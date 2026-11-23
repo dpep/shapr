@@ -47,8 +47,8 @@ first changed line to last, with the context between them.
 | `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. *Not emitted yet.* |
 | `move_with_changes` | no | A move whose body also changed. *Not emitted yet.* |
-| `extract` | yes | Statements leave one method and become another method's body, replaced by a call. *Not emitted yet.* |
-| `inline` | yes | The inverse of `extract`. *Not emitted yet.* |
+| `extract` | yes | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
+| `inline` | yes | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
 | `logic` | no | Anything else. The default: a hunk shapr can't prove structural is `logic`. |
 
 "Structure" describes the shape of a change, not its risk: extracts and
@@ -148,6 +148,39 @@ renamed with two call sites scores 0.8, and one with none 0.67.
 |---|---|---|---|
 | `method` | string | always | `"ast"`: both sides parsed cleanly and their trees were compared. `"line"`: a side has a syntax error, so the region's text was compared, whitespace and comments aside. `"none"`: nothing was compared (no frontend for the file, a binary file, or content that couldn't be read). |
 | `similarity` | number 0–1 | `method` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
+
+## Extract and inline
+
+An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and nothing else beside the two methods changed. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets the label, or none does.
+
+`detail` on each labeled hunk:
+
+| key | type | meaning |
+|---|---|---|
+| `method` | string | The method created (`extract`) or removed (`inline`). |
+| `caller` | string | The method the chunk left or joined. |
+| `hunks` | int array | `id`s of every hunk the refactoring touches, this one included. |
+
+`evidence` keys beside `method`:
+
+| key | type | meaning |
+|---|---|---|
+| `statements` | int | Statements in the chunk. |
+| `nodes` | int | Syntax nodes in the chunk: its size. |
+| `params` | int | The method's parameters. |
+| `verbatim` | number 0–1 | Share of the chunk's nodes that match the method's body without renaming a parameter. |
+| `returns` | bool | The call's result is assigned: a value flows back to the caller. |
+
+Confidence is `size × (1 + verbatim) / 2`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
+
+A hunk that matches this shape but would change behavior stays `logic` and says why in `detail`, beside `method`, `caller` and `hunks`:
+
+| key | type | meaning |
+|---|---|---|
+| `near` | string | `"extract"` or `"inline"`. |
+| `risk` | string | `"jump"`: the chunk holds `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` or `block_given?`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears in the change (a def, a call, a `send`). `"tiny"`: under 8 nodes. |
+
+shapr sees only the files in the diff: a subclass override or a caller elsewhere of the new or removed method is invisible to it.
 
 ## Confidence
 

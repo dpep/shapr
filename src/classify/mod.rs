@@ -8,6 +8,7 @@
 
 pub mod site;
 
+mod extract;
 mod format;
 mod rename;
 
@@ -113,7 +114,7 @@ pub type Labels = Vec<Vec<Label>>;
 type Pass = fn(&Change, &mut Labels);
 
 /// In precedence order: an earlier pass claims a hunk first.
-const PASSES: &[Pass] = &[format::run, rename::run];
+const PASSES: &[Pass] = &[format::run, rename::run, extract::run];
 
 pub fn classify(change: &Change) -> Labels {
     let mut labels = defaults(change);
