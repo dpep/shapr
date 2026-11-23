@@ -303,3 +303,102 @@ pub(super) fn kind_and_name<'pr>(node: &Node<'pr>) -> (&'static str, Option<&'pr
         Node::YieldNode { .. } => ("yield", None),
     }
 }
+
+/// prism's default visitor walks a field of a fixed node type by calling
+/// that type's visit method directly, skipping the enter and leave hooks.
+/// These overrides route such nodes through `visit`, so they reach the tree.
+macro_rules! concrete_visits {
+    ($lt:lifetime) => {
+        fn visit_arguments_node(&mut self, node: &ruby_prism::ArgumentsNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_arguments_node(self, node);
+            }
+        }
+        fn visit_block_argument_node(&mut self, node: &ruby_prism::BlockArgumentNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_block_argument_node(self, node);
+            }
+        }
+        fn visit_block_node(&mut self, node: &ruby_prism::BlockNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_block_node(self, node);
+            }
+        }
+        fn visit_block_parameter_node(&mut self, node: &ruby_prism::BlockParameterNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            }
+        }
+        fn visit_call_node(&mut self, node: &ruby_prism::CallNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_call_node(self, node);
+            }
+        }
+        fn visit_constant_path_node(&mut self, node: &ruby_prism::ConstantPathNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_constant_path_node(self, node);
+            }
+        }
+        fn visit_else_node(&mut self, node: &ruby_prism::ElseNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_else_node(self, node);
+            }
+        }
+        fn visit_ensure_node(&mut self, node: &ruby_prism::EnsureNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_ensure_node(self, node);
+            }
+        }
+        fn visit_local_variable_target_node(
+            &mut self,
+            node: &ruby_prism::LocalVariableTargetNode<$lt>,
+        ) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            }
+        }
+        fn visit_parameters_node(&mut self, node: &ruby_prism::ParametersNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_parameters_node(self, node);
+            }
+        }
+        fn visit_rescue_node(&mut self, node: &ruby_prism::RescueNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_rescue_node(self, node);
+            }
+        }
+        fn visit_splat_node(&mut self, node: &ruby_prism::SplatNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_splat_node(self, node);
+            }
+        }
+        fn visit_statements_node(&mut self, node: &ruby_prism::StatementsNode<$lt>) {
+            if !self.dispatched(&node.as_node()) {
+                self.visit(&node.as_node());
+            } else {
+                ruby_prism::visit_statements_node(self, node);
+            }
+        }
+    };
+}
+pub(super) use concrete_visits;

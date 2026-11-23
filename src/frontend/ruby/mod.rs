@@ -41,6 +41,7 @@ impl Frontend for Ruby {
 
         Walker {
             builder: &mut builder,
+            entered: None,
         }
         .visit(&result.node());
         if let Some(data) = result.data_loc() {
@@ -84,10 +85,31 @@ fn span(loc: &Location<'_>) -> Span {
 
 struct Walker<'b> {
     builder: &'b mut TreeBuilder,
+    /// The node the enter hook just saw, as (kind, start, end).
+    entered: Option<(&'static str, usize, usize)>,
+}
+
+fn key(node: &Node<'_>) -> (&'static str, usize, usize) {
+    let loc = node.location();
+    (
+        generated::kind_and_name(node).0,
+        loc.start_offset(),
+        loc.end_offset(),
+    )
+}
+
+impl Walker<'_> {
+    /// Whether `node` arrived through `visit`, which already ran the enter hook.
+    fn dispatched(&mut self, node: &Node<'_>) -> bool {
+        self.entered.take() == Some(key(node))
+    }
 }
 
 impl<'pr> Visit<'pr> for Walker<'_> {
+    generated::concrete_visits!('pr);
+
     fn visit_branch_node_enter(&mut self, node: Node<'pr>) {
+        self.entered = Some(key(&node));
         let (kind, name) = generated::kind_and_name(&node);
         self.builder.open(kind, span(&node.location()), name);
     }
@@ -97,6 +119,7 @@ impl<'pr> Visit<'pr> for Walker<'_> {
     }
 
     fn visit_leaf_node_enter(&mut self, node: Node<'pr>) {
+        self.entered = Some(key(&node));
         let (kind, name) = generated::kind_and_name(&node);
         // A heredoc's node spans only its opener; the body and terminator
         // live on later lines and must still be compared byte for byte.
@@ -188,6 +211,16 @@ mod tests {
         assert_eq!(names, ["greet", "name", "puts", "name"]);
         assert!(tree.errors.is_empty());
         assert!(!parse("def broken(\n").errors.is_empty());
+    }
+
+    #[test]
+    fn fields_of_a_fixed_node_type_reach_the_tree() {
+        let tree = parse("def a(x, &b)\n  foo(1) if x\nend\n");
+        let kinds = kinds(&tree, false);
+        for kind in ["parameters", "block_parameter", "arguments"] {
+            assert!(kinds.contains(&kind), "{kind}: {kinds:?}");
+        }
+        assert_eq!(kinds.iter().filter(|k| **k == "statements").count(), 3);
     }
 
     #[test]
