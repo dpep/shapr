@@ -231,6 +231,17 @@ fn a_method_rename_that_updates_send_is_a_rename() {
 }
 
 #[test]
+fn a_method_rename_leaving_a_symbol_of_the_old_name_is_logic() {
+    // A DSL (here a callback) names the method by symbol.
+    let before = format!(
+        "class Page\n  before_save :tidy\n{}  def tidy\n    1\n  end\nend\n",
+        filler()
+    );
+    let after = before.replace("def tidy", "def clean");
+    logic_because(&one(&before, &after), "tidy is still used");
+}
+
+#[test]
 fn renaming_a_method_onto_an_existing_one_is_logic() {
     let before = "def a\n  1\nend\n\ndef b\n  2\nend\n\na\n";
     let after = "def b\n  1\nend\n\ndef b\n  2\nend\n\nb\n";

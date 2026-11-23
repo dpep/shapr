@@ -455,7 +455,7 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
     tree.descendants(root).any(|id| {
         let n = tree.node(id);
         let Some(found) = n.name.as_deref() else {
-            return false;
+            return scope != Scope::Local && literal_names(tree, id, &bare(name));
         };
         match n.role {
             Role::DynamicName if scope == Scope::Field => bare(found) == bare(name),
@@ -464,6 +464,20 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
             role => found == name && Scope::of(role) == Some(scope),
         }
     })
+}
+
+/// A plain literal spelling `name` (`:name`, `"name"`, `name:`): DSLs such
+/// as callbacks and `autoload` name methods and constants this way, through
+/// calls no frontend can list.
+fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
+    let n = tree.node(id);
+    if n.role != Role::Other || n.comment || !n.children.is_empty() {
+        return false;
+    }
+    let text = String::from_utf8_lossy(tree.text(&n.span));
+    let text = text.trim_start_matches(':').trim_start_matches('@');
+    let text = text.trim_matches(['"', '\'']);
+    text == name || text.strip_suffix(':') == Some(name)
 }
 
 /// A class, module or constant's name, which the tree also holds as a

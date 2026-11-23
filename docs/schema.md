@@ -73,8 +73,10 @@ and every name that differs passes these checks:
 - Nothing in the scope still uses the old name after the change, and nothing
   used the new name before it. For a local, a bare method call of that name
   counts; for a method, constant or field, so does a dynamic reference
-  (`send(:old)`, `const_get`, and for a field an `attr_*` of the same name). A
-  leftover `send(:old)` is `logic`: it would now raise.
+  (`send(:old)`, `const_get`, and for a field an `attr_*` of the same name)
+  and any plain literal spelling the name (`:old`, `"old"`, `old:`), since
+  DSLs such as callbacks and `autoload` name code that way. A leftover
+  `send(:old)` is `logic`: it would now raise.
 - A keyword parameter keeps its name (callers pass it), a renamed method
   doesn't call `super` (it would reach the parent's method of the new name),
   and global variables aren't renamed.
