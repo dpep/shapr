@@ -105,6 +105,13 @@ fn a_local_variable_renamed_in_a_def_is_a_rename() {
 }
 
 #[test]
+fn a_rename_that_also_rewords_a_comment_is_a_rename() {
+    let before = "# Adds one.\ndef bump(n)\n  n + 1\nend\n";
+    let after = "# Adds one to a count.\n# Pure.\ndef bump(count)\n  count + 1\nend\n";
+    assert_eq!(kinds(&one(before, after)), ["rename"]);
+}
+
+#[test]
 fn a_local_use_left_behind_is_logic() {
     // The leftover `sum` is no longer a local: Ruby now calls a method.
     let after = TOTAL

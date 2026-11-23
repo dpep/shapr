@@ -180,14 +180,19 @@ fn aligned(change: &Change, labels: &Labels) -> Vec<Hunk> {
             if label.kind != Kind::Logic {
                 continue;
             }
-            let (before, after) = (&site.before.cover, &site.after.cover);
+            let code = |tree: &Tree, cover: &[NodeId]| -> Vec<NodeId> {
+                let code = cover.iter().filter(|&&id| !tree.node(id).comment);
+                code.copied().collect()
+            };
+            let before = code(&trees.before, &site.before.cover);
+            let after = code(&trees.after, &site.after.cover);
             if before.is_empty() || before.len() != after.len() {
                 continue;
             }
             let mut diffs = Vec::new();
             let all = before
                 .iter()
-                .zip(after)
+                .zip(&after)
                 .all(|(&b, &a)| align(&trees.before, b, &trees.after, a, &mut diffs));
             if all && !diffs.is_empty() {
                 out.push(Hunk { file, hunk, diffs });
