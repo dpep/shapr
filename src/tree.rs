@@ -55,8 +55,15 @@ pub enum NameKind {
     Class,
     Module,
     Constant,
+    /// A local variable.
     Variable,
+    /// An instance or class variable: state kept on an object or class.
+    Field,
+    Global,
     Parameter,
+    /// A parameter callers name at the call site (`key:`), so its name is
+    /// part of the method's interface.
+    KeywordParameter,
     /// The parameter receiving the method's block (`&block`).
     BlockParameter,
 }

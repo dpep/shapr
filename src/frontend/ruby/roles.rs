@@ -57,7 +57,8 @@ impl Roles {
             | Node::LocalVariableAndWriteNode { .. }
             | Node::LocalVariableOrWriteNode { .. }
             | Node::LocalVariableTargetNode { .. }
-            | Node::InstanceVariableWriteNode { .. }
+            | Node::BlockLocalVariableNode { .. } => Role::Definition(Variable),
+            Node::InstanceVariableWriteNode { .. }
             | Node::InstanceVariableOperatorWriteNode { .. }
             | Node::InstanceVariableAndWriteNode { .. }
             | Node::InstanceVariableOrWriteNode { .. }
@@ -66,17 +67,17 @@ impl Roles {
             | Node::ClassVariableOperatorWriteNode { .. }
             | Node::ClassVariableAndWriteNode { .. }
             | Node::ClassVariableOrWriteNode { .. }
-            | Node::ClassVariableTargetNode { .. }
-            | Node::GlobalVariableWriteNode { .. }
+            | Node::ClassVariableTargetNode { .. } => Role::Definition(Field),
+            Node::GlobalVariableWriteNode { .. }
             | Node::GlobalVariableOperatorWriteNode { .. }
             | Node::GlobalVariableAndWriteNode { .. }
             | Node::GlobalVariableOrWriteNode { .. }
-            | Node::GlobalVariableTargetNode { .. }
-            | Node::BlockLocalVariableNode { .. } => Role::Definition(Variable),
-            Node::RequiredParameterNode { .. }
-            | Node::OptionalParameterNode { .. }
-            | Node::RequiredKeywordParameterNode { .. }
-            | Node::OptionalKeywordParameterNode { .. } => Role::Definition(Parameter),
+            | Node::GlobalVariableTargetNode { .. } => Role::Definition(Global),
+            Node::RequiredParameterNode { .. } | Node::OptionalParameterNode { .. } => {
+                Role::Definition(Parameter)
+            }
+            Node::RequiredKeywordParameterNode { .. }
+            | Node::OptionalKeywordParameterNode { .. } => Role::Definition(KeywordParameter),
             Node::RestParameterNode { .. } => {
                 let name = node.as_rest_parameter_node().and_then(|n| owned(n.name()));
                 return (Role::Definition(Parameter), name);
@@ -91,10 +92,11 @@ impl Roles {
                 let name = node.as_block_parameter_node().and_then(|n| owned(n.name()));
                 return (Role::Definition(BlockParameter), name);
             }
-            Node::LocalVariableReadNode { .. }
-            | Node::InstanceVariableReadNode { .. }
-            | Node::ClassVariableReadNode { .. }
-            | Node::GlobalVariableReadNode { .. } => Role::Reference(Variable),
+            Node::LocalVariableReadNode { .. } => Role::Reference(Variable),
+            Node::InstanceVariableReadNode { .. } | Node::ClassVariableReadNode { .. } => {
+                Role::Reference(Field)
+            }
+            Node::GlobalVariableReadNode { .. } => Role::Reference(Global),
             Node::ConstantReadNode { .. } => Role::Reference(Constant),
             Node::ConstantPathNode { .. } => {
                 let name = node.as_constant_path_node().and_then(|n| owned(n.name()));

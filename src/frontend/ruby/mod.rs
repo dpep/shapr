@@ -248,7 +248,7 @@ mod tests {
         let found = roles(
             "module Shop\n  class Cart\n    LIMIT = 3\n    Shop::MAX = 4\n\
              def add(item, qty = 1, *rest, key:, **opts, &blk)\n\
-             @items = item\n      total = LIMIT\n      Shop::Cart\n    end\n  end\nend\n",
+             @items = item\n      $seen = @@count\n      total = LIMIT\n      Shop::Cart\n    end\n  end\nend\n",
         );
         for (role, name) in [
             (Role::Definition(Module), "Shop"),
@@ -259,10 +259,12 @@ mod tests {
             (Role::Definition(Parameter), "item"),
             (Role::Definition(Parameter), "qty"),
             (Role::Definition(Parameter), "rest"),
-            (Role::Definition(Parameter), "key"),
+            (Role::Definition(KeywordParameter), "key"),
             (Role::Definition(Parameter), "opts"),
             (Role::Definition(BlockParameter), "blk"),
-            (Role::Definition(Variable), "@items"),
+            (Role::Definition(Field), "@items"),
+            (Role::Definition(Global), "$seen"),
+            (Role::Reference(Field), "@@count"),
             (Role::Definition(Variable), "total"),
             (Role::Reference(Variable), "item"),
             (Role::Reference(Constant), "LIMIT"),
