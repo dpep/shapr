@@ -9,6 +9,7 @@
 pub mod site;
 
 mod format;
+mod rename;
 
 use crate::change::Change;
 use serde::Serialize;
@@ -112,7 +113,7 @@ pub type Labels = Vec<Vec<Label>>;
 type Pass = fn(&Change, &mut Labels);
 
 /// In precedence order: an earlier pass claims a hunk first.
-const PASSES: &[Pass] = &[format::run];
+const PASSES: &[Pass] = &[format::run, rename::run];
 
 pub fn classify(change: &Change) -> Labels {
     let mut labels = defaults(change);

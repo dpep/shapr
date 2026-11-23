@@ -44,7 +44,7 @@ first changed line to last, with the context between them.
 |---|---|---|
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text. |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs. |
-| `rename` | yes | Only identifiers change, consistently across the file. Any parameter added, removed, reordered or given a default is `logic`. *Not emitted yet.* |
+| `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. *Not emitted yet.* |
 | `move_with_changes` | no | A move whose body also changed. *Not emitted yet.* |
 | `extract` | yes | Statements leave one method and become another method's body, replaced by a call. *Not emitted yet.* |
@@ -59,6 +59,54 @@ byte of each node's source must match, and leaves (string content, heredoc
 bodies, symbols, numbers) match byte for byte, whitespace included. So
 `do…end` versus `{…}`, a change of quote style, a trailing comma, or any
 reordering is `logic`.
+
+## Renames
+
+A hunk is a `rename` when its two sides align node for node (same kinds,
+roles and child order, same source text apart from names and whitespace)
+and every name that differs passes these checks:
+
+- Each old name becomes one new name, and each new name comes from one old
+  name, within the scope.
+- The old name's definition is renamed (a call or reference renamed alone
+  points at something else).
+- Nothing in the scope still uses the old name after the change, and nothing
+  used the new name before it. For a local, a bare method call of that name
+  counts; for a method, constant or field, so does a dynamic reference
+  (`send(:old)`, `const_get`, and for a field an `attr_*` of the same name). A
+  leftover `send(:old)` is `logic`: it would now raise.
+- A keyword parameter keeps its name (callers pass it), a renamed method
+  doesn't call `super` (it would reach the parent's method of the new name),
+  and global variables aren't renamed.
+- A renamed dynamic reference (`send(:old)` → `send(:new)`) follows a method,
+  constant or field rename that passes.
+
+Scopes: a `local` (variable or parameter) lives in its enclosing method,
+class or module; a `field` (instance or class variable) in its file; a
+`method` or `constant` (class and module names included) in every parsed file
+of the change.
+
+`detail`:
+
+| key | type | meaning |
+|---|---|---|
+| `renames` | array | One object per rename the hunk makes. |
+| `from`, `to` | string | The old and new name. |
+| `kind` | string | `local`, `field`, `method` or `constant`. |
+| `occurrences` | int | Uses renamed across the change, the definition included; a class or module name counts once. |
+
+`evidence`, beside `method`:
+
+| key | type | meaning |
+|---|---|---|
+| `renamed` | int | Sum of the hunk's renames' `occurrences`. |
+| `uses` | int | Uses of the old names shapr saw in their scopes before the change. More than `renamed` when another hunk deleted some. |
+| `unseen_uses` | bool | Some name can be used in code shapr doesn't see (fields, methods, constants: other files, subclasses, templates). |
+
+`confidence` is the weakest rename's score. A local's is `renamed / uses`.
+Where uses can be unseen, the unseen ones are smoothed in as one unknown
+(Laplace's rule of succession): `(renamed + 1) / (uses + 2)`, so a method
+renamed with two call sites scores 0.8, and one with none 0.67.
 
 ## `file` record
 
@@ -90,7 +138,7 @@ reordering is `logic`.
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
 | `review_lines` | int | Lines a reviewer still has to read once formatting, comments, renames and the unchanged bodies of moves are discounted. For `logic`, `code_added + code_deleted`; for structural kinds, 0. |
-| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) for the kinds emitted today. |
+| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. |
 
 ## Evidence
 
