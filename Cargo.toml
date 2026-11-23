@@ -9,3 +9,10 @@ keywords = ["diff", "refactoring", "code-review", "ruby", "ast"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
+ruby-prism = "1.9.0"
+
+# Discipline the code already keeps, held by the gate.
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+dbg_macro = "deny"
+todo = "deny"
