@@ -88,6 +88,8 @@ struct Facts {
     after_gates: BTreeSet<NodeId>,
 }
 
+type Verdicts<'f> = BTreeMap<&'f Pair, Result<Verdict, String>>;
+
 struct Verdict {
     renamed: usize,
     uses: usize,
@@ -120,7 +122,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             entry.after_gates.insert(gate(&t.after, diff.after));
         }
     }
-    let verdicts: BTreeMap<&Pair, Result<Verdict, String>> = facts
+    let verdicts: Verdicts = facts
         .iter()
         .map(|(pair, f)| (pair, judge(change, pair, f, &facts)))
         .collect();
@@ -131,14 +133,12 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
         match hunk_pairs(t, hunk, &verdicts) {
             Err(why) => label.reason = why,
             Ok(pairs) => {
-                let verdicts: Vec<&Verdict> = pairs.iter().map(|p| verdict(&verdicts, p)).collect();
-                let score = verdicts.iter().map(|v| v.score).fold(1.0, f64::min);
-                let renamed: usize = verdicts.iter().map(|v| v.renamed).sum();
-                let uses: usize = verdicts.iter().map(|v| v.uses).sum();
-                let unseen = pairs.iter().any(|p| p.space.scope.unseen());
+                let score = pairs.iter().map(|(_, v)| v.score).fold(1.0, f64::min);
+                let renamed: usize = pairs.iter().map(|(_, v)| v.renamed).sum();
+                let uses: usize = pairs.iter().map(|(_, v)| v.uses).sum();
+                let unseen = pairs.iter().any(|(p, _)| p.space.scope.unseen());
                 let renames: Vec<Value> = pairs
                     .iter()
-                    .zip(&verdicts)
                     .map(|(p, v)| {
                         json!({
                             "from": p.from,
@@ -158,13 +158,6 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 label.detail.insert("renames".into(), Value::Array(renames));
             }
         }
-    }
-}
-
-fn verdict<'v>(verdicts: &'v BTreeMap<&Pair, Result<Verdict, String>>, pair: &Pair) -> &'v Verdict {
-    match &verdicts[pair] {
-        Ok(v) => v,
-        Err(_) => unreachable!("hunk_pairs returns only accepted pairs"),
     }
 }
 
@@ -320,41 +313,41 @@ fn pair_of(trees: &Trees, file: usize, diff: &Diff) -> Result<Pair, String> {
 }
 
 /// The accepted renames a hunk makes, or why it stays logic.
-fn hunk_pairs(
+fn hunk_pairs<'v>(
     trees: &Trees,
     hunk: &Hunk,
-    verdicts: &BTreeMap<&Pair, Result<Verdict, String>>,
-) -> Result<Vec<Pair>, String> {
-    let mut pairs = BTreeSet::new();
+    verdicts: &'v Verdicts,
+) -> Result<Vec<(&'v Pair, &'v Verdict)>, String> {
+    let mut pairs = BTreeMap::new();
     for diff in &hunk.diffs {
         let node = trees.before.node(diff.before);
-        if node.role == Role::DynamicName {
+        let (pair, verdict) = if node.role == Role::DynamicName {
             // Accepted when it follows a rename made elsewhere in the change.
             let from = node.name.as_deref().unwrap_or_default();
-            let to = trees
-                .after
-                .node(diff.after)
-                .name
-                .as_deref()
-                .unwrap_or_default();
+            let to = trees.after.node(diff.after).name.as_deref();
             let backing = verdicts.iter().find(|(p, v)| {
-                p.space.scope != Scope::Local && p.from == from && p.to == to && v.is_ok()
+                p.space.scope != Scope::Local
+                    && p.from == from
+                    && Some(p.to.as_str()) == to
+                    && v.is_ok()
             });
-            match backing {
-                Some((p, _)) => pairs.insert((*p).clone()),
-                None => {
-                    return Err(format!(
-                        "the dynamic reference {from} becomes {to}, matching no rename"
-                    ));
-                }
+            let Some((pair, verdict)) = backing else {
+                return Err(format!(
+                    "the dynamic reference {from} changes, matching no rename"
+                ));
             };
-            continue;
-        }
-        let pair = pair_of(trees, hunk.file, diff)?;
-        if let Err(why) = &verdicts[&pair] {
-            return Err(format!("renames {} to {}, but {why}", pair.from, pair.to));
-        }
-        pairs.insert(pair);
+            (*pair, verdict)
+        } else {
+            let pair = pair_of(trees, hunk.file, diff)?;
+            let (pair, verdict) = verdicts
+                .get_key_value(&pair)
+                .expect("every diff's pair was judged");
+            (*pair, verdict)
+        };
+        match verdict {
+            Ok(v) => pairs.insert(pair, v),
+            Err(why) => return Err(format!("renames {} to {}, but {why}", pair.from, pair.to)),
+        };
     }
     Ok(pairs.into_iter().collect())
 }
