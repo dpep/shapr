@@ -1,0 +1,152 @@
+//! Mapping a textual hunk onto tree nodes, once per hunk, for every pass.
+//!
+//! A hunk's changed region on each side becomes a *cover*: the smallest run
+//! of sibling nodes holding every significant byte of the region. Two covers
+//! that hash equal are the same code. Cross-hunk passes use covers as the
+//! subtrees a hunk removed (before side) and added (after side).
+
+use crate::diff::{Hunk, Lines};
+use crate::tree::{NodeId, Span, Tree};
+
+#[derive(Debug)]
+pub struct Site {
+    pub before: Side,
+    pub after: Side,
+}
+
+#[derive(Debug)]
+pub struct Side {
+    pub lines: Lines,
+    /// First to last significant byte of the region; `None` when the region
+    /// holds nothing but insignificant whitespace.
+    pub span: Option<Span>,
+    /// Sibling nodes, in order, covering `span`. Can reach past the region
+    /// when the region cuts through a node; never misses any of it.
+    pub cover: Vec<NodeId>,
+}
+
+impl Site {
+    pub fn new(before: &Tree, after: &Tree, hunk: &Hunk) -> Site {
+        Site {
+            before: Side::new(before, hunk.before),
+            after: Side::new(after, hunk.after),
+        }
+    }
+}
+
+impl Side {
+    fn new(tree: &Tree, lines: Lines) -> Side {
+        let significance = Significance::of(tree, lines);
+        let span = significance.span();
+        let cover = span
+            .as_ref()
+            .map(|s| cover(tree, s, &significance))
+            .unwrap_or_default();
+        Side { lines, span, cover }
+    }
+}
+
+/// Which bytes of a region matter: anything but whitespace, plus whitespace
+/// inside a leaf (string content, a comment), where it is part of the value.
+pub struct Significance {
+    region: Span,
+    marks: Vec<bool>,
+}
+
+impl Significance {
+    pub fn of(tree: &Tree, lines: Lines) -> Significance {
+        let Some(last) = lines.last() else {
+            return Significance {
+                region: 0..0,
+                marks: Vec::new(),
+            };
+        };
+        let region = tree.line_span(lines.start, last);
+        let mut marks: Vec<bool> = tree
+            .text(&region)
+            .iter()
+            .map(|b| !b.is_ascii_whitespace())
+            .collect();
+        for node in tree.nodes.iter().filter(|n| n.children.is_empty()) {
+            let from = node.extent.start.max(region.start);
+            let to = node.extent.end.min(region.end);
+            for mark in marks
+                .iter_mut()
+                .take(to.saturating_sub(region.start))
+                .skip(from.saturating_sub(region.start))
+            {
+                *mark = true;
+            }
+        }
+        Significance { region, marks }
+    }
+
+    pub fn span(&self) -> Option<Span> {
+        let first = self.marks.iter().position(|&m| m)?;
+        let last = self.marks.iter().rposition(|&m| m)?;
+        Some(self.region.start + first..self.region.start + last + 1)
+    }
+
+    /// Whether any byte of `span` inside the region is significant.
+    pub fn any(&self, span: &Span) -> bool {
+        let from = span.start.max(self.region.start);
+        let to = span.end.min(self.region.end);
+        from < to && self.marks[from - self.region.start..to - self.region.start].contains(&true)
+    }
+
+    /// The region's significant bytes outside `skip`, in order.
+    pub fn bytes(&self, tree: &Tree, skip: &[Span]) -> Vec<u8> {
+        self.marks
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| **m)
+            .map(|(i, _)| self.region.start + i)
+            .filter(|at| !skip.iter().any(|s| s.contains(at)))
+            .map(|at| tree.source[at])
+            .collect()
+    }
+}
+
+/// Descends while one child holds all of `span` and the node's own text
+/// doesn't reach into it; then the overlapping children are the cover.
+fn cover(tree: &Tree, span: &Span, sig: &Significance) -> Vec<NodeId> {
+    let mut at = Tree::ROOT;
+    loop {
+        let node = tree.node(at);
+        if own_text_in(tree, at, span) {
+            return vec![at];
+        }
+        let overlapping: Vec<NodeId> = node
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| sig.any(&clip(&tree.node(c).extent, span)))
+            .collect();
+        match overlapping.as_slice() {
+            [only] if contains(&tree.node(*only).extent, span) => at = *only,
+            [] => return vec![at],
+            _ => return overlapping,
+        }
+    }
+}
+
+/// Non-whitespace bytes of `id`'s own span, outside its children, in `span`.
+fn own_text_in(tree: &Tree, id: NodeId, span: &Span) -> bool {
+    let node = tree.node(id);
+    let own = clip(&node.span, span);
+    (own.start..own.end).any(|at| {
+        !tree.source[at].is_ascii_whitespace()
+            && !node
+                .children
+                .iter()
+                .any(|&c| tree.node(c).extent.contains(&at))
+    })
+}
+
+fn clip(a: &Span, b: &Span) -> Span {
+    a.start.max(b.start)..a.end.min(b.end).max(a.start.max(b.start))
+}
+
+fn contains(outer: &Span, inner: &Span) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
