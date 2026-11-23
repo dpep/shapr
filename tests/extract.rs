@@ -26,13 +26,20 @@ fn git(dir: &Path, args: &[&str]) {
 
 /// `shapr -j` over one commit turning `before` into `after` in `a.rb`.
 fn classify(before: &str, after: &str) -> (Value, i32) {
+    classify_files(&[("a.rb", before)], &[("a.rb", after)])
+}
+
+/// `shapr -j` over one commit writing each (path, content) pair.
+fn classify_files(before: &[(&str, &str)], after: &[(&str, &str)]) -> (Value, i32) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path();
     git(path, &["init", "-q", "-b", "main"]);
     git(path, &["config", "user.email", "test@example.com"]);
     git(path, &["config", "user.name", "Test"]);
-    for content in [before, after] {
-        std::fs::write(path.join("a.rb"), content).unwrap();
+    for files in [before, after] {
+        for (name, content) in files {
+            std::fs::write(path.join(name), content).unwrap();
+        }
         git(path, &["add", "-A"]);
         git(path, &["commit", "-q", "--allow-empty", "-m", "state"]);
     }
@@ -412,4 +419,35 @@ fn a_reformatted_sibling_keeps_its_label_beside_an_extract() {
         serde_json::json!([0, 2])
     );
     assert_eq!(code, 0);
+}
+
+#[test]
+fn a_new_use_of_the_new_method_elsewhere_is_not_a_collision() {
+    let spec = "describe Report do\n  it { Report.new.rule }\nend\n";
+    let (report, _) = classify_files(
+        &[("a.rb", RENDER)],
+        &[("a.rb", RENDER_EXTRACTED), ("a_spec.rb", spec)],
+    );
+    let by_file: Vec<(&str, &str)> = hunks(&report)
+        .iter()
+        .map(|h| (h["file"].as_str().unwrap(), h["kind"].as_str().unwrap()))
+        .collect();
+    assert!(by_file.contains(&("a.rb", "extract")), "{report:#}");
+    assert!(by_file.contains(&("a_spec.rb", "logic")), "{report:#}");
+}
+
+#[test]
+fn a_new_method_overriding_one_defined_elsewhere_in_the_change_is_logic() {
+    let base = "class Base\n  def rule\n    :base\n  end\nend\n";
+    let (report, _) = classify_files(
+        &[("a.rb", RENDER), ("base.rb", "class Base\nend\n")],
+        &[("a.rb", RENDER_EXTRACTED), ("base.rb", base)],
+    );
+    assert!(
+        hunks(&report)
+            .iter()
+            .any(|h| h["detail"]["risk"] == "collision"),
+        "{report:#}"
+    );
+    assert!(!kinds(&report).contains(&"extract"), "{report:#}");
 }

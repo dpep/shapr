@@ -178,7 +178,7 @@ A hunk that matches this shape but would change behavior stays `logic` and says 
 | key | type | meaning |
 |---|---|---|
 | `near` | string | `"extract"` or `"inline"`. |
-| `risk` | string | `"jump"`: the chunk holds `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` or `block_given?`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears in the change (a def, a call, a `send`). `"tiny"`: under 8 nodes. |
+| `risk` | string | `"jump"`: the chunk holds `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` or `block_given?`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"tiny"`: under 8 nodes. |
 
 shapr sees only the files in the diff: a subclass override or a caller elsewhere of the new or removed method is invisible to it.
 

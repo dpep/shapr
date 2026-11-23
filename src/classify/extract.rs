@@ -242,7 +242,7 @@ fn find(
         Err(Risk::BlockParameter)
     } else if exact.is_none() || free != arg_set || flow.clobbers || outflow != assigned_set {
         Err(Risk::Wiring)
-    } else if mentioned(change, &method, calls, &[b, call]) {
+    } else if mentioned(change, &method, dir, calls, b) {
         Err(Risk::Collision)
     } else if nodes < FLOOR {
         Err(Risk::Tiny)
@@ -773,22 +773,29 @@ fn statement_value(tree: &Tree, stmt: NodeId, v: &str) -> Option<NodeId> {
         .then(|| kids[0])
 }
 
-/// B's name used anywhere in the change but at B and its one call: a def,
-/// a call or a dynamic reference that defining or removing B would reach.
-fn mentioned(change: &Change, method: &str, calls: &Tree, ours: &[NodeId]) -> bool {
+/// B's name already means something: used on the side where B doesn't
+/// exist, in any file of the change (a def, a call or a dynamic reference
+/// that defining B would capture, or that removing it would break), or
+/// defined again beside B, so B takes part in dispatch beyond its one call.
+/// New calls to the new method are not collisions.
+fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) -> bool {
+    let named = |tree: &Tree, id: NodeId| tree.node(id).name.as_deref() == Some(method);
     change
         .files
         .iter()
         .filter_map(|f| f.trees.as_ref().ok())
-        .flat_map(|t| [&t.before, &t.after])
-        .any(|tree| {
-            ids(tree).any(|id| {
-                let node = tree.node(id);
-                matches!(
-                    node.role,
-                    Role::Definition(NameKind::Method) | Role::Call(_) | Role::DynamicName
-                ) && node.name.as_deref() == Some(method)
-                    && !(std::ptr::eq(tree, calls) && ours.contains(&id))
+        .any(|trees| {
+            let (calls, chunks) = dir.sides(trees);
+            ids(chunks).any(|id| {
+                named(chunks, id)
+                    && matches!(
+                        chunks.node(id).role,
+                        Role::Definition(NameKind::Method) | Role::Call(_) | Role::DynamicName
+                    )
+            }) || ids(calls).any(|id| {
+                named(calls, id)
+                    && calls.node(id).role == Role::Definition(NameKind::Method)
+                    && !(std::ptr::eq(calls, ours) && id == b)
             })
         })
 }
