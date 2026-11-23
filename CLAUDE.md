@@ -46,6 +46,7 @@ src/
   frontend/
     mod.rs          the Frontend trait and the registry (for_path)
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
+    ruby/roles.rs   which prism nodes play which Role
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
   change.rs         assembles a Change: per file, both trees and a Site per hunk
   classify/
@@ -64,6 +65,21 @@ raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 language reads as code), `error`. The builder computes everything the core
 relies on, so a second language needs no core change. The classification core
 never imports a parser's types; test classification through a frontend.
+
+Language facts the core acts on travel as `Node::role` (a `tree::Role`), with
+the identifier in `Node::name`. Roles are not in the hash or the output.
+
+| Role | Ruby | For |
+|---|---|---|
+| `Definition(NameKind)` | `def`, `class`, `module`, constant and variable writes, parameters (`BlockParameter` for `&block`) | rename: what a name declares. move: `Role::is_declaration()` is true for method, class, module and constant definitions, the statements whose order doesn't change behavior |
+| `Reference(NameKind)` | variable reads, constant reads and paths (`Variable`, `Constant`) | rename: every use of a name |
+| `Call(Receiver)` | a method call; `Implicit` (`go`), `SelfRef` (`self.go`), `Explicit` (receiver is the first child) | extract/inline: a call to the new method replacing the statements |
+| `DynamicName` | a string or symbol argument to `send`, `public_send`, `__send__`, `method`, `define_method`, `respond_to?`, `instance_variable_get`/`set`, `const_get`, `alias_method`, `attr*`, a visibility call, and both names of `alias`; `name` is the literal's value | rename: an old name still mentioned here lowers confidence |
+| `Visibility(Visibility)` | `public`, `protected`, `private`, `module_function` with no receiver: bare, `private def x`, or `private :x` | move: a def crossing a visibility boundary |
+| `Jump(Jump)` | `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` (both forms), `block_given?`/`iterator?` | extract/inline: control flow that changes meaning in a new method; block-parameter use is a `Reference` whose name matches a `Definition(BlockParameter)` |
+
+Walk a subtree with `Tree::descendants(id)` and filter on `role`. A
+frontend's mapping is unit-tested through `Frontend::parse`.
 
 ### The pass pipeline
 

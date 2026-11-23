@@ -1,9 +1,10 @@
 //! Ruby, parsed with prism.
 
 mod generated;
+mod roles;
 
 use super::Frontend;
-use crate::tree::{Span, Tree, TreeBuilder};
+use crate::tree::{Role, Span, Tree, TreeBuilder};
 use ruby_prism::{Location, Node, Visit};
 
 pub struct Ruby;
@@ -41,11 +42,12 @@ impl Frontend for Ruby {
 
         Walker {
             builder: &mut builder,
+            roles: roles::Roles::default(),
             entered: None,
         }
         .visit(&result.node());
         if let Some(data) = result.data_loc() {
-            builder.leaf("data", span(&data), None);
+            builder.leaf("data", span(&data), None, Role::Other);
         }
 
         let magic: Vec<usize> = result
@@ -85,6 +87,7 @@ fn span(loc: &Location<'_>) -> Span {
 
 struct Walker<'b> {
     builder: &'b mut TreeBuilder,
+    roles: roles::Roles,
     /// The node the enter hook just saw, as (kind, start, end).
     entered: Option<(&'static str, usize, usize)>,
 }
@@ -103,6 +106,12 @@ impl Walker<'_> {
     fn dispatched(&mut self, node: &Node<'_>) -> bool {
         self.entered.take() == Some(key(node))
     }
+
+    fn facts(&mut self, node: &Node<'_>) -> (&'static str, Option<Vec<u8>>, Role) {
+        let (kind, name) = generated::kind_and_name(node);
+        let (role, renamed) = self.roles.of(node);
+        (kind, renamed.or_else(|| name.map(<[u8]>::to_vec)), role)
+    }
 }
 
 impl<'pr> Visit<'pr> for Walker<'_> {
@@ -110,8 +119,9 @@ impl<'pr> Visit<'pr> for Walker<'_> {
 
     fn visit_branch_node_enter(&mut self, node: Node<'pr>) {
         self.entered = Some(key(&node));
-        let (kind, name) = generated::kind_and_name(&node);
-        self.builder.open(kind, span(&node.location()), name);
+        let (kind, name, role) = self.facts(&node);
+        self.builder
+            .open(kind, span(&node.location()), name.as_deref(), role);
     }
 
     fn visit_branch_node_leave(&mut self) {
@@ -120,15 +130,16 @@ impl<'pr> Visit<'pr> for Walker<'_> {
 
     fn visit_leaf_node_enter(&mut self, node: Node<'pr>) {
         self.entered = Some(key(&node));
-        let (kind, name) = generated::kind_and_name(&node);
+        let (kind, name, role) = self.facts(&node);
+        let name = name.as_deref();
         // A heredoc's node spans only its opener; the body and terminator
         // live on later lines and must still be compared byte for byte.
         if let Some(body) = heredoc_body(&node) {
-            self.builder.open(kind, span(&node.location()), name);
-            self.builder.leaf("heredoc_body", body, None);
+            self.builder.open(kind, span(&node.location()), name, role);
+            self.builder.leaf("heredoc_body", body, None, Role::Other);
             self.builder.close();
         } else {
-            self.builder.leaf(kind, span(&node.location()), name);
+            self.builder.leaf(kind, span(&node.location()), name, role);
         }
     }
 }
@@ -153,6 +164,7 @@ fn heredoc_body(node: &Node<'_>) -> Option<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::Receiver;
 
     fn parse(src: &str) -> Tree {
         Ruby.parse(src.as_bytes().to_vec())
@@ -211,6 +223,123 @@ mod tests {
         assert_eq!(names, ["greet", "name", "puts", "name"]);
         assert!(tree.errors.is_empty());
         assert!(!parse("def broken(\n").errors.is_empty());
+    }
+
+    /// Every node with a role, as (role, name).
+    fn roles(src: &str) -> Vec<(Role, Option<String>)> {
+        let tree = parse(src);
+        assert!(tree.errors.is_empty(), "{src}");
+        tree.nodes
+            .iter()
+            .filter(|n| n.role != Role::Other)
+            .map(|n| (n.role, n.name.as_deref().map(str::to_string)))
+            .collect()
+    }
+
+    fn has(found: &[(Role, Option<String>)], role: Role, name: Option<&str>) -> bool {
+        found
+            .iter()
+            .any(|(r, n)| *r == role && n.as_deref() == name)
+    }
+
+    #[test]
+    fn roles_mark_definitions_and_references() {
+        use crate::tree::NameKind::*;
+        let found = roles(
+            "module Shop\n  class Cart\n    LIMIT = 3\n    Shop::MAX = 4\n\
+             def add(item, qty = 1, *rest, key:, **opts, &blk)\n\
+             @items = item\n      total = LIMIT\n      Shop::Cart\n    end\n  end\nend\n",
+        );
+        for (role, name) in [
+            (Role::Definition(Module), "Shop"),
+            (Role::Definition(Class), "Cart"),
+            (Role::Definition(Constant), "LIMIT"),
+            (Role::Definition(Constant), "MAX"),
+            (Role::Definition(Method), "add"),
+            (Role::Definition(Parameter), "item"),
+            (Role::Definition(Parameter), "qty"),
+            (Role::Definition(Parameter), "rest"),
+            (Role::Definition(Parameter), "key"),
+            (Role::Definition(Parameter), "opts"),
+            (Role::Definition(BlockParameter), "blk"),
+            (Role::Definition(Variable), "@items"),
+            (Role::Definition(Variable), "total"),
+            (Role::Reference(Variable), "item"),
+            (Role::Reference(Constant), "LIMIT"),
+            (Role::Reference(Constant), "Cart"),
+        ] {
+            assert!(has(&found, role, Some(name)), "{role:?} {name}: {found:?}");
+        }
+        assert!(Role::Definition(Method).is_declaration());
+        assert!(!Role::Definition(Variable).is_declaration());
+    }
+
+    #[test]
+    fn roles_mark_dynamic_names() {
+        let found = roles(
+            "send(:greet)\nobj.public_send(\"wave\")\nrespond_to?(:nod)\n\
+             attr_reader :size, :color\nalias_method :fresh, :stale\nalias newer older\n\
+             instance_variable_get(:@cache)\nputs :not_a_name\n",
+        );
+        let dynamic: Vec<&str> = found
+            .iter()
+            .filter(|(r, _)| *r == Role::DynamicName)
+            .filter_map(|(_, n)| n.as_deref())
+            .collect();
+        assert_eq!(
+            dynamic,
+            [
+                "greet", "wave", "nod", "size", "color", "fresh", "stale", "newer", "older",
+                "@cache"
+            ]
+        );
+    }
+
+    #[test]
+    fn roles_mark_visibility() {
+        use crate::tree::Visibility::*;
+        let found = roles(
+            "class A\n  private\n  def a; end\n  protected def b; end\n  public :a\n\
+             module_function\n  other.private\nend\n",
+        );
+        let visibility: Vec<Role> = found
+            .iter()
+            .map(|(r, _)| *r)
+            .filter(|r| matches!(r, Role::Visibility(_)))
+            .collect();
+        let expected = [Private, Protected, Public, ModuleFunction].map(Role::Visibility);
+        assert_eq!(visibility, expected);
+        assert!(has(&found, Role::DynamicName, Some("a")));
+        assert!(has(&found, Role::Call(Receiver::Explicit), Some("private")));
+    }
+
+    #[test]
+    fn roles_mark_jumps_and_calls() {
+        use crate::tree::Jump::*;
+        let found = roles(
+            "def run(&blk)\n  return 1 if block_given?\n  loop { break }\n  loop { redo }\n  [1].each { next }\n\
+             yield\n  super\n  super(1)\n  begin; rescue; retry; end\n\
+             go\n  self.go\n  blk.call\nend\n",
+        );
+        for jump in [Return, BlockGiven, Break, Redo, Next, Yield, Super, Retry] {
+            assert!(
+                found.iter().any(|(r, _)| *r == Role::Jump(jump)),
+                "{jump:?}"
+            );
+        }
+        let supers = found
+            .iter()
+            .filter(|(r, _)| *r == Role::Jump(Super))
+            .count();
+        assert_eq!(supers, 2);
+        assert!(has(&found, Role::Call(Receiver::Implicit), Some("go")));
+        assert!(has(&found, Role::Call(Receiver::SelfRef), Some("go")));
+        assert!(has(&found, Role::Call(Receiver::Explicit), Some("call")));
+        assert!(has(
+            &found,
+            Role::Reference(crate::tree::NameKind::Variable),
+            Some("blk")
+        ));
     }
 
     #[test]

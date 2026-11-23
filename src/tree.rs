@@ -13,6 +13,87 @@ pub type Span = Range<usize>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub u32);
 
+/// What a node means, in terms the core can act on. Set by the frontend;
+/// most nodes are [`Role::Other`]. The identifier, where there is one, is
+/// [`Node::name`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Role {
+    #[default]
+    Other,
+    /// Declares `name`.
+    Definition(NameKind),
+    /// Reads a variable or constant called `name`.
+    Reference(NameKind),
+    /// Calls the method `name`.
+    Call(Receiver),
+    /// A string or symbol literal whose value (`name`) the language resolves
+    /// to code at runtime, as in `send(:name)`.
+    DynamicName,
+    /// Changes the visibility of the definitions after it, or of its arguments.
+    Visibility(Visibility),
+    /// Control flow bound to the enclosing method or block: it means
+    /// something else once moved into a new method.
+    Jump(Jump),
+}
+
+impl Role {
+    /// A statement that defines a method, class, module or constant: the
+    /// statements whose order doesn't matter to behavior.
+    pub fn is_declaration(self) -> bool {
+        matches!(
+            self,
+            Role::Definition(
+                NameKind::Method | NameKind::Class | NameKind::Module | NameKind::Constant
+            )
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameKind {
+    Method,
+    Class,
+    Module,
+    Constant,
+    Variable,
+    Parameter,
+    /// The parameter receiving the method's block (`&block`).
+    BlockParameter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Receiver {
+    /// `name(...)`.
+    Implicit,
+    /// `self.name(...)`.
+    SelfRef,
+    /// Anything else: the receiver is the call's first child.
+    Explicit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Protected,
+    Private,
+    ModuleFunction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Jump {
+    Return,
+    Break,
+    Next,
+    Redo,
+    Retry,
+    Yield,
+    /// A call to the parent's method, whose implicit arguments are the
+    /// enclosing method's.
+    Super,
+    /// Asks whether the enclosing method was given a block.
+    BlockGiven,
+}
+
 #[derive(Debug)]
 pub struct Node {
     /// The frontend's name for the syntax, e.g. `def` or `call`. Compared for
@@ -30,6 +111,7 @@ pub struct Node {
     pub comment: bool,
     /// The identifier the syntax declares or references, where it has one.
     pub name: Option<Box<str>>,
+    pub role: Role,
     /// Equal for subtrees that differ only in whitespace and comments.
     /// Process-local: never persisted or printed.
     pub hash: u64,
@@ -110,18 +192,21 @@ impl Tree {
         }
     }
 
+    /// `id` and every node under it, in source order.
+    pub fn descendants(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        let mut stack = vec![id];
+        std::iter::from_fn(move || {
+            let at = stack.pop()?;
+            stack.extend(self.node(at).children.iter().rev());
+            Some(at)
+        })
+    }
+
     /// Comment nodes under `id`, itself included, in source order.
     pub fn comments_under(&self, id: NodeId) -> Vec<NodeId> {
-        let mut out = Vec::new();
-        let mut stack = vec![id];
-        while let Some(at) = stack.pop() {
-            let node = self.node(at);
-            if node.comment {
-                out.push(at);
-            }
-            stack.extend(node.children.iter().rev());
-        }
-        out
+        self.descendants(id)
+            .filter(|&n| self.node(n).comment)
+            .collect()
     }
 }
 
@@ -154,7 +239,7 @@ impl TreeBuilder {
             comments: Vec::new(),
             errors: Vec::new(),
         };
-        builder.push("root", 0..len, None, false);
+        builder.push("root", 0..len, None, Role::Other, false);
         builder.stack.push(Tree::ROOT);
         builder
     }
@@ -163,8 +248,8 @@ impl TreeBuilder {
         &self.source
     }
 
-    pub fn open(&mut self, kind: &'static str, span: Span, name: Option<&[u8]>) {
-        let id = self.push(kind, span, name, false);
+    pub fn open(&mut self, kind: &'static str, span: Span, name: Option<&[u8]>, role: Role) {
+        let id = self.push(kind, span, name, role, false);
         self.stack.push(id);
     }
 
@@ -177,8 +262,8 @@ impl TreeBuilder {
 
     /// A node compared byte for byte, whitespace included: a token, a string's
     /// content, a directive the language reads from a comment.
-    pub fn leaf(&mut self, kind: &'static str, span: Span, name: Option<&[u8]>) {
-        self.push(kind, span, name, true);
+    pub fn leaf(&mut self, kind: &'static str, span: Span, name: Option<&[u8]>, role: Role) {
+        self.push(kind, span, name, role, true);
     }
 
     pub fn comment(&mut self, span: Span) {
@@ -195,7 +280,14 @@ impl TreeBuilder {
         self.errors.push(span);
     }
 
-    fn push(&mut self, kind: &'static str, span: Span, name: Option<&[u8]>, leaf: bool) -> NodeId {
+    fn push(
+        &mut self,
+        kind: &'static str,
+        span: Span,
+        name: Option<&[u8]>,
+        role: Role,
+        leaf: bool,
+    ) -> NodeId {
         let id = NodeId(self.nodes.len() as u32);
         let parent = self.stack.last().copied();
         if let Some(parent) = parent {
@@ -209,6 +301,7 @@ impl TreeBuilder {
             children: Vec::new(),
             comment: false,
             name: name.map(|n| String::from_utf8_lossy(n).into()),
+            role,
             hash: 0,
         });
         self.leaf.push(leaf);
@@ -271,6 +364,7 @@ impl TreeBuilder {
                 children: Vec::new(),
                 comment: !directive,
                 name: None,
+                role: Role::Other,
                 hash: 0,
             });
             self.leaf.push(true);
@@ -371,9 +465,9 @@ mod tests {
         let mut b = TreeBuilder::new(src.as_bytes().to_vec());
         let a = src.find('a').unwrap();
         let z = src.rfind('z').unwrap();
-        b.open("call", a..z + 1, None);
-        b.leaf("ident", a..a + 1, Some(b"a"));
-        b.leaf("ident", z..z + 1, Some(b"z"));
+        b.open("call", a..z + 1, None, Role::Other);
+        b.leaf("ident", a..a + 1, Some(b"a"), Role::Other);
+        b.leaf("ident", z..z + 1, Some(b"z"), Role::Other);
         b.close();
         if let Some(c) = comment {
             b.comment(c);
@@ -399,7 +493,7 @@ mod tests {
     fn leaves_keep_their_whitespace() {
         let tree = |s: &str| {
             let mut b = TreeBuilder::new(s.as_bytes().to_vec());
-            b.leaf("string", 0..s.len(), None);
+            b.leaf("string", 0..s.len(), None, Role::Other);
             b.finish()
         };
         assert_ne!(call(&tree("\"a b\"")), call(&tree("\"ab\"")));
