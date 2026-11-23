@@ -1,0 +1,11 @@
+[package]
+name = "shapr"
+version = "0.1.0"
+edition = "2024"
+description = "Classify the shape of a code change: format, comment, rename, move, extract, or logic."
+license = "MIT"
+repository = "https://github.com/dpep/shapr"
+keywords = ["diff", "refactoring", "code-review", "ruby", "ast"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
