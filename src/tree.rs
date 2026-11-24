@@ -353,7 +353,7 @@ impl Semantics {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Node {
     /// The frontend's name for the syntax, e.g. `def` or `call`. Compared for
     /// equality, never interpreted by the core.
@@ -377,7 +377,7 @@ pub struct Node {
     pub hash: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Tree {
     pub source: Vec<u8>,
     pub nodes: Vec<Node>,

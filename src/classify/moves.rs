@@ -66,7 +66,6 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
         }));
     }
     let pairs = pair(change, &units);
-    let ids = hunk_ids(change);
     let mut by_unit: HashMap<usize, usize> = HashMap::new();
     for (p, pair) in pairs.iter().enumerate() {
         // Both halves must be lines the diff changed, or the trees and the
@@ -154,11 +153,9 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
                 let joint = if context.is_empty() { ", but" } else { ";" };
                 reason = format!("{reason}{joint} several declarations match it equally well");
             }
-            let entries: Vec<Entry> = mine
-                .iter()
-                .map(|p| entry(change, &units, &ids, p))
-                .collect();
-            let (changed, first) = moved_changes(&entries, ids[f] + h, !assumptions.is_empty());
+            let entries: Vec<Entry> = mine.iter().map(|p| entry(change, &units, p)).collect();
+            let (changed, first) =
+                moved_changes(&entries, change.files[f].ids[h], !assumptions.is_empty());
             let names: Vec<&str> = context.iter().map(|c| c.as_str()).collect();
             let lines = explained.minus(&changed);
             let part = Part {
@@ -615,20 +612,6 @@ fn directives(tree: &Tree) -> Vec<u64> {
     out
 }
 
-/// Each hunk's output `id`, by `[file][hunk]`.
-fn hunk_ids(change: &Change) -> Vec<usize> {
-    let mut next = 0;
-    change
-        .files
-        .iter()
-        .map(|f| {
-            let first = next;
-            next += f.diff.hunks.len();
-            first
-        })
-        .collect()
-}
-
 /// One pair touching a hunk, as `detail.moves` lists it.
 #[derive(Serialize)]
 struct Entry {
@@ -648,9 +631,9 @@ fn context_names<S: serde::Serializer>(context: &[Context], s: S) -> Result<S::O
     s.collect_seq(context.iter().map(|c| c.as_str()))
 }
 
-fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Entry {
+fn entry(change: &Change, units: &[Unit], pair: &Pair) -> Entry {
     let (from, to) = (&units[pair.from], &units[pair.to]);
-    let id = |u: &Unit| u.hunk(change).map(|h| ids[u.file] + h);
+    let id = |u: &Unit| u.hunk(change).map(|h| change.files[u.file].ids[h]);
     let first = |u: &Unit| {
         let tree = u.tree(change);
         tree.lines(u.node).find(|&l| tree.line(l).code)

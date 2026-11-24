@@ -26,10 +26,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 const FLOOR: usize = 8;
 
 pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels: &mut Labels) {
-    let mut first_id = 0;
     for (f, file) in change.files.iter().enumerate() {
-        let base = first_id;
-        first_id += file.diff.hunks.len();
         let Ok(trees) = &file.trees else { continue };
         if !trees.clean() {
             continue;
@@ -47,7 +44,7 @@ pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels
                 match find(change, calls, chunks, b, dir) {
                     Ok(mut found) => {
                         reach(change, outside, f, calls, b, &mut found);
-                        apply(trees, base, &found, &mut labels[f]);
+                        apply(trees, &file.ids, &found, &mut labels[f]);
                     }
                     Err(why) => crate::verbose!(
                         "{}: `{}` not an {}: {why}",
@@ -379,7 +376,7 @@ fn reach(
 /// Labels every hunk the refactoring touches, or none when another part
 /// already claims a line it explains: the lines it explains become its
 /// part, and a sibling that changed on its own stays logic.
-fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
+fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label]) {
     // (hunk, the lines the refactoring explains)
     let mut touched = Vec::new();
     let [before, after] = &found.regions;
@@ -398,7 +395,9 @@ fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
         };
         touched.push((h, lines));
     }
-    let ids: Vec<usize> = touched.iter().map(|(h, _)| base + h).collect();
+    let mut ids: Vec<usize> = touched.iter().map(|&(h, _)| hunk_ids[h]).collect();
+    // Runs of one hunk share its id.
+    ids.dedup();
     let mut detail = Map::new();
     detail.insert("method".into(), Value::from(found.method.as_str()));
     detail.insert("caller".into(), Value::from(found.caller.as_str()));

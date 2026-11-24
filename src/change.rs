@@ -15,6 +15,8 @@ pub struct Change {
 
 pub struct FileChange {
     pub diff: FileDiff,
+    /// Per hunk, in `diff.hunks` order: the output id of the hunk it reports in.
+    pub ids: Vec<usize>,
     pub category: Category,
     /// Per hunk, in `diff.hunks` order: in a file no frontend reads, the
     /// changed lines differ only in trailing whitespace and blank lines.
@@ -51,7 +53,7 @@ pub fn assemble(diffs: Vec<FileDiff>, git: &Git) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
     let attributes = git.linguist(&paths);
     let mut blobs = Blobs::new(git);
-    let files = diffs
+    let mut files = diffs
         .into_iter()
         .filter_map(|mut diff| {
             if diff.binary && diff.hunks.is_empty() {
@@ -69,7 +71,12 @@ pub fn assemble(diffs: Vec<FileDiff>, git: &Git) -> Change {
             }
             Some(file_change(diff, &mut blobs, &attributes))
         })
-        .collect();
+        .collect::<Vec<FileChange>>();
+    let mut next = 0;
+    for file in &mut files {
+        file.ids = (next..next + file.diff.hunks.len()).collect();
+        next += file.diff.hunks.len();
+    }
     Change { files }
 }
 
@@ -126,6 +133,7 @@ fn file_change(
     );
     FileChange {
         diff,
+        ids: Vec::new(),
         category,
         whitespace_only,
         lines_before,

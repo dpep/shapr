@@ -1,7 +1,7 @@
 //! Unified diff parsing: `git diff` output, or any unified diff.
 
 /// One file's section of a diff.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FileDiff {
     /// `None` for an added file.
     pub old_path: Option<String>,
@@ -42,13 +42,58 @@ impl Lines {
 
 /// A hunk, narrowed to its changed region: first changed line to last, with
 /// the context between them but not around them.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Hunk {
     pub before: Lines,
     pub after: Lines,
     /// Line numbers of the `-` lines (before side) and `+` lines (after side).
     pub removed: Vec<usize>,
     pub added: Vec<usize>,
+}
+
+impl Hunk {
+    /// The maximal runs of changed lines, no context between them, each as
+    /// a hunk of its own: the edits git's context merged into this one.
+    pub fn runs(&self) -> Vec<Hunk> {
+        let (mut old, mut new) = (self.before.start, self.after.start);
+        let (mut removed, mut added) =
+            (self.removed.iter().peekable(), self.added.iter().peekable());
+        let mut out = Vec::new();
+        while removed.peek().is_some() || added.peek().is_some() {
+            // Context lines pair one to one, so both sides skip them together.
+            while removed.peek() != Some(&&old) && added.peek() != Some(&&new) {
+                old += 1;
+                new += 1;
+            }
+            let mut run = Hunk {
+                before: Lines {
+                    start: old,
+                    count: 0,
+                },
+                after: Lines {
+                    start: new,
+                    count: 0,
+                },
+                ..Hunk::default()
+            };
+            // A tool other than git may interleave `-` and `+` lines.
+            loop {
+                if removed.next_if_eq(&&old).is_some() {
+                    run.removed.push(old);
+                    old += 1;
+                } else if added.next_if_eq(&&new).is_some() {
+                    run.added.push(new);
+                    new += 1;
+                } else {
+                    break;
+                }
+            }
+            run.before.count = run.removed.len();
+            run.after.count = run.added.len();
+            out.push(run);
+        }
+        out
+    }
 }
 
 pub fn parse(text: &str) -> Vec<FileDiff> {
@@ -329,6 +374,28 @@ Binary files a/img.png and b/img.png differ
         );
         assert_eq!(files[2].hunks[0].after, Lines { start: 1, count: 0 });
         assert!(files[3].binary);
+    }
+
+    #[test]
+    fn splits_a_hunk_into_runs_of_changed_lines() {
+        let files =
+            parse("--- a/x\n+++ b/x\n@@ -1,7 +1,7 @@\n-a\n+A\n+B\n c\n d\n-e\n f\n-g\n+G\n-h\n");
+        let runs = files[0].hunks[0].runs();
+        let sides: Vec<_> = runs
+            .iter()
+            .map(|r| (r.before, r.after, r.removed.clone(), r.added.clone()))
+            .collect();
+        let lines = |start, count| Lines { start, count };
+        assert_eq!(
+            sides,
+            [
+                (lines(1, 1), lines(1, 2), vec![1], vec![1, 2]),
+                // A pure removal sits before the after side's next line.
+                (lines(4, 1), lines(5, 0), vec![4], vec![]),
+                // Interleaved `-` and `+` lines are one run.
+                (lines(6, 2), lines(6, 1), vec![6, 7], vec![6]),
+            ]
+        );
     }
 
     #[test]
