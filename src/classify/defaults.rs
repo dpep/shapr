@@ -52,25 +52,40 @@ pub(super) fn run(
             let Some((b, a)) = anchors(trees, counts, &site.before, &site.after) else {
                 continue;
             };
-            let pair = Pair { trees, frontend };
+            let pair = Pair {
+                trees,
+                frontend,
+                near: Default::default(),
+            };
             let mut restated = Vec::new();
-            if !pair.equivalent(b, a, &mut restated) || restated.is_empty() {
+            if !pair.equivalent(b, a, &mut restated) {
                 continue;
             }
-            let proofs: Result<Vec<Proof>, String> = restated
+            let near = pair.near.take();
+            if restated.is_empty() && near.is_empty() {
+                continue;
+            }
+            let results: Vec<Result<Proof, String>> = restated
                 .iter()
                 .map(|r| lookups.prove(f, &pair, r))
                 .collect();
             let label = &mut labels[f][h];
-            let proofs = match proofs {
-                Ok(proofs) => proofs,
-                Err(why) => {
-                    if label.residual.detail.is_empty() {
-                        label.residual.reason = why;
-                    }
-                    continue;
+            // Every call the hunk restates a default in, near misses included.
+            let total = restated.len() + near.len();
+            let mut failures: Vec<String> = near;
+            failures.extend(results.iter().filter_map(|r| r.as_ref().err().cloned()));
+            if !failures.is_empty() {
+                if label.residual.detail.is_empty() {
+                    let n = failures.len();
+                    label.residual.reason = match (n, total) {
+                        (_, 1) => failures.remove(0),
+                        (n, total) if n == total => format!("{n} calls: {}", failures.join("; ")),
+                        (n, total) => format!("{n} of {total} calls: {}", failures.join("; ")),
+                    };
                 }
-            };
+                continue;
+            }
+            let proofs: Vec<Proof> = results.into_iter().flatten().collect();
             let code = (CodeLines::of(&trees.before), CodeLines::of(&trees.after));
             let (eb, ea) = (
                 trees.before.node(b).extent.clone(),
@@ -101,11 +116,7 @@ pub(super) fn run(
                     })
                 })
                 .collect();
-            let mut reason = format!(
-                "{}, `{}`'s default",
-                pair.describe(&restated[0]),
-                proofs[0].method
-            );
+            let mut reason = describe_all(&pair, &restated, &proofs);
             if assumptions.contains(&Assumption::PublicApi) {
                 reason += ", but a library's subclass outside the repository may override it";
             } else if !assumptions.is_empty() {
@@ -132,6 +143,25 @@ pub(super) fn run(
                 variants: Vec::new(),
             });
         }
+    }
+}
+
+/// What the calls restate: "drops `k: 1`, `m`'s default", or for several,
+/// "2 calls: drops `k: 1`, adds `j: 2`, `m`'s default" (each its method's
+/// when they differ).
+fn describe_all(pair: &Pair, restated: &[Restated], proofs: &[Proof]) -> String {
+    let what: Vec<String> = restated.iter().map(|r| pair.describe(r)).collect();
+    let one = proofs.iter().all(|p| p.method == proofs[0].method);
+    let list = match one {
+        true => format!("{}, `{}`'s default", what.join(", "), proofs[0].method),
+        false => (what.iter().zip(proofs))
+            .map(|(w, p)| format!("{w}, `{}`'s default", p.method))
+            .collect::<Vec<_>>()
+            .join("; "),
+    };
+    match restated.len() {
+        1 => list,
+        n => format!("{n} calls: {list}"),
     }
 }
 
@@ -267,6 +297,9 @@ impl Counts {
 struct Pair<'a> {
     trees: &'a Trees,
     frontend: &'static dyn Frontend,
+    /// Calls that differ by one argument shapr can't tie to a parameter, as
+    /// reasons: compared as equal, so the rest of the code is still checked.
+    near: std::cell::RefCell<Vec<String>>,
 }
 
 impl Pair<'_> {
@@ -343,15 +376,54 @@ impl Pair<'_> {
                 .collect()
         };
         let (ox, oy) = (others(tb, x), others(ta, y));
-        let (ax, ay) = (
-            self.frontend.arguments(tb, x)?,
-            self.frontend.arguments(ta, y)?,
-        );
+        let near = |why: &str, found: &mut Vec<Restated>| -> Option<bool> {
+            let list = |tree: &Tree, id| {
+                (tree.code_children(id)).find(|&c| tree.node(c).flags.contains(Flags::ARGUMENTS))
+            };
+            let (lx, ly) = (list(tb, x)?, list(ta, y)?);
+            let (side, extra) = match (one_more(tb, lx, ta, ly), one_more(ta, ly, tb, lx)) {
+                (Some(n), _) => (Side::Before, n),
+                (_, Some(n)) => (Side::After, n),
+                _ => return None,
+            };
+            let same = ox.len() == oy.len()
+                && (ox.iter().zip(&oy)).all(|(&c, &d)| self.equivalent(c, d, found));
+            if !same {
+                return Some(false);
+            }
+            let verb = match side {
+                Side::Before => "drops",
+                Side::After => "adds",
+            };
+            let text = self.text(side, extra);
+            (self.near.borrow_mut()).push(format!(
+                "{verb} `{text}`, not shown to restate a default: {why}"
+            ));
+            Some(true)
+        };
+        let (Some(ax), Some(ay)) = (
+            self.frontend.arguments(tb, x),
+            self.frontend.arguments(ta, y),
+        ) else {
+            return near(
+                "the call's arguments can't each be tied to a parameter \
+                 (a splat, `...`, or a key that isn't a plain symbol)",
+                found,
+            );
+        };
         let (side, param, value, pairs) = match (dropped(&ax, &ay), dropped(&ay, &ax)) {
             (Some((param, value, pairs)), _) => (Side::Before, param, value, pairs),
             (_, Some((param, value, pairs))) => {
                 let pairs = pairs.into_iter().map(|(l, s)| (s, l)).collect();
                 (Side::After, param, value, pairs)
+            }
+            _ if ax.positional.len().abs_diff(ay.positional.len()) == 1
+                && !(ax.keywords.is_empty() && ay.keywords.is_empty()) =>
+            {
+                return near(
+                    "a positional argument beside keyword arguments isn't tied to its parameter",
+                    found,
+                );
             }
             _ => return None,
         };
@@ -370,6 +442,28 @@ impl Pair<'_> {
             });
         }
         Some(same)
+    }
+}
+
+/// The one code child (or descendant, through children that differ alone)
+/// `longer` holds beyond `shorter`, all else equal.
+fn one_more(tl: &Tree, longer: NodeId, ts: &Tree, shorter: NodeId) -> Option<NodeId> {
+    let cl: Vec<NodeId> = tl.code_children(longer).collect();
+    let cs: Vec<NodeId> = ts.code_children(shorter).collect();
+    let eq = |l: NodeId, s: NodeId| tl.node(l).hash == ts.node(s).hash;
+    if cl.len() == cs.len() + 1 {
+        return (0..cl.len()).map(|i| cl[i]).find(|&extra| {
+            let kept = cl.iter().filter(|&&c| c != extra);
+            kept.zip(&cs).all(|(&l, &s)| eq(l, s))
+        });
+    }
+    let differ: Vec<(NodeId, NodeId)> = (cl.iter().zip(&cs))
+        .filter(|&(&l, &s)| !eq(l, s))
+        .map(|(&l, &s)| (l, s))
+        .collect();
+    match differ[..] {
+        [(l, s)] if cl.len() == cs.len() => one_more(tl, l, ts, s),
+        _ => None,
     }
 }
 
@@ -519,21 +613,40 @@ impl<'c> Lookups<'c> {
                         file.diff.path()
                     )));
                 }
-                let found = scan(tree, &method).map_err(|why| fail(why.to_string()))?;
+                let found = (scan(tree, &method))
+                    .map_err(|why| fail(format!("{why} in {}", file.diff.path())))?;
                 defs[s].extend(found.into_iter().map(|d| (file.diff.path(), tree, d)));
             }
         }
         for d in &mut defs {
             d.extend(lookup.defs.iter().map(|(p, t, id)| (p.as_str(), &**t, *id)));
         }
-        let [Some(def_b), Some(def_a)] = defs.map(|d| match d[..] {
-            [one] => Some(one),
-            _ => None,
-        }) else {
-            return Err(fail(format!(
-                "`{method}` isn't defined exactly once in the repository"
-            )));
-        };
+        for (side, want) in defs.iter().zip([&home_b, &home_a]) {
+            if side.len() == 1 {
+                continue;
+            }
+            if side.is_empty() {
+                return Err(fail(format!("`{method}` isn't defined in the repository")));
+            }
+            let at_home = |(path, tree, def): &Def| {
+                let frontend = frontend::for_path(path).unwrap_or(frontend);
+                home_of_def(tree, frontend, *def).as_ref() == Some(want)
+            };
+            let elsewhere: BTreeSet<&str> =
+                (side.iter()).filter(|d| !at_home(d)).map(|d| d.0).collect();
+            let files = |paths: BTreeSet<&str>| paths.into_iter().collect::<Vec<_>>().join(", ");
+            return Err(fail(match elsewhere.is_empty() {
+                true => format!(
+                    "`{method}` is defined more than once in {}",
+                    files(side.iter().map(|d| d.0).collect())
+                ),
+                false => format!(
+                    "`{method}` is also defined in {}, which may override it",
+                    files(elsewhere)
+                ),
+            }));
+        }
+        let [def_b, def_a] = defs.map(|d| d[0]);
         let mut lists = Vec::new();
         for ((path, tree, def), want) in [(def_b, &home_b), (def_a, &home_a)] {
             let frontend = frontend::for_path(path).unwrap_or(frontend);
