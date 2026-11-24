@@ -204,6 +204,9 @@ impl Flags {
     /// A [`Role::DynamicName`] that reaches a constant, not a method (Ruby's
     /// `const_get(n)`, `n.constantize`).
     pub const CONSTANT: Flags = Flags(1 << 8);
+    /// A [`Role::DynamicName`] that reaches a field, not a method (Ruby's
+    /// `instance_variable_get(n)`).
+    pub const FIELD: Flags = Flags(1 << 9);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0

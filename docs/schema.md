@@ -184,7 +184,8 @@ class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
 without its `?`, `!` or `=`. A file that reaches a method by a name built
 at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`), or a
-class or constant by one (`const_get(n)`, `n.constantize`), is read too, once per run (every file of the language is parsed for them), and held
+class or constant by one (`const_get(n)`, `n.constantize`), or a field
+(`instance_variable_get(n)`), is read too, once per run (every file of the language is parsed for them), and held
 to the same rule as in the change: a computed name that could spell the old
 one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. The
 name as a whole word in any other file code may read (config such as YAML
@@ -329,7 +330,10 @@ every name that differs passes these checks:
   `qualified_const_get`, `const_defined?`, `constantize`,
   `safe_constantize`) counts the same way for a class, module or constant,
   matched on the name's last `::` segment (`const_get("Zoo::#{x}")` could be
-  any constant).
+  any constant), and a field lookup by one (`instance_variable_get`,
+  `instance_variable_set`, `instance_variable_defined?`,
+  `remove_instance_variable` and their `class_variable` forms) for an
+  instance or class variable: `instance_variable_get("@#{n}")` could be any.
 - A local isn't renamed in a scope that reads locals by name at runtime
   (`binding`, `eval`, `local_variables`, a string `instance_eval`; an ERB
   template's `result(binding)`), and a method isn't renamed when it reads its

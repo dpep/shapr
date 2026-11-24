@@ -28,6 +28,12 @@ pub(super) const DISPATCH_WORDS: &[&str] = &[
     "protected_method_defined?",
     "instance_variable_get",
     "instance_variable_set",
+    "instance_variable_defined?",
+    "remove_instance_variable",
+    "class_variable_get",
+    "class_variable_set",
+    "class_variable_defined?",
+    "remove_class_variable",
     "const_get",
     "qualified_const_get",
     "const_defined?",
@@ -81,6 +87,19 @@ const CONSTANT_WORDS: &[&str] = &[
     "safe_constantize",
 ];
 
+/// Dynamic calls that reach a field (`@x`, `@@x`) named by their first
+/// argument.
+const FIELD_WORDS: &[&str] = &[
+    "instance_variable_get",
+    "instance_variable_set",
+    "instance_variable_defined?",
+    "remove_instance_variable",
+    "class_variable_get",
+    "class_variable_set",
+    "class_variable_defined?",
+    "remove_class_variable",
+];
+
 /// Constant-reaching calls whose receiver is the name (`name.constantize`).
 const NAMED_BY_RECEIVER: &[&str] = &["constantize", "safe_constantize"];
 
@@ -93,8 +112,9 @@ pub(super) struct Roles {
     /// Argument lists, by start offset, with the pattern their computed
     /// name matches.
     computed: HashMap<usize, Vec<u8>>,
-    /// Nodes, by start offset, whose computed name reaches a constant.
-    constant: HashSet<usize>,
+    /// Nodes, by start offset, whose computed name reaches a constant or a
+    /// field ([`Flags::CONSTANT`], [`Flags::FIELD`]).
+    reaches: HashMap<usize, Flags>,
     /// Literal arguments, by start offset, that name a constant.
     constant_literals: HashSet<usize>,
 }
@@ -237,6 +257,7 @@ impl Roles {
         };
         let name = call.name().as_slice();
         let constant = CONSTANT_WORDS.iter().any(|w| w.as_bytes() == name);
+        let field = FIELD_WORDS.iter().any(|w| w.as_bytes() == name);
         // `name.constantize`: a computed receiver may name any constant.
         if NAMED_BY_RECEIVER.iter().any(|w| w.as_bytes() == name)
             && let Some(receiver) = call.receiver()
@@ -244,7 +265,8 @@ impl Roles {
             && receiver.as_symbol_node().is_none()
         {
             let pattern = interpolated(&receiver).unwrap_or_else(|| b"*".to_vec());
-            self.constant.insert(node.location().start_offset());
+            self.reaches
+                .insert(node.location().start_offset(), Flags::CONSTANT);
             return (Role::DynamicName, Some(last_segment(pattern)));
         }
         let receiver = match call.receiver() {
@@ -264,6 +286,10 @@ impl Roles {
         if dynamic && let Some(args) = call.arguments() {
             let mut computed = Vec::new();
             for (i, arg) in args.arguments().iter().enumerate() {
+                // A field call's later arguments are values, not names.
+                if field && i > 0 {
+                    break;
+                }
                 if arg.as_symbol_node().is_some() || arg.as_string_node().is_some() {
                     self.dynamic_args.insert(arg.location().start_offset());
                     if constant {
@@ -271,7 +297,7 @@ impl Roles {
                     }
                 } else if let Some(pattern) = interpolated(&arg) {
                     computed.push(pattern);
-                } else if i == 0 && SENDERS.iter().any(|s| s.as_bytes() == name) {
+                } else if i == 0 && (field || SENDERS.iter().any(|s| s.as_bytes() == name)) {
                     computed.push(b"*".to_vec());
                 }
             }
@@ -282,12 +308,14 @@ impl Roles {
             };
             if let Some(pattern) = pattern {
                 let start = args.location().start_offset();
-                let pattern = match constant {
-                    true => {
-                        self.constant.insert(start);
-                        last_segment(pattern)
-                    }
-                    false => pattern,
+                let pattern = if constant {
+                    self.reaches.insert(start, Flags::CONSTANT);
+                    last_segment(pattern)
+                } else if field {
+                    self.reaches.insert(start, Flags::FIELD);
+                    sigiled(pattern)
+                } else {
+                    pattern
                 };
                 self.computed.insert(start, pattern);
             }
@@ -326,10 +354,19 @@ impl Roles {
     /// constant.
     pub(super) fn flags(&mut self, node: &Node<'_>) -> Flags {
         let flags = flags(node);
-        match self.constant.remove(&node.location().start_offset()) {
-            true => flags | Flags::CONSTANT,
-            false => flags,
+        match self.reaches.remove(&node.location().start_offset()) {
+            Some(reaches) => flags | reaches,
+            None => flags,
         }
+    }
+}
+
+/// A computed field name as Ruby accepts it, starting with `@`: so the
+/// pattern can never spell a method's or constant's name.
+fn sigiled(pattern: Vec<u8>) -> Vec<u8> {
+    match pattern.first() {
+        Some(b'@') => pattern,
+        _ => [b"@".as_slice(), &pattern].concat(),
     }
 }
 
@@ -464,8 +501,8 @@ mod tests {
     /// search finds computed callers by these words: a sender missing here
     /// reaches a renamed method unseen.
     #[test]
-    fn every_sender_and_constant_lookup_is_a_dispatch_word() {
-        for word in SENDERS.iter().chain(CONSTANT_WORDS) {
+    fn every_sender_constant_and_field_lookup_is_a_dispatch_word() {
+        for word in SENDERS.iter().chain(CONSTANT_WORDS).chain(FIELD_WORDS) {
             assert!(DYNAMIC.contains(word), "{word}");
         }
     }

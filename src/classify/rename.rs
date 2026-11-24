@@ -788,11 +788,15 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
         };
         match n.role {
             // A computed name reaches methods (`send(n)`, `define_method`),
-            // or constants (`const_get(n)`, `n.constantize`).
+            // constants (`const_get(n)`, `n.constantize`) or fields
+            // (`instance_variable_get(n)`).
             Role::DynamicName if found.contains('*') => {
-                let reaches = match n.flags.contains(Flags::CONSTANT) {
-                    true => Scope::Constant,
-                    false => Scope::Method,
+                let reaches = if n.flags.contains(Flags::CONSTANT) {
+                    Scope::Constant
+                } else if n.flags.contains(Flags::FIELD) {
+                    Scope::Field
+                } else {
+                    Scope::Method
                 };
                 scope == reaches && spells(found, name)
             }

@@ -443,18 +443,52 @@ mod tests {
         assert!(tree.line(2).comment && !tree.line(2).code);
     }
 
+    /// The one table of computed-name families: each dispatch word's
+    /// computed name is a pattern flagged with what it reaches (a method,
+    /// constant or field), which rename blocks that family's names by. A new
+    /// word lands here with its family.
     #[test]
-    fn only_dispatch_words_reach_a_method_by_a_computed_name() {
-        let computed = |call: &str| {
-            parse(&format!("{call}(\"get_#{{n}}\")\n"))
-                .nodes
-                .iter()
-                .any(|n| n.role == Role::DynamicName && n.name.as_deref() == Some("get_*"))
+    fn every_dispatch_word_computes_a_name_in_its_family() {
+        use crate::tree::Flags;
+        const CONSTANT: &[&str] = &[
+            "const_get",
+            "qualified_const_get",
+            "const_defined?",
+            "constantize",
+            "safe_constantize",
+        ];
+        const FIELD: &[&str] = &[
+            "instance_variable_get",
+            "instance_variable_set",
+            "instance_variable_defined?",
+            "remove_instance_variable",
+            "class_variable_get",
+            "class_variable_set",
+            "class_variable_defined?",
+            "remove_class_variable",
+        ];
+        let computed = |source: String| {
+            let tree = parse(&source);
+            let n = tree.nodes.iter().find(|n| n.role == Role::DynamicName)?;
+            Some((n.name.as_deref()?.to_string(), n.flags))
         };
-        for word in Ruby.dispatch_words() {
-            assert!(computed(word), "{word}");
+        for &word in Ruby.dispatch_words() {
+            let (pattern, family) = match word {
+                w if CONSTANT.contains(&w) => ("get_*", Flags::CONSTANT),
+                w if FIELD.contains(&w) => ("@get_*", Flags::FIELD),
+                _ => ("get_*", Flags::default()),
+            };
+            let (name, flags) = computed(format!("{word}(\"get_#{{n}}\")\n")).expect(word);
+            assert_eq!(name, pattern, "{word}");
+            for f in [Flags::CONSTANT, Flags::FIELD] {
+                assert_eq!(flags.contains(f), family == f, "{word}");
+            }
         }
-        assert!(!computed("puts"));
+        for &word in FIELD {
+            let (name, flags) = computed(format!("{word}(n, v)\n")).expect(word);
+            assert!(name == "@*" && flags.contains(Flags::FIELD), "{word}");
+        }
+        assert_eq!(computed("puts(\"get_#{n}\")\n".to_string()), None);
     }
 
     #[test]
