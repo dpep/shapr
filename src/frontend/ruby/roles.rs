@@ -268,8 +268,36 @@ pub(super) fn flags(node: &Node<'_>) -> Flags {
         Node::ArgumentsNode { .. } => Flags::ARGUMENTS,
         // `{x:}`, `g(x:)`: the value read also names the key.
         Node::ImplicitNode { .. } => Flags::MEMBER,
+        Node::ConstantWriteNode { .. } | Node::ConstantPathWriteNode { .. } => {
+            let value = match node {
+                Node::ConstantWriteNode { .. } => node.as_constant_write_node().map(|n| n.value()),
+                _ => node.as_constant_path_write_node().map(|n| n.value()),
+            };
+            match value
+                .as_ref()
+                .and_then(|v| v.as_call_node())
+                .is_some_and(|c| makes_class(&c))
+            {
+                true => Flags::CLASS_VALUE,
+                false => Flags::default(),
+            }
+        }
         _ => Flags::default(),
     }
+}
+
+/// `Class.new`, `Module.new`, `Struct.new` or `Data.define`: a call whose
+/// value is a new class or module.
+fn makes_class(call: &ruby_prism::CallNode<'_>) -> bool {
+    let receiver = call.receiver();
+    let constant = receiver
+        .as_ref()
+        .and_then(|r| r.as_constant_read_node())
+        .map(|c| c.name().as_slice());
+    matches!(
+        (constant, call.name().as_slice()),
+        (Some(b"Class" | b"Module" | b"Struct"), b"new") | (Some(b"Data"), b"define")
+    )
 }
 
 /// Whether a call on `self` spells the method it calls the plain way:

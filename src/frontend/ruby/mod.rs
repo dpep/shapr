@@ -533,6 +533,26 @@ mod tests {
     }
 
     #[test]
+    fn a_constant_holding_a_new_class_is_marked() {
+        let marked = |src: &str| {
+            let tree = parse(src);
+            let names = tree
+                .nodes
+                .iter()
+                .filter(|n| n.flags.contains(crate::tree::Flags::CLASS_VALUE));
+            names
+                .filter_map(|n| n.name.as_deref().map(str::to_string))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            marked(
+                "P = Struct.new(:x)\nQ = Class.new(B) do\nend\nM::R = Module.new\nD = Data.define(:a)\nX = Foo.new\nY = 1\n"
+            ),
+            ["P", "Q", "R", "D"]
+        );
+    }
+
+    #[test]
     fn roles_mark_frame_and_position_reads() {
         use crate::tree::Hazard::*;
         let jumps = |src: &str| -> Vec<crate::tree::Hazard> {

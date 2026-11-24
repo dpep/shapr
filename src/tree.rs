@@ -193,6 +193,10 @@ impl Flags {
     /// std), or an item an attribute macro reads as written: renaming a
     /// name in it changes what the macro sees.
     pub const SPELLS: Flags = Flags(1 << 6);
+    /// A constant whose value is a new class or module (Ruby's
+    /// `Point = Struct.new(:x)`, `Class.new`, `Module.new`, `Data.define`):
+    /// its name is a class's name.
+    pub const CLASS_VALUE: Flags = Flags(1 << 7);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
