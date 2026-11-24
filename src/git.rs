@@ -1,6 +1,7 @@
 //! The git commands shapr runs: the diff for a range, and file contents by
 //! blob id.
 
+use crate::diff::FileDiff;
 use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::io::Write;
@@ -12,6 +13,15 @@ use std::process::{Command, Output, Stdio};
 pub struct Git {
     dir: Option<PathBuf>,
     bare: Option<Bare>,
+}
+
+/// The files a change ends in: a revision's, the index's (a staged diff on
+/// stdin), or the working tree's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum State {
+    Revision(String),
+    Index,
+    Worktree,
 }
 
 /// A bare repository, and the commit whose `.gitattributes` apply.
@@ -165,7 +175,65 @@ impl Git {
         Some(if to.is_empty() { "HEAD" } else { to }.to_string())
     }
 
-    /// PATH's contents at REV; `None` when it has no such file.
+    /// Where a diff read from stdin ends, from its blob ids: the index when
+    /// each file goes from HEAD to the index (`git diff --staged`), the
+    /// working tree when each goes from the index or HEAD to the working
+    /// tree (`git diff`, `git diff HEAD`). `None` for anything else, such as
+    /// a diff between two commits: the files it doesn't name can't be read
+    /// as of its after side.
+    pub fn stdin_after(&self, diffs: &[FileDiff]) -> Option<State> {
+        let index: HashMap<String, String> = self.files(None).ok()?.into_iter().collect();
+        let head: HashMap<String, String> = self
+            .files(Some("HEAD"))
+            .map(|f| f.into_iter().collect())
+            .unwrap_or_default();
+        let worktree = self.hash_worktree(diffs.iter().filter_map(|d| d.new_path.as_deref()))?;
+        let all = |before: &[&HashMap<String, String>], after: &HashMap<String, String>| {
+            diffs.iter().all(|d| {
+                blob_is(&d.new_blob, d.new_path.as_deref(), after)
+                    && before
+                        .iter()
+                        .any(|b| blob_is(&d.old_blob, d.old_path.as_deref(), b))
+            })
+        };
+        if all(&[&head], &index) {
+            Some(State::Index)
+        } else if all(&[&index, &head], &worktree) {
+            Some(State::Worktree)
+        } else {
+            None
+        }
+    }
+
+    /// Each existing working-tree file of PATHS (from the top) with the blob
+    /// id git would give it.
+    fn hash_worktree<'p>(
+        &self,
+        paths: impl Iterator<Item = &'p str>,
+    ) -> Option<HashMap<String, String>> {
+        let toplevel = self.toplevel()?;
+        let paths: Vec<&str> = paths.filter(|p| toplevel.join(p).is_file()).collect();
+        if paths.is_empty() {
+            return Some(HashMap::new());
+        }
+        let mut input = paths.join("\n").into_bytes();
+        input.push(b'\n');
+        let mut cmd = self.command();
+        cmd.current_dir(&toplevel)
+            .args(["hash-object", "--stdin-paths"]);
+        let out = run_with_input(&mut cmd, &input).ok()?;
+        let ids = String::from_utf8_lossy(&out);
+        Some(
+            paths
+                .iter()
+                .zip(ids.lines())
+                .map(|(p, id)| (p.to_string(), id.to_string()))
+                .collect(),
+        )
+    }
+
+    /// PATH's contents at REV, or in the index when REV is `""`; `None`
+    /// when it has no such file.
     pub fn show(&self, rev: &str, path: &str) -> Option<Vec<u8>> {
         run(self
             .command()
@@ -185,6 +253,22 @@ impl Git {
             .filter_map(|entry| entry.split_once('\t'))
             .filter(|(meta, _)| meta.split(' ').nth(1) == Some("blob"))
             .map(|(_, name)| crate::norms::join(dir, name))
+            .collect()
+    }
+
+    /// The files directly in DIR in the index (`""` for the top), as paths.
+    pub fn ls_index(&self, dir: &str) -> Vec<String> {
+        let spec = format!(":(top,glob){}", crate::norms::join(dir, "*"));
+        let Ok(out) = run(self
+            .command()
+            .args(["ls-files", "-z", "--full-name", "--", &spec]))
+        else {
+            return Vec::new();
+        };
+        String::from_utf8_lossy(&out)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
             .collect()
     }
 
@@ -274,10 +358,10 @@ impl Git {
         })
     }
 
-    /// Files of REV (the working tree when `None`) matching PATHSPECS that
-    /// hold WORD as a whole word, as paths from the top. Never fetches: a
-    /// blob a partial clone lacks is an error.
-    pub fn grep(&self, rev: Option<&str>, word: &str, pathspecs: &[String]) -> Result<Vec<String>> {
+    /// Files of STATE matching PATHSPECS that hold WORD as a whole word, as
+    /// paths from the top. Never fetches: a blob a partial clone lacks is an
+    /// error.
+    pub fn grep(&self, state: &State, word: &str, pathspecs: &[String]) -> Result<Vec<String>> {
         let mut cmd = self.command();
         cmd.env("GIT_NO_LAZY_FETCH", "1").args([
             "grep",
@@ -290,6 +374,14 @@ impl Git {
             "-e",
             word,
         ]);
+        let rev = match state {
+            State::Revision(rev) => Some(rev.as_str()),
+            State::Index => {
+                cmd.arg("--cached");
+                None
+            }
+            State::Worktree => None,
+        };
         cmd.args(rev).arg("--").args(pathspecs);
         let out = cmd.output().context("could not run git")?;
         // Exit 1 with nothing on stderr: no match.
@@ -368,6 +460,19 @@ const LINGUIST: [&str; 3] = [
     "linguist-vendored",
     "linguist-documentation",
 ];
+
+/// Whether ID, a possibly abbreviated blob id from a diff (all zeros for no
+/// file), is PATH's blob in FILES.
+fn blob_is(id: &Option<String>, path: Option<&str>, files: &HashMap<String, String>) -> bool {
+    let Some(id) = id else {
+        return false;
+    };
+    let found = path.and_then(|p| files.get(p));
+    match found {
+        None => id.bytes().all(|b| b == b'0'),
+        Some(full) => !id.is_empty() && full.starts_with(id.as_str()),
+    }
+}
 
 /// The linguist attributes .gitattributes sets (`Some(true)`) or unsets
 /// (`Some(false)`) on a path; `None` where it says nothing.

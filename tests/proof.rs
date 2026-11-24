@@ -303,3 +303,49 @@ fn the_old_name_in_another_files_string_or_comment_is_not_a_use() {
         "{reason}"
     );
 }
+
+const CALLER: (&str, &str) = (
+    "report.rb",
+    "class Report\n  def show\n    Meter.new.sample\n  end\nend\n",
+);
+const CALLER_GONE: (&str, &str) = ("report.rb", "class Report\n  def show\n  end\nend\n");
+
+#[test]
+fn a_diff_on_stdin_whose_after_side_is_neither_the_working_tree_nor_the_index_is_unseen() {
+    let dir = based_repo(
+        &[CALLER],
+        &[("meter.rb", &meter("read", "sample"))],
+        &[("meter.rb", &meter("read", "probe"))],
+    );
+    commit(dir.path(), &[CALLER_GONE], "drop the call");
+    // The working tree no longer calls `sample`, but HEAD~1, where the diff
+    // ends, still does.
+    let diff = git(dir.path(), &["diff", "HEAD~2", "HEAD~1"]);
+    let report = report(&shapr_stdin(dir.path(), &["-j"], &diff));
+    let rename = any_part(&report, "rename");
+    assert_eq!(rename["structure"], false, "{report:#}");
+    assert_eq!(assumptions(rename), ["unseen_uses"]);
+    assert_ne!(report["summary"]["verdict"], "structure");
+}
+
+#[test]
+fn a_staged_diff_on_stdin_is_searched_in_the_index() {
+    let dir = based_repo(
+        &[CALLER],
+        &[("meter.rb", &meter("read", "sample"))],
+        &[("README.md", "Meters.\n")],
+    );
+    write(dir.path(), &[("meter.rb", &meter("read", "probe"))]);
+    git(dir.path(), &["add", "meter.rb"]);
+    // Unstaged: the working tree drops the call the index still holds.
+    write(dir.path(), &[CALLER_GONE]);
+    let diff = git(dir.path(), &["diff", "--staged"]);
+    let staged = report(&shapr_stdin(dir.path(), &["-j"], &diff));
+    let reason = any_part(&staged, "logic")["reason"].as_str().unwrap();
+    assert!(reason.contains("report.rb"), "{staged:#}");
+    // Staged as well, the index holds no use.
+    git(dir.path(), &["add", "report.rb"]);
+    let diff = git(dir.path(), &["diff", "--staged", "--", "meter.rb"]);
+    let report = report(&shapr_stdin(dir.path(), &["-j"], &diff));
+    assert_eq!(any_part(&report, "rename")["structure"], true, "{report:#}");
+}

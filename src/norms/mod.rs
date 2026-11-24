@@ -11,7 +11,7 @@ mod ruby;
 pub mod snapshot;
 
 pub use align::{HunkStyle, styles, text};
-pub use snapshot::{Revision, Snapshot, Worktree, join};
+pub use snapshot::{Index, Revision, Snapshot, Worktree, join};
 
 use crate::change::Category;
 use serde::Serialize;

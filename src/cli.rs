@@ -242,20 +242,36 @@ pub fn run() -> ExitCode {
     if let Some(remote) = remote {
         git = remote.git;
     }
+    // Where uses outside the change are searched: a diff on stdin names
+    // its own after side only by blob ids.
+    let state = match (&cli.range, git.after_revision(cli.range.as_deref())) {
+        (_, Some(rev)) => Some(git::State::Revision(rev)),
+        (Some(_), None) => Some(git::State::Worktree),
+        (None, None) => git.stdin_after(&files),
+    };
+    if cli.range.is_none() && state.is_none() {
+        crate::verbose!(
+            "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
+        );
+    }
     let change = change::assemble(files, &git);
     // The repository as of the change's after side: config and neighbors
     // for norms, uses and library layout for proof.
-    let after = git.after_revision(cli.range.as_deref());
-    let revision = after
-        .clone()
-        .map(|rev| crate::norms::Revision::new(&git, rev));
-    let worktree = git.toplevel().map(crate::norms::Worktree);
-    let snapshot: Option<&dyn crate::norms::Snapshot> = match (&revision, &worktree) {
-        (Some(revision), _) => Some(revision),
-        (None, Some(worktree)) => Some(worktree),
-        (None, None) => None,
+    let revision = match &state {
+        Some(git::State::Revision(rev)) => Some(crate::norms::Revision::new(&git, rev.clone())),
+        _ => None,
     };
-    let repository = snapshot.map(|s| Repository::new(&git, after, s));
+    let index = crate::norms::Index(&git);
+    let worktree = git.toplevel().map(crate::norms::Worktree);
+    let snapshot: Option<&dyn crate::norms::Snapshot> = match (&state, &revision, &worktree) {
+        (_, Some(revision), _) => Some(revision),
+        (Some(git::State::Index), ..) => Some(&index),
+        (_, None, Some(worktree)) => Some(worktree),
+        (_, None, None) => None,
+    };
+    let repository = snapshot
+        .zip(state)
+        .map(|(s, state)| Repository::new(&git, state, s));
     let outside: &dyn Outside = match &repository {
         Some(repository) => repository,
         None => &Nowhere,

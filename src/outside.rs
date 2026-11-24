@@ -2,11 +2,11 @@
 //! uses outside the change are searched (`git grep -w`) and its library
 //! layout is read. A revision is searched in the object store, so a bare
 //! partial clone works once the blobs are prefetched in one request; the
-//! working tree is searched when the change ends there.
+//! index or the working tree is searched when the change ends there.
 
 use crate::classify::proof::{Outside, Search};
 use crate::frontend::{self, Frontend};
-use crate::git::Git;
+use crate::git::{Git, State};
 use crate::norms::Snapshot;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeSet, HashMap};
@@ -17,8 +17,7 @@ const CAP: usize = 20_000;
 
 pub struct Repository<'a> {
     git: &'a Git,
-    /// `None`: the working tree.
-    rev: Option<String>,
+    state: State,
     snapshot: &'a dyn Snapshot,
     cap: usize,
     files: OnceCell<Option<Vec<(String, String)>>>,
@@ -28,10 +27,10 @@ pub struct Repository<'a> {
 }
 
 impl<'a> Repository<'a> {
-    pub fn new(git: &'a Git, rev: Option<String>, snapshot: &'a dyn Snapshot) -> Self {
+    pub fn new(git: &'a Git, state: State, snapshot: &'a dyn Snapshot) -> Self {
         Repository {
             git,
-            rev,
+            state,
             snapshot,
             cap: CAP,
             files: OnceCell::new(),
@@ -42,11 +41,16 @@ impl<'a> Repository<'a> {
 
     fn files(&self) -> Option<&[(String, String)]> {
         self.files
-            .get_or_init(|| match self.git.files(self.rev.as_deref()) {
-                Ok(files) => Some(files),
-                Err(error) => {
-                    crate::verbose!("can't list the repository's files: {error:#}");
-                    None
+            .get_or_init(|| {
+                match self.git.files(match &self.state {
+                    State::Revision(rev) => Some(rev),
+                    State::Index | State::Worktree => None,
+                }) {
+                    Ok(files) => Some(files),
+                    Err(error) => {
+                        crate::verbose!("can't list the repository's files: {error:#}");
+                        None
+                    }
                 }
             })
             .as_deref()
@@ -68,7 +72,7 @@ impl<'a> Repository<'a> {
             );
             return Search::Capped;
         }
-        if self.rev.is_some() {
+        if matches!(self.state, State::Revision(_)) {
             let mut prefetched = self.prefetched.borrow_mut();
             let fetched = *prefetched.entry(frontend.language()).or_insert_with(|| {
                 let ids: BTreeSet<&str> = candidates.iter().map(|(_, id)| id.as_str()).collect();
@@ -82,7 +86,7 @@ impl<'a> Repository<'a> {
                 return Search::Unavailable;
             }
         }
-        match self.git.grep(self.rev.as_deref(), word, &pathspecs(globs)) {
+        match self.git.grep(&self.state, word, &pathspecs(globs)) {
             Ok(found) => Search::Done {
                 searched: candidates.len(),
                 found,
@@ -186,7 +190,7 @@ mod tests {
         }
         git(&["add", "-A"]);
         let shell = Git::new(Some(dir.path().to_path_buf()));
-        let mut repo = Repository::new(&shell, None, &Empty);
+        let mut repo = Repository::new(&shell, State::Worktree, &Empty);
         assert_eq!(
             repo.uses("a.rb", "go"),
             Search::Done {
@@ -194,7 +198,7 @@ mod tests {
                 found: vec!["a.rb".into(), "b.rb".into()]
             }
         );
-        repo = Repository::new(&shell, None, &Empty);
+        repo = Repository::new(&shell, State::Worktree, &Empty);
         repo.cap = 1;
         assert_eq!(repo.uses("a.rb", "go"), Search::Capped);
     }

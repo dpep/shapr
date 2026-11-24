@@ -140,7 +140,7 @@ unchecked: its `assumptions` are empty. An operation that reaches code
 outside the change (a renamed method's callers, the name an extract adds or
 an inline removes) is checked against the repository at the after revision
 (the range's end, the fetched head of a GitHub change, or the working tree
-when the change ends there): shapr searches its files for the old name as a
+when the change ends there; for a diff on stdin, see below): shapr searches its files for the old name as a
 whole word (`git grep -w`), then parses each file found and applies the same
 rule as to the files in the change (a use, a dynamic reference, a plain
 literal such as `:old`), so the word in a comment or a sentence doesn't
@@ -151,7 +151,7 @@ What the search can't settle stays on the part:
 
 | assumption | meaning |
 |---|---|
-| `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository, a failed search), so code outside the change may still use the name. |
+| `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), so code outside the change may still use the name. |
 | `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
 | `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false`, outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
@@ -173,6 +173,14 @@ runtime (`send("get_" + n)`) in a file outside the change, code in other
 languages (YAML, JavaScript), or other repositories beyond `public_api`. In
 a partial clone (the GitHub cache) the language's blobs at the after
 revision are fetched in one request first.
+
+A diff on stdin names its after side only by the blob ids on its `index`
+lines, so shapr searches it only where those ids say the change ends: the
+index when every file goes from HEAD to the index (`git diff --staged`),
+the working tree when every file goes from the index or HEAD to the working
+tree (`git diff`, `git diff HEAD`). Any other diff (between two commits, or
+against an older base) leaves the files it doesn't name unknown, so its
+parts carry `unseen_uses`: give the range instead (`shapr A..B`).
 
 ## Restyle
 
@@ -692,8 +700,9 @@ file. The table above says which settings configure each norm.
 
 Config and a new file's neighbors are read as of the change's after side:
 from the revision a range ends in (`B` of `A..B`; a GitHub change's head),
-or from the working tree when the change ends there (one revision, or a
-diff on stdin). Nothing above the repository's top is read.
+or from the index or the working tree when the change ends there (one
+revision, or a diff on stdin as [Proof status](#proof-status) reads it; the
+working tree for any other diff on stdin). Nothing above the repository's top is read.
 
 The hunk's `style`:
 

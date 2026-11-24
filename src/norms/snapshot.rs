@@ -1,7 +1,7 @@
 //! The repository state norms read beside the diff: linter config and a new
-//! file's neighbors, from the revision the change produced, or the working
-//! tree when the change ends there. Paths are relative to the repository's
-//! top, `/`-separated; nothing above the top is read.
+//! file's neighbors, from the revision the change produced, or the index or
+//! the working tree when the change ends there. Paths are relative to the
+//! repository's top, `/`-separated; nothing above the top is read.
 
 use crate::git::Git;
 use std::cell::RefCell;
@@ -64,6 +64,19 @@ impl Snapshot for Revision<'_> {
 
     fn list(&self, dir: &str) -> Vec<String> {
         self.git.ls(&self.rev, dir)
+    }
+}
+
+/// The index: what a staged diff ends in.
+pub struct Index<'a>(pub &'a Git);
+
+impl Snapshot for Index<'_> {
+    fn read(&self, path: &str) -> Option<Vec<u8>> {
+        self.0.show("", path)
+    }
+
+    fn list(&self, dir: &str) -> Vec<String> {
+        self.0.ls_index(dir)
     }
 }
 
