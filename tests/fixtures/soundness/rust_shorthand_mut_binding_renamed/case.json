@@ -1,0 +1,11 @@
+{
+  "description": "`S { mut a, .. }` binds field a: renaming the local through it binds another field, so the whole rename is logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

@@ -1,7 +1,13 @@
 {
-  "description": "a field renamed through field-init shorthand: `S { a }` reads the local too, so `S { c }` reads another local and the line is logic",
+  "description": "a field renamed through field-init shorthand: `S { a }` reads the local too, so `S { c }` reads another local and the whole rename is logic",
   "expect": {
-    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "lines": {"after": [{"start": 8, "count": 1}]}}}}},
-    "summary": {"verdict": {"$not": "structure"}}
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
   }
 }

@@ -1,7 +1,11 @@
 {
-  "description": "field-init shorthand inside a macro's tokens names the field too: renaming the local through `vec![S { a, .. }]` sets another field, so it is logic",
+  "description": "field-init shorthand inside a macro's tokens names the field too: renaming the local through `vec![S { a, .. }]` sets another field, so the whole rename is logic",
   "expect": {
-    "hunks": [{"verdict": {"$not": "structure"}}],
-    "summary": {"verdict": {"$not": "structure"}}
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
   }
 }

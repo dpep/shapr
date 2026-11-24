@@ -258,6 +258,8 @@ pub(super) fn flags(node: &Node<'_>) -> Flags {
         }
         Node::ClassNode { .. } | Node::ModuleNode { .. } => Flags::SCOPE,
         Node::ArgumentsNode { .. } => Flags::ARGUMENTS,
+        // `{x:}`, `g(x:)`: the value read also names the key.
+        Node::ImplicitNode { .. } => Flags::MEMBER,
         _ => Flags::default(),
     }
 }

@@ -1,0 +1,11 @@
+{
+  "description": "`g(x:)` reads local x and names keyword :x, so renaming the local through it passes another keyword: the whole rename is logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

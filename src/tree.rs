@@ -184,8 +184,9 @@ impl Flags {
     /// definitions are private unless marked ([`Semantics::private_by_default`]):
     /// Rust's `pub`, and a `pub` trait's items or `pub` enum's variants.
     pub const PUBLIC: Flags = Flags(1 << 4);
-    /// An identifier that names a member as well as the local it reads or
-    /// binds (Rust's `S { a }`): renaming it changes the member too.
+    /// An identifier, or the node holding it, that names a member as well as
+    /// the local it reads or binds (Rust's `S { a }`, `S { mut a }`, Ruby's
+    /// `{x:}`): renaming it changes the member too.
     pub const MEMBER: Flags = Flags(1 << 5);
     /// A macro call whose expansion may spell its tokens out as text (Rust's
     /// `stringify!`, `dbg!`, a message-less `assert!`, any macro outside

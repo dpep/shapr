@@ -101,6 +101,8 @@ struct Facts {
     after_nodes: BTreeSet<(usize, NodeId)>,
     /// The renamed definitions on the before side, by file.
     definitions: Vec<(usize, NodeId)>,
+    /// Why a use under the same names can't follow (a member, a macro).
+    blocked: Option<String>,
 }
 
 type Verdicts<'f> = BTreeMap<&'f Pair, Result<Verdict, String>>;
@@ -131,9 +133,31 @@ pub(super) fn run(
 
     // Every rename the change makes, gathered across hunks and files.
     let mut facts: BTreeMap<Pair, Facts> = BTreeMap::new();
+    // Diffs no rename passes through, as (local space, from, to, why).
+    let mut blocked: Vec<(Space, String, String, String)> = Vec::new();
     for hunk in &hunks {
         let t = trees(hunk.file);
         for diff in &hunk.alignment.diffs {
+            if let Some(why) = stopped(t, diff) {
+                let name = |tree: &Tree, id| {
+                    tree.node(id)
+                        .name
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                let local = Space {
+                    scope: Scope::Local,
+                    file: Some(hunk.file),
+                    gate: Some(t.before.scope(diff.before)),
+                };
+                blocked.push((
+                    local,
+                    name(&t.before, diff.before),
+                    name(&t.after, diff.after),
+                    why,
+                ));
+            }
             let Ok(pair) = pair_of(t, hunk.file, diff) else {
                 continue;
             };
@@ -158,6 +182,17 @@ pub(super) fn run(
             entry.after_gates.insert(t.after.scope(diff.after));
             entry.after_nodes.insert((hunk.file, diff.after));
         }
+    }
+    // A use that can't follow leaves the rename partial, so none of it holds.
+    for (pair, f) in facts.iter_mut() {
+        f.blocked = blocked
+            .iter()
+            .find(|(local, from, to, _)| {
+                *from == pair.from
+                    && *to == pair.to
+                    && (pair.space.scope != Scope::Local || pair.space == *local)
+            })
+            .map(|(.., why)| why.clone());
     }
     let verdicts: Verdicts = facts
         .iter()
@@ -319,23 +354,10 @@ fn judged<'v>(
     diff: &Diff,
     verdicts: &'v Verdicts,
 ) -> Result<(&'v Pair, &'v Verdict), String> {
+    if let Some(why) = stopped(trees, diff) {
+        return Err(why);
+    }
     let node = trees.before.node(diff.before);
-    if node.flags.contains(Flags::MEMBER) {
-        let to = trees
-            .after
-            .node(diff.after)
-            .name
-            .as_deref()
-            .unwrap_or_default();
-        let from = node.name.as_deref().unwrap_or_default();
-        return Err(format!("{from} also names a field, which becomes {to}"));
-    }
-    let mut ancestors = trees.before.ancestors(diff.before);
-    let spelled = ancestors.any(|a| trees.before.node(a).flags.contains(Flags::SPELLS));
-    if spelled {
-        let from = node.name.as_deref().unwrap_or_default();
-        return Err(format!("a macro may read {from} as written, which changes"));
-    }
     let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
         // Accepted when it follows a rename made elsewhere in the change;
         // an opaque name may follow a local's, in the same scope.
@@ -372,6 +394,29 @@ fn judged<'v>(
     }
 }
 
+/// Why no rename passes through this diff: its name also names a member
+/// (`S { a }`, `S { mut a }`, Ruby's `g(x:)`), or a macro may read it as written.
+fn stopped(trees: &Trees, diff: &Diff) -> Option<String> {
+    let tree = &trees.before;
+    let node = tree.node(diff.before);
+    let from = node.name.as_deref().unwrap_or_default();
+    let member = |id: NodeId| tree.node(id).flags.contains(Flags::MEMBER);
+    if member(diff.before) || node.parent.is_some_and(member) {
+        let to = trees
+            .after
+            .node(diff.after)
+            .name
+            .as_deref()
+            .unwrap_or_default();
+        return Some(format!(
+            "{from} also names a field or key, which becomes {to}"
+        ));
+    }
+    let mut ancestors = tree.ancestors(diff.before);
+    let spelled = ancestors.any(|a| tree.node(a).flags.contains(Flags::SPELLS));
+    spelled.then(|| format!("a macro may read {from} as written, which changes"))
+}
+
 /// Whether a rename holds across its whole scope, and how strongly.
 fn judge(
     change: &Change,
@@ -391,6 +436,9 @@ fn judge(
     }
     if !facts.defined {
         return Err(format!("{from}'s definition isn't renamed"));
+    }
+    if let Some(why) = &facts.blocked {
+        return Err(why.clone());
     }
     if let Some(name) = &facts.reserved {
         return Err(format!(
