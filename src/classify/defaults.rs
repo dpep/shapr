@@ -22,6 +22,7 @@ use crate::change::{Change, Trees};
 use crate::frontend::{self, Arguments, Frontend};
 use crate::tree::{Flags, MARK, NameKind, NodeId, Receiver, Role, Span, Tree, spells};
 use serde_json::{Map, Value, json};
+use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
@@ -40,12 +41,15 @@ pub(super) fn run(
         if !trees.clean() {
             continue;
         }
+        let counts = OnceCell::new();
         for (h, site) in trees.sites.iter().enumerate() {
             let free = labels[f][h].unclaimed();
             if free.is_empty() {
                 continue;
             }
-            let Some((b, a)) = anchors(trees, &site.before, &site.after) else {
+            let counts =
+                counts.get_or_init(|| (Counts::of(&trees.before), Counts::of(&trees.after)));
+            let Some((b, a)) = anchors(trees, counts, &site.before, &site.after) else {
                 continue;
             };
             let pair = Pair { trees, frontend };
@@ -188,15 +192,25 @@ fn region(tree: &Tree, side: &SiteSide) -> Span {
 /// The smallest node on each side holding the hunk's region whose text
 /// around the region, whitespace aside, is the same on both sides: one node,
 /// the region swapped.
-fn anchors(trees: &Trees, before: &SiteSide, after: &SiteSide) -> Option<(NodeId, NodeId)> {
+fn anchors(
+    trees: &Trees,
+    (cb, ca): &(Counts, Counts),
+    before: &SiteSide,
+    after: &SiteSide,
+) -> Option<(NodeId, NodeId)> {
     let (tb, ta) = (&trees.before, &trees.after);
     let (rb, ra) = (region(tb, before), region(ta, after));
     let (mut b, mut a) = (tb.deepest_containing(&rb), ta.deepest_containing(&ra));
     loop {
         match (around(tb, b, &rb), around(ta, a, &ra)) {
-            (Some(x), Some(y)) if x == y => return Some((b, a)),
             (Some(x), Some(y)) => {
-                let (lx, ly) = (x.0.len() + x.1.len(), y.0.len() + y.1.len());
+                let (lx, ly) = (
+                    cb.count(&x.0) + cb.count(&x.1),
+                    ca.count(&y.0) + ca.count(&y.1),
+                );
+                if lx == ly && same(tb, &x.0, ta, &y.0) && same(tb, &x.1, ta, &y.1) {
+                    return Some((b, a));
+                }
                 if lx <= ly {
                     b = tb.node(b).parent?;
                 }
@@ -210,21 +224,43 @@ fn anchors(trees: &Trees, before: &SiteSide, after: &SiteSide) -> Option<(NodeId
     }
 }
 
-/// The node's text before and after `region`, whitespace dropped; `None`
-/// when the node doesn't hold the region.
-fn around(tree: &Tree, id: NodeId, region: &Span) -> Option<(Vec<u8>, Vec<u8>)> {
+/// The node's spans before and after `region`; `None` when the node
+/// doesn't hold the region.
+fn around(tree: &Tree, id: NodeId, region: &Span) -> Option<(Span, Span)> {
     let extent = &tree.node(id).extent;
     if extent.start > region.start || region.end > extent.end {
         return None;
     }
-    let text = |span: Span| -> Vec<u8> {
-        let text = tree.text(&span).iter().copied();
-        text.filter(|b| !b.is_ascii_whitespace()).collect()
-    };
-    Some((
-        text(extent.start..region.start),
-        text(region.end..extent.end),
-    ))
+    Some((extent.start..region.start, region.end..extent.end))
+}
+
+/// Whether two spans hold the same text, whitespace dropped.
+fn same(tx: &Tree, x: &Span, ty: &Tree, y: &Span) -> bool {
+    let bx = tx.text(x).iter().filter(|b| !b.is_ascii_whitespace());
+    let by = ty.text(y).iter().filter(|b| !b.is_ascii_whitespace());
+    bx.eq(by)
+}
+
+/// How many bytes before each offset of a tree's source aren't whitespace,
+/// so a span's count is a subtraction.
+struct Counts(Vec<usize>);
+
+impl Counts {
+    fn of(tree: &Tree) -> Counts {
+        let mut seen = 0;
+        let mut counts = Vec::with_capacity(tree.source.len() + 1);
+        counts.push(0);
+        for b in &tree.source {
+            seen += usize::from(!b.is_ascii_whitespace());
+            counts.push(seen);
+        }
+        Counts(counts)
+    }
+
+    /// The bytes of `span` that aren't whitespace.
+    fn count(&self, span: &Span) -> usize {
+        self.0[span.end] - self.0[span.start]
+    }
 }
 
 /// The two trees of one file, compared through its frontend.

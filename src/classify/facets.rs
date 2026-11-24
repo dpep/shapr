@@ -409,9 +409,8 @@ impl<'a> Parsed<'a> {
                 .region
                 .last()
                 .map_or(0..0, |last| tree.line_span(side.region.start, last));
-            let mut hashes: Vec<u64> = tree
-                .nodes
-                .iter()
+            let mut hashes: Vec<u64> = (tree.touching(&region))
+                .map(|id| tree.node(id))
                 .filter(|n| !n.comment && contains(&region, &n.extent))
                 .map(|n| n.hash)
                 .collect();
@@ -425,8 +424,7 @@ impl<'a> Parsed<'a> {
             let tree = side.tree();
             let last = side.region.last()?;
             let region = tree.line_span(side.region.start, last);
-            let overlapping: Vec<(NodeId, &crate::tree::Node)> = tree
-                .descendants(Tree::ROOT)
+            let overlapping: Vec<(NodeId, &crate::tree::Node)> = (tree.touching(&region))
                 .map(|id| (id, tree.node(id)))
                 .filter(|(_, n)| n.extent.start < region.end && region.start < n.extent.end)
                 .collect();

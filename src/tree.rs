@@ -435,6 +435,8 @@ pub struct Tree {
     ignored: Vec<Span>,
     /// Spans whose whitespace is hashed like code, sorted and disjoint.
     verbatim: Vec<Span>,
+    /// Comments' extents, sorted and disjoint.
+    comments: Vec<Span>,
     line_starts: Vec<usize>,
     lines: Vec<LineFacts>,
     /// The deepest nesting of nodes below the root.
@@ -527,6 +529,11 @@ impl Tree {
     /// Offsets of the non-whitespace bytes of `id`'s own span that no
     /// child's extent holds: an operator, a keyword, punctuation.
     pub fn own_offsets(&self, id: NodeId) -> impl Iterator<Item = usize> + '_ {
+        self.own_offsets_in(id, &self.node(id).span)
+    }
+
+    /// [`Tree::own_offsets`] inside `within`.
+    pub fn own_offsets_in(&self, id: NodeId, within: &Span) -> impl Iterator<Item = usize> + '_ {
         let node = self.node(id);
         // One sweep over children sorted by start: `at` is held when the
         // furthest end among children starting at or before it lies past it.
@@ -537,7 +544,8 @@ impl Tree {
             .collect();
         held.sort_by_key(|s| s.start);
         let (mut next, mut reach) = (0, 0);
-        node.span.clone().filter(move |&at| {
+        let span = node.span.start.max(within.start)..node.span.end.min(within.end);
+        span.filter(move |&at| {
             while next < held.len() && held[next].start <= at {
                 reach = reach.max(held[next].end);
                 next += 1;
@@ -634,6 +642,12 @@ impl Tree {
     }
 
     /// Whether whitespace at `at` is code ([`TreeBuilder::verbatim`]).
+    /// Whether byte `at` is inside a comment.
+    pub fn in_comment(&self, at: usize) -> bool {
+        let i = self.comments.partition_point(|s| s.end <= at);
+        self.comments.get(i).is_some_and(|s| s.contains(&at))
+    }
+
     fn verbatim(&self, at: usize) -> bool {
         let i = self.verbatim.partition_point(|s| s.end <= at);
         self.verbatim.get(i).is_some_and(|s| s.contains(&at))
@@ -691,6 +705,25 @@ impl Tree {
         std::iter::from_fn(move || {
             let at = stack.pop()?;
             stack.extend(self.node(at).children.iter().rev());
+            Some(at)
+        })
+    }
+
+    /// The root and each node whose extent touches `span` (overlaps it or
+    /// meets an end), in [`Tree::descendants`] order: every node inside or
+    /// overlapping `span`, without walking the rest of the tree.
+    pub fn touching(&self, span: &Span) -> impl Iterator<Item = NodeId> + '_ {
+        let span = span.clone();
+        let mut stack = vec![Self::ROOT];
+        std::iter::from_fn(move || {
+            let at = stack.pop()?;
+            // A node's extent holds its children's; a comment under the root
+            // may lie outside the root's.
+            let children = self.node(at).children.iter().rev();
+            stack.extend(children.filter(|&&c| {
+                let extent = &self.node(c).extent;
+                extent.start <= span.end && span.start <= extent.end
+            }));
             Some(at)
         })
     }
@@ -895,7 +928,14 @@ impl TreeBuilder {
                 self.ignored
             },
             verbatim: disjoint(self.verbatim),
+            comments: Vec::new(),
         };
+        tree.comments = disjoint(
+            (tree.nodes.iter())
+                .filter(|n| n.comment)
+                .map(|n| n.extent.clone())
+                .collect(),
+        );
         for i in (0..tree.nodes.len()).rev() {
             tree.nodes[i].hash = hash(&tree, i, self.leaf[i], |n| n.hash);
             let canonical = self.canonical[i].as_ref();
@@ -1286,6 +1326,41 @@ mod tests {
         assert_eq!(tree.own_text(call, false), [MARK, b'+', MARK]);
         assert_eq!(tree.own_spans(call), vec![Range { start: 1, end: 4 }]);
         assert_eq!(tree.own_bytes(call), [(1, b'+')]);
+        assert_eq!(tree.own_offsets_in(call, &(0..2)).count(), 0);
+        assert_eq!(tree.own_offsets_in(call, &(2..5)).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn touching_walks_only_the_nodes_near_a_span() {
+        let tree = build("a + z # one\n", Some(6..11));
+        for start in 0..12 {
+            for end in start..12 {
+                let span = start..end;
+                let near: Vec<NodeId> = tree.touching(&span).collect();
+                let wanted = tree.descendants(Tree::ROOT).filter(|&id| {
+                    let e = &tree.node(id).extent;
+                    (e.start < span.end && span.start < e.end)
+                        || (span.start <= e.start && e.end <= span.end)
+                });
+                // In walk order, and holding every node inside or overlapping.
+                let walk: Vec<NodeId> = tree.descendants(Tree::ROOT).collect();
+                let order: Vec<usize> = near
+                    .iter()
+                    .map(|id| walk.iter().position(|w| w == id).unwrap())
+                    .collect();
+                assert!(order.is_sorted(), "{span:?}");
+                for id in wanted {
+                    assert!(near.contains(&id), "{span:?} {id:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn comment_bytes_are_known_by_offset() {
+        let tree = build("a + z # one\n", Some(6..11));
+        let inside: Vec<usize> = (0..12).filter(|&at| tree.in_comment(at)).collect();
+        assert_eq!(inside, (6..11).collect::<Vec<_>>());
     }
 
     #[test]
