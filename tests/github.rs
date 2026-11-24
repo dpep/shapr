@@ -10,41 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap().trim().to_string()
-}
-
-fn write(dir: &Path, files: &[(&str, &str)]) {
-    for (path, content) in files {
-        let path = dir.join(path);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, content).unwrap();
-    }
-}
-
-fn commit(dir: &Path, files: &[(&str, &str)], message: &str) -> String {
-    write(dir, files);
-    git(dir, &["add", "-A"]);
-    git(dir, &["commit", "-q", "-m", message]);
-    git(dir, &["rev-parse", "HEAD"])
-}
+mod common;
+use common::*;
 
 /// Canned API responses by path; anything else is 404. Records each
 /// request's head, lowercased.
@@ -166,7 +133,9 @@ impl Fixture {
     /// Serves pull request NUMBER from main's tip to HEAD.
     fn pull(&self, number: u64, head: &str, title: &str) {
         let base = &self.main;
-        let merge_base = git(&self.work, &["merge-base", base, head]);
+        let merge_base = git(&self.work, &["merge-base", base, head])
+            .trim()
+            .to_string();
         self.server.route(
             &format!("/repos/acme/widgets/pulls/{number}"),
             200,
@@ -183,13 +152,17 @@ impl Fixture {
 
     /// Serves the commit SHA under the name ASKED.
     fn commit(&self, asked: &str, sha: &str) {
-        let parents = git(&self.work, &["rev-list", "--parents", "-n1", sha]);
+        let parents = git(&self.work, &["rev-list", "--parents", "-n1", sha])
+            .trim()
+            .to_string();
         let parents: Vec<Value> = parents
             .split_whitespace()
             .skip(1)
             .map(|p| json!({"sha": p}))
             .collect();
-        let message = git(&self.work, &["log", "-1", "--format=%B", sha]);
+        let message = git(&self.work, &["log", "-1", "--format=%B", sha])
+            .trim()
+            .to_string();
         self.server.route(
             &format!("/repos/acme/widgets/commits/{asked}"),
             200,
@@ -233,16 +206,6 @@ impl Fixture {
     fn shapr(&self, args: &[&str]) -> Output {
         self.shapr_in(&self.work, args, &[])
     }
-}
-
-fn report(out: &Output) -> Value {
-    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
-        panic!(
-            "{e}: stdout {} stderr {}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        )
-    })
 }
 
 fn stderr(out: &Output) -> String {
@@ -373,7 +336,9 @@ fn a_fork_head_is_fetched_from_the_pull_ref() {
             "fork",
             &format!("{}^{{tree}}", f.feature),
         ],
-    );
+    )
+    .trim()
+    .to_string();
     git(
         &f.work,
         &[
@@ -394,7 +359,7 @@ fn a_fork_head_is_fetched_from_the_pull_ref() {
 #[test]
 fn a_commit_is_diffed_against_its_parent() {
     let f = Fixture::new();
-    let reformat = git(&f.work, &["rev-parse", "feature~1"]);
+    let reformat = git(&f.work, &["rev-parse", "feature~1"]).trim().to_string();
     let short = &reformat[..8];
     f.commit(short, &reformat);
     let out = f.shapr(&["-j", &format!("acme/widgets@{short}")]);
@@ -436,7 +401,7 @@ fn a_merge_commit_is_diffed_against_its_first_parent_and_says_so() {
         &f.work,
         &["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"],
     );
-    let merge = git(&f.work, &["rev-parse", "HEAD"]);
+    let merge = git(&f.work, &["rev-parse", "HEAD"]).trim().to_string();
     git(&f.work, &["push", "-q", f.remote.to_str().unwrap(), "main"]);
     f.commit(&merge, &merge);
     let out = f.shapr(&["-j", &format!("acme/widgets@{merge}")]);
