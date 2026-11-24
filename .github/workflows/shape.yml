@@ -3,23 +3,29 @@ name: Shape
 # shapr labels its own changes: advisory, never a gate on the verdict.
 on:
   pull_request:
-    types: [ opened, synchronize ]
+    types: [ opened, synchronize, reopened, edited ]
   push:
     branches: [ main ]
 
 permissions:
   contents: read
 
+# A newer push supersedes a run still going.
+concurrency:
+  group: shape-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   # Judge a pull request with its base's build, so a change that breaks
   # shapr can't grade itself; a push to main with its own.
   BUILD_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-  RANGE: ${{ github.event_name == 'pull_request' && format('{0}...HEAD', github.event.pull_request.base.sha) || 'HEAD^!' }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
 jobs:
   shape:
     name: shapr
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: clone ${{ github.repository }}
@@ -56,15 +62,23 @@ jobs:
       - name: build shapr
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo build --release --manifest-path "$RUNNER_TEMP/build/Cargo.toml"
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/build/Cargo.toml"
           mkdir -p "$RUNNER_TEMP/bin"
           cp "$RUNNER_TEMP/build/target/release/shapr" "$RUNNER_TEMP/bin/shapr"
 
       - name: shape of the change
         run: |
           shapr="$RUNNER_TEMP/bin/shapr"
+          # A pushed merge commit is refused against both parents: take the first.
+          if [ -n "$BASE_SHA" ]; then
+            RANGE="$BASE_SHA...HEAD"
+          elif [ "$(git rev-list --parents -n1 HEAD | wc -w)" -gt 2 ]; then
+            RANGE="HEAD^1..HEAD"
+          else
+            RANGE="HEAD^!"
+          fi
           "$shapr" -J "$RANGE" > shape.ndjson
-          text=$("$shapr" "$RANGE")
+          text=$("$shapr" "$RANGE" | head -n 200)
           verdict=$(tail -n1 shape.ndjson | jq -r .verdict)
           echo "$text"
           {
