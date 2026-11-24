@@ -151,9 +151,13 @@ pub enum Hazard {
     /// Reads or writes the enclosing method's locals by name at runtime
     /// (`binding`, `eval`): a local can't be renamed under it.
     Binding,
-    /// Reads the enclosing method's frame: its name (`__method__`), its
-    /// callers (`caller`), the last regexp match (`$~`, `$1`).
+    /// Reads the enclosing method's frame: its name (`__method__`), the
+    /// last regexp match (`$~`, `$1`).
     Frame,
+    /// Reads the call stack (`caller`, `caller_locations`, Rust's
+    /// `Location::caller()`): its frames' method names, files and lines,
+    /// its own among them.
+    Stack,
     /// Reads its own source line (`__LINE__`, `line!()`): moving the code
     /// changes the value.
     Line,

@@ -870,6 +870,7 @@ fn hazard_reason(hazard: Hazard, from: &str, to: &str) -> String {
     match hazard {
         Hazard::Super => format!("its super call now reaches the parent's {to}"),
         Hazard::Frame => format!("it reads its own name (`__method__`), which becomes {to}"),
+        Hazard::Stack => format!("it reads the call stack, whose frames name {from}"),
         Hazard::Binding => format!("its scope reads locals by name at runtime, {from} among them"),
         other => format!("it holds {other:?}, bound to {from}"),
     }

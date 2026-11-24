@@ -312,9 +312,8 @@ impl Roles {
             b"instance_eval" | b"class_eval" | b"module_eval" if call.arguments().is_some() => {
                 Role::Hazard(Hazard::Binding)
             }
-            b"__method__" | b"__callee__" | b"caller" | b"caller_locations" if implicit => {
-                Role::Hazard(Hazard::Frame)
-            }
+            b"__method__" | b"__callee__" if implicit => Role::Hazard(Hazard::Frame),
+            b"caller" | b"caller_locations" if implicit => Role::Hazard(Hazard::Stack),
             b"__dir__" | b"require_relative" if implicit => Role::Hazard(Hazard::File),
             _ => Role::Call(receiver),
         };

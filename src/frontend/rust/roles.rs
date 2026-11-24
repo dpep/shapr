@@ -705,7 +705,17 @@ impl Walker<'_> {
                     Some(p) if self.text(&p) == "Self" => Receiver::SelfRef,
                     _ => Receiver::Explicit,
                 };
-                self.open(&n, attrs, Some(name), Role::Call(receiver));
+                // `Location::caller()` reports a line: its own, or under
+                // `#[track_caller]` its caller's.
+                let location = path.is_some_and(|p| {
+                    let p = self.text(&p);
+                    p.rsplit("::").next() == Some("Location")
+                }) && name == "caller";
+                let role = match location {
+                    true => Role::Hazard(Hazard::Stack),
+                    false => Role::Call(receiver),
+                };
+                self.open(&n, attrs, Some(name), role);
                 if let Some(path) = path {
                     self.emit(path, Mode::Path, &[]);
                 }

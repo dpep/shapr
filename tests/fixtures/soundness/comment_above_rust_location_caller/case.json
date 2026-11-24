@@ -1,0 +1,17 @@
+{
+  "description": "a comment line added above a function reading Location::caller().line(): the line it reports moves, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "a reformat that adds a line above a method reading caller_locations(0).first.lineno: the line it reports moves, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

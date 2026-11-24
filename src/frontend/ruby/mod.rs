@@ -668,7 +668,7 @@ mod tests {
         );
         assert_eq!(
             jumps("__method__\ncaller\ncaller_locations\n$~\n$1\n$&\n"),
-            [Frame, Frame, Frame, Frame, Frame, Frame]
+            [Frame, Stack, Stack, Frame, Frame, Frame]
         );
         assert_eq!(
             jumps("__LINE__\n__FILE__\n__dir__\nrequire_relative 'a'\n"),
