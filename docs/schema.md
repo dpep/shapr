@@ -939,8 +939,10 @@ file. The table above says which settings configure each norm.
 
 Where RuboCop wouldn't check a norm's cop, its config says nothing: a file
 under `AllCops` or the cop's `Exclude`, or outside the cop's `Include`
-(patterns matched as RuboCop does, `File.fnmatch?` with `**/` and `{a,b}`,
-from the directory of the `.rubocop*` file that lists them; a pattern shapr
+(patterns matched as RuboCop's `match_path?` does: `File.fnmatch?` with
+`FNM_PATHNAME` and `FNM_EXTGLOB`, so `*` skips a leading `.`, `**/` skips
+hidden directories and `{a,b}` nests, and a hidden file in no hidden
+directory matched with `FNM_DOTMATCH` as well; the directory of the `.rubocop*` file that lists them; a pattern shapr
 can't read, such as a regexp, counts against the file), and a line under
 `# rubocop:disable` or `# rubocop:todo` for the cop, its department or `all`
 (to the matching `# rubocop:enable`, or that line alone after code). There
