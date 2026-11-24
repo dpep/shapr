@@ -7,7 +7,9 @@ mod config;
 mod hash_syntax;
 mod indentation;
 mod strings;
+mod whitespace;
 
+use super::editorconfig;
 use super::{
     Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind, Snapshot,
 };
@@ -45,6 +47,10 @@ static NORMS: &[NormDef] = &[
         id: indentation::NORM,
         styles: indentation::STYLES,
     },
+    NormDef {
+        id: whitespace::NORM,
+        styles: whitespace::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -56,6 +62,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     commas::see_arguments,
     hash_syntax::see,
     indentation::see,
+    whitespace::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -118,6 +125,11 @@ static SETTINGS: &[Setting] = &[
             ("indented_internal_methods", "indented_internal_methods"),
         ],
     },
+    Setting {
+        norm: whitespace::NORM,
+        key: "Enabled",
+        values: &[("true", "no_trailing_whitespace")],
+    },
 ];
 
 /// Every comma style wants one where commas are observed: each item on its
@@ -151,8 +163,10 @@ impl Language for Ruby {
             observations: Vec::new(),
             scopes: Vec::new(),
             embedded: Vec::new(),
+            literals: Vec::new(),
         };
         walker.visit(&result.node());
+        whitespace::lines(&mut walker);
         Analysis {
             observations: walker.observations,
             scopes: walker.scopes,
@@ -161,11 +175,13 @@ impl Language for Ruby {
         }
     }
 
+    /// `.editorconfig`, then `.rubocop.yml`: where both set a norm, the
+    /// Ruby-specific file wins.
     fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> BTreeMap<&'static str, String> {
+        let mut styles = from_editorconfig(&editorconfig::properties(path, snapshot));
         let Some(config) = config::find(path, snapshot).map(|p| config::load(&p, snapshot)) else {
-            return BTreeMap::new();
+            return styles;
         };
-        let mut styles = BTreeMap::new();
         for setting in SETTINGS {
             let value = config.get(setting.norm, setting.key);
             if let Some((_, style)) = setting.values.iter().find(|(v, _)| Some(*v) == value) {
@@ -176,6 +192,17 @@ impl Language for Ruby {
     }
 }
 
+/// The norms `.editorconfig` properties set.
+fn from_editorconfig(properties: &BTreeMap<String, String>) -> BTreeMap<&'static str, String> {
+    let mut styles = BTreeMap::new();
+    let get = |key: &str| properties.get(key).map(String::as_str);
+    // `false` only stops an editor trimming; it asks for no whitespace.
+    if get("trim_trailing_whitespace") == Some("true") {
+        styles.insert(whitespace::NORM, "no_trailing_whitespace".to_string());
+    }
+    styles
+}
+
 pub struct Walker<'a> {
     pub source: &'a [u8],
     pub index: &'a LineIndex,
@@ -183,6 +210,8 @@ pub struct Walker<'a> {
     scopes: Vec<Scope>,
     /// Per open branch node: whether it is an interpolation (`#{}`).
     pub embedded: Vec<bool>,
+    /// Byte ranges of string and heredoc contents.
+    pub literals: Vec<std::ops::Range<usize>>,
 }
 
 impl<'pr> Visit<'pr> for Walker<'_> {

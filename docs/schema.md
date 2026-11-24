@@ -556,6 +556,7 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 | `Style/TrailingCommaInArguments` | `comma`, `no_comma` | the same, for a call's arguments in `()` or `[]` (`Set[...]`), each keyword argument an item and a `&block` argument last |
 | `Style/HashSyntax` | `ruby19`, `hash_rockets` | each pair of a hash or keyword arguments whose key is a symbol: `a: 1` or `:a => 1` where the symbol can be a label, a quoted label `"a-b": 1` as `ruby19`. As in RuboCop's `ruby19`, a rocket counts only when every key in its hash can be a label; a hash with an omitted value (`{a:}`) chooses nothing. `ruby19_no_mixed_keys` reads as `ruby19` |
 | `Layout/IndentationConsistency` | `normal`, `indented_internal_methods` | each method defined after a bare `private` or `protected` in a class or module body: at the modifier's column, or deeper. As in RuboCop, the method is measured from its modifier, outdented or not; `public` ends the section |
+| `Layout/TrailingWhitespace` | `no_trailing_whitespace`, `trailing_whitespace` | each non-empty line up to `__END__`, but not a line whose break is inside a string or heredoc, where whitespace is data. `.rubocop.yml` configures it by enabling the cop; `.editorconfig` by `trim_trailing_whitespace = true` |
 
 A style is a scope's norm when its share, as `(n + 1) / (total + styles)`, is
 at least `--norm-threshold` (default 0.8): three of three backs a norm, two of
@@ -563,8 +564,14 @@ two abstains. The scope is the narrowest unchanged code that backs one: the
 enclosing method, then class, then file, then, for a new file, its directory's
 other files. When none does and the hunk's scope moved wholesale from one
 style to another, that move is the norm (`renorming`). With no norm inferred,
-the style `.rubocop.yml` configures (the nearest one, with local
-`inherit_from`) is expected instead.
+the style the project configures is expected instead.
+
+Configured styles come from `.rubocop.yml` (the nearest one, with local
+`inherit_from`) and `.editorconfig` (each one from the file's directory up
+to the first with `root = true`, nearer files and later sections winning,
+section globs matched against the file as editorconfig.org specifies).
+Where both set the same norm, `.rubocop.yml` wins: it is the Ruby-specific
+file. The table above says which settings configure each norm.
 
 Config and a new file's neighbors are read as of the change's after side:
 from the revision a range ends in (`B` of `A..B`; a GitHub change's head),

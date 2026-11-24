@@ -1,0 +1,25 @@
+{
+  "about": ".editorconfig's trim_trailing_whitespace configures the norm",
+  "norm": "Layout/TrailingWhitespace",
+  "expect": {
+    "hunks": [
+      {
+        "norms": [
+          {
+            "configured": "no_trailing_whitespace",
+            "expected": "no_trailing_whitespace",
+            "direction": "diverging",
+            "deviations": [
+              {
+                "line": 2,
+                "column": 5,
+                "style": "trailing_whitespace",
+                "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -2,1 +2,1 @@\n-  go  \n+  go\n"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

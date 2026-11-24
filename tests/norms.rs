@@ -174,3 +174,53 @@ fn norm_cases() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
+
+/// A `.editorconfig` above the repository, as any user's home can hold, is
+/// never read: config stops at the repository's top.
+#[test]
+fn config_above_the_repository_is_not_read() {
+    let outer = tempfile::tempdir().unwrap();
+    std::fs::write(
+        outer.path().join(".editorconfig"),
+        "[*]\ntrim_trailing_whitespace = true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        outer.path().join(".rubocop.yml"),
+        "Style/StringLiterals:\n  EnforcedStyle: double_quotes\n",
+    )
+    .unwrap();
+    let root = outer.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "test@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    for (side, content) in [
+        ("before", "def a\n  go\nend\n"),
+        ("after", "def a\n  go('x')  \nend\n"),
+    ] {
+        std::fs::write(root.join("a.rb"), content).unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", side]);
+    }
+    for args in [
+        vec!["-j", "HEAD~1..HEAD"],
+        vec!["-j", "HEAD~1"],
+        vec!["norms", "-j", "a.rb"],
+    ] {
+        let out = command(env!("CARGO_BIN_EXE_shapr"), &root)
+            .args(&args)
+            .output()
+            .unwrap();
+        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let norms = match args[0] {
+            "norms" => report["norms"].clone(),
+            _ => report["hunks"][0]["style"]["norms"].clone(),
+        };
+        let norms = norms.as_array().unwrap();
+        assert!(!norms.is_empty(), "{args:?}");
+        for norm in norms {
+            assert_eq!(norm["configured"], Value::Null, "{args:?}: {norm}");
+        }
+    }
+}

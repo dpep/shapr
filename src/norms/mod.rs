@@ -6,6 +6,7 @@
 mod align;
 pub mod command;
 mod edit;
+mod editorconfig;
 mod ruby;
 pub mod snapshot;
 
