@@ -1,0 +1,4 @@
+{
+  "description": "a method moved into a new file required after the old one, in a repository that autoloads with Zeitwerk",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}, "$some": {"parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": {"$some": "load_order"}}}}}}, "summary": {"verdict": "behavior"}}
+}

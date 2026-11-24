@@ -1,0 +1,7 @@
+{
+  "description": "a gem's method moved into a new file that its entry file requires after the old one: another package may require the old file alone, so it assumes public_api",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}, "$some": {"parts": {"$some": {"kind": "move", "structure": false, "assumptions": ["public_api"]}}}},
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

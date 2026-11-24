@@ -1,0 +1,4 @@
+{
+  "description": "a class moved to a new file required at the end of the old one, past a constant that reads the class at load time",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}, "$some": {"parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": {"$some": "load_order"}}}}}}, "summary": {"verdict": "behavior"}}
+}

@@ -1,0 +1,7 @@
+{
+  "description": "a class moved to its own new file that nothing requires: a move into a new load order, not logic and not structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic", "parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": ["load_order"]}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

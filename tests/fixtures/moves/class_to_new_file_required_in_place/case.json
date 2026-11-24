@@ -1,0 +1,7 @@
+{
+  "description": "a class moved to its own new file, which the old file requires where the class stood: structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "move", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "description": "a method moved into a new file required after the old one, but a glob loader elsewhere may load the new file first",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}, "$some": {"parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": {"$some": "load_order"}}}}}}, "summary": {"verdict": "behavior"}}
+}

@@ -201,6 +201,10 @@ impl Frontend for Rust {
     fn rebinds_self(&self, _: &Tree, _: NodeId) -> bool {
         false
     }
+
+    fn load(&self, _: &Tree, _: NodeId, _: &str) -> Option<super::Load> {
+        None
+    }
 }
 
 /// Whether a crate's manifest allows no registry: `[package]` says

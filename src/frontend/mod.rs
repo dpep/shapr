@@ -61,6 +61,56 @@ pub trait Frontend: Sync {
     /// Code inside `id` may run with another `self` than the code around it
     /// (a Ruby block, which `instance_eval` can rebind, or a class body).
     fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool;
+
+    /// How statement `id` of the file at `path` loads another file of the
+    /// language, if it does: `None` for code that loads nothing, and in a
+    /// language whose files aren't loaded by statements.
+    fn load(&self, tree: &Tree, id: NodeId, path: &str) -> Option<Load>;
+}
+
+/// A statement loading another file, as [`Frontend::load`] reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Load {
+    /// Runs the file now, the first time any statement asks for it (Ruby's
+    /// `require`, `require_relative`).
+    Now(Target),
+    /// Runs it later, at the first use of a name (Ruby's `autoload`), or
+    /// every time it is asked for (`load`).
+    Other(Target),
+    /// Loads files named at runtime: `require path`, a `Dir` glob, an
+    /// autoloader such as Zeitwerk.
+    Computed,
+}
+
+/// The file a [`Load`] names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// This repository path.
+    Exact(String),
+    /// This path under a load-path directory: one of `roots` (`""` for the
+    /// repository's top), at the top or any depth.
+    Rooted {
+        roots: &'static [&'static str],
+        path: String,
+    },
+}
+
+impl Target {
+    /// Whether the target is the repository file at `file`.
+    pub fn is(&self, file: &str) -> bool {
+        match self {
+            Target::Exact(path) => path == file,
+            Target::Rooted { roots, path } => {
+                let Some(prefix) = file.strip_suffix(path.as_str()) else {
+                    return false;
+                };
+                let Some(dir) = prefix.strip_suffix('/').or(prefix.is_empty().then_some("")) else {
+                    return false;
+                };
+                roots.contains(&dir.rsplit('/').next().unwrap_or(dir))
+            }
+        }
+    }
 }
 
 /// A method's parameters, as [`Frontend::signature`] reads them.

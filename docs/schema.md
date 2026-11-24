@@ -163,7 +163,7 @@ What the search can't settle stays on the part:
 |---|---|
 | `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), or holds the name in a file shapr can't parse for a use (YAML, JavaScript; see below), so code outside the change may still use the name. |
 | `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
-| `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. |
+| `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. Also a definition moved from a gem's `lib/` into a new file that other files load after the old one: another package may load the old file alone ([New files](#new-files)). |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
 
 A part with assumptions is reported with `structure: false` and its lines
@@ -746,7 +746,7 @@ its new place differs. Its `context` names each difference:
 | `module` | Rust, across files: each file is a module, so the paths it resolves and its own path change. |
 | `owner` | A different enclosing class, module or `impl` (a Rust namespace's attributes count: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`). |
 | `visibility` | A method in a different visibility section: it crossed a bare `private`, `protected`, `public` or `module_function`. A constant or class isn't affected by one. |
-| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or, for anything but a method, any statement that runs code at load time (a `require`, a DSL call, a constant whose value calls something: `X = Counter.next`). |
+| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or, for anything but a method, any statement that runs code at load time (a `require`, a DSL call, a constant whose value calls something: `X = Counter.next`). Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
 | `directives` | Across files, different file-level directives (`# frozen_string_literal`). |
 | `position` | The unit reads its own line (`__LINE__`, Rust's `line!()`), or its own file (`__FILE__`, `__dir__`, `require_relative`, Rust's `file!()`) and moved to another file. |
 
@@ -774,7 +774,7 @@ part.
 | key | type | meaning |
 |---|---|---|
 | `context` | string array | Every `context` among the hunk's entries, in the table's order; empty for a part that is structure. |
-| `moves` | array | One entry per pair touching the hunk, below. |
+| `moves` | array | One entry per pair touching the hunk, below; in a hunk that holds a new file's directives or the statement loading it, the pairs moved into that file. |
 
 Each `moves` entry:
 
@@ -790,6 +790,45 @@ Each `moves` entry:
 Confidence is `similarity × (1 − 1/nodes) ÷ candidates`, the weakest pair
 in the hunk: a match is weaker when it isn't exact, when the unit is small
 enough to match by chance, and when several units could be its other half.
+
+### New files
+
+A namespace the alignment leaves out that pairs with nothing as a whole is
+opened, outermost first: its declarations pair on their own. So a class
+moved into a new file inside `module Zoo … end`, or a method moved into a
+new file that reopens its class, pairs with what it left. The opened
+namespace is part of the move when every member moved, and its header must
+say what the old place's does: the same kind (`class` or `module`), and the
+same header, superclass included, or only the name; otherwise context
+`owner`. A header that is more than a name (a superclass), or only the name
+where the old one has more, holds only once the old file has declared the
+namespace, so it is `load_order` unless the new file is shown to run after
+the old one. A file the change adds or deletes whose every statement moved
+moves its directives too.
+
+A Ruby file the change adds runs only when something loads it, so a
+definition moved into one is `load_order` unless the new file is shown to
+run its code where it ran before, nothing in between depending on it (the
+same test as a reorder: a statement naming it at load time, or for a class
+or constant any statement that runs code), in one of two ways:
+
+- The old file `require`s (or `require_relative`s) the new one at its top
+  level: the code now runs there, and every other load of the new file
+  follows that one or a load of the old file.
+- Every load of the new file directly follows a load of the old one in the
+  same statement list, and every load of the old file (there is at least
+  one) is directly followed by one of the new: it runs right after the old
+  file. In a gem's `lib/`, another package may require the old file alone,
+  so the part assumes `public_api`.
+
+Loads are found in the change and, by the files' names as words, in the
+repository at the after revision. A bare `require 'a/b'` names `a/b.rb`
+under a `lib`, `spec` or `test` directory or the repository's top. Either
+way no Ruby file may load files by a name computed at runtime (`require f`,
+a `Dir` glob, `load`, `autoload` with a computed path, any mention of
+Zeitwerk), and an `autoload` or `load` of either file is not a load that
+proves anything. When shown, the statements loading the new file are part
+of the move too.
 
 ## Style
 

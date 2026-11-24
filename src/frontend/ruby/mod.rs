@@ -198,6 +198,10 @@ impl Frontend for Ruby {
     fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool {
         signature::rebinds_self(tree, id)
     }
+
+    fn load(&self, tree: &Tree, id: NodeId, path: &str) -> Option<super::Load> {
+        signature::load(tree, id, path)
+    }
 }
 
 fn is_directive(text: &[u8]) -> bool {

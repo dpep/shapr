@@ -120,12 +120,30 @@ impl File {
                 self.declarations(trees, nb, na);
             }
         }
-        let left = |seen: &[bool], ids: &[NodeId], side: Side| -> Vec<(Side, NodeId)> {
-            let ids = ids.iter().zip(seen).filter(|(_, seen)| !**seen);
-            ids.map(|(&n, _)| (side, n)).collect()
-        };
-        self.unmatched.extend(left(&in_b, &b, Side::Removed));
-        self.unmatched.extend(left(&in_a, &a, Side::Added));
+        // A statement list left out (all of a new file's code) leaves out
+        // each of its statements.
+        let left =
+            |seen: &[bool], ids: &[NodeId], tree: &Tree, side: Side| -> Vec<(Side, NodeId)> {
+                let mut out = Vec::new();
+                let mut stack: Vec<NodeId> = ids
+                    .iter()
+                    .zip(seen)
+                    .filter(|(_, seen)| !**seen)
+                    .map(|(&n, _)| n)
+                    .rev()
+                    .collect();
+                while let Some(n) = stack.pop() {
+                    if transparent(tree, n) {
+                        let children: Vec<NodeId> = tree.code_children(n).collect();
+                        stack.extend(children.into_iter().rev());
+                    } else {
+                        out.push((side, n));
+                    }
+                }
+                out
+            };
+        self.unmatched.extend(left(&in_b, &b, tb, Side::Removed));
+        self.unmatched.extend(left(&in_a, &a, ta, Side::Added));
     }
 }
 
@@ -141,7 +159,7 @@ fn untouched(trees: &Trees, lines: RangeInclusive<usize>) -> bool {
 
 /// How a child lines up with its counterpart on the other side.
 #[derive(PartialEq, Eq)]
-enum Key<'t> {
+pub(super) enum Key<'t> {
     /// A namespace, by its name: its body is aligned in turn.
     Namespace(u64),
     /// Any other declaration, by its name: aligned with a different hash,
@@ -152,7 +170,7 @@ enum Key<'t> {
     Code(u64),
 }
 
-fn key(tree: &Tree, id: NodeId) -> Key<'_> {
+pub(super) fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     let node = tree.node(id);
     if matches!(
         node.role,
