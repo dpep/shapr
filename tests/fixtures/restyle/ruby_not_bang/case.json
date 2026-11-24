@@ -1,0 +1,30 @@
+{
+  "description": "not x and !x are both a call to !",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "logic"
+            }
+          },
+          "$some": {
+            "detail": {
+              "variants": [
+                "Style/MethodCallWithArgsParentheses",
+                "Style/Not",
+                "Style/RedundantParentheses"
+              ]
+            },
+            "kind": "restyle",
+            "review_lines": 0,
+            "structure": true
+          }
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

@@ -63,7 +63,7 @@ Compare the trees after normalizing only what the "Normalize" column says. Every
 
 | Lang | Pair | Normalize | Condition |
 |---|---|---|---|
-| R | `'abc'` ↔ `"abc"` ↔ `%q(abc)` ↔ `%Q(abc)` ↔ `?a` (one char) ↔ a non-interpolating heredoc | `StringNode`: compare `unescaped` bytes plus the forced-encoding and frozen/mutable flags | No interpolation (an `InterpolatedStringNode` stays exact). The encoding flags matter: `"é"` forces UTF-8. |
+| R | `'abc'` ↔ `"abc"` ↔ `%q(abc)` ↔ `%Q(abc)` ↔ `?a` (one char) ↔ a non-interpolating heredoc | `StringNode`: compare `unescaped` bytes plus the forced-encoding and frozen/mutable flags | No interpolation (an `InterpolatedStringNode` stays exact). The encoding flags matter: `"\u00e9"` forces UTF-8, while `'é'` and `"é"` in a UTF-8 source set no flag and are equal (checked). |
 | R | `:abc` ↔ `:"abc"` | `SymbolNode.unescaped` | Not a dynamic symbol. |
 | R | `{:a => 1}` ↔ `{a: 1}`, and `{:"a b" => 1}` ↔ `{"a b": 1}` | `AssocNode` key compared as a symbol value; ignore `=>`/`:` | The key is a `SymbolNode` on both sides (see the look-alikes for `"a": 1`). |
 | R | `{x: x}` ↔ `{x:}` | `ImplicitNode` ↔ the explicit value | The explicit value is the same local read or variable call `x` that prism resolves for the shorthand. |

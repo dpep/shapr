@@ -170,6 +170,7 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
                     ("moves".to_string(), json!(entries)),
                     ("context".to_string(), json!(names)),
                 ]),
+                variants: Vec::new(),
                 context,
             };
             label.claim(part);

@@ -1,0 +1,28 @@
+{
+  "description": "a modifier while and a block while that isn't do-while",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "logic"
+            }
+          },
+          "$some": {
+            "detail": {
+              "variants": [
+                "Style/WhileUntilModifier"
+              ]
+            },
+            "kind": "restyle",
+            "review_lines": 0,
+            "structure": true
+          }
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

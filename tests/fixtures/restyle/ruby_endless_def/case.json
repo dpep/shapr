@@ -1,0 +1,29 @@
+{
+  "description": "an endless def and a def with one statement",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "logic"
+            }
+          },
+          "$some": {
+            "detail": {
+              "variants": [
+                "Style/DefWithParentheses",
+                "Style/EndlessMethod"
+              ]
+            },
+            "kind": "restyle",
+            "review_lines": 0,
+            "structure": true
+          }
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

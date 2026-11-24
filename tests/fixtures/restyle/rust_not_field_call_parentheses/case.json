@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: (s.a)() calls a field, s.a() a method",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

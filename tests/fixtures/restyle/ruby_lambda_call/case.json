@@ -1,0 +1,29 @@
+{
+  "description": "f.() is f.call()",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "logic"
+            }
+          },
+          "$some": {
+            "detail": {
+              "variants": [
+                "Style/LambdaCall",
+                "Style/MethodCallWithArgsParentheses"
+              ]
+            },
+            "kind": "restyle",
+            "review_lines": 0,
+            "structure": true
+          }
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

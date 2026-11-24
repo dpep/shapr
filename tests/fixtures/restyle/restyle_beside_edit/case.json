@@ -1,0 +1,54 @@
+{
+  "description": "a respelled line beside an edited one is a restyle part and a residual",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "restyle",
+            "lines": {
+              "after": [
+                {
+                  "count": 1,
+                  "start": 2
+                }
+              ],
+              "before": [
+                {
+                  "count": 1,
+                  "start": 2
+                }
+              ]
+            },
+            "structure": true
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "after": [
+                {
+                  "count": 1,
+                  "start": 3
+                }
+              ],
+              "before": [
+                {
+                  "count": 1,
+                  "start": 3
+                }
+              ]
+            }
+          }
+        ],
+        "verdict": "mixed"
+      }
+    ],
+    "summary": {
+      "kinds": {
+        "restyle": 1
+      },
+      "verdict": "mixed"
+    }
+  }
+}

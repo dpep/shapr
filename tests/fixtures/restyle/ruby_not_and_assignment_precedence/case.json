@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: ok = a and b assigns a; ok = a && b assigns the conjunction",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

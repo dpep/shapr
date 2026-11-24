@@ -1,0 +1,28 @@
+{
+  "description": "'é' and \"é\" in a UTF-8 source set no encoding flag: the same string",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "logic"
+            }
+          },
+          "$some": {
+            "detail": {
+              "variants": [
+                "Style/StringLiterals"
+              ]
+            },
+            "kind": "restyle",
+            "review_lines": 0,
+            "structure": true
+          }
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

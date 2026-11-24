@@ -192,7 +192,7 @@ pub(super) fn run(
                 after: own(&code.1, &t.after, &changed.after, |d| d.after),
             }
         };
-        let (b, a) = &hunk.alignment.differs;
+        let (b, a) = &hunk.alignment.changed();
         let differs = Claim {
             before: code.0.touched(&changed.before, |at| site::in_any(b, at)),
             after: code.1.touched(&changed.after, |at| site::in_any(a, at)),
@@ -255,6 +255,7 @@ pub(super) fn run(
             reason: reason.into(),
             evidence,
             detail: Map::from_iter([("renames".to_string(), Value::Array(renames))]),
+            variants: Vec::new(),
         });
     }
 }

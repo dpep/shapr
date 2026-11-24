@@ -3,7 +3,7 @@
 
 use super::{Walker, span};
 use crate::frontend::Construct;
-use crate::tree::{Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree};
+use crate::tree::{Canonical, Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
 use tree_sitter::Node;
 
@@ -28,6 +28,11 @@ pub(super) enum Plan {
     /// Wrapped in an `annotation` node: a type.
     Annotate,
 }
+
+/// Spelling variants `restyle` normalizes, by the rustfmt option or lint
+/// that chooses among them.
+const FIELD_INIT_SHORTHAND: &str = "use_field_init_shorthand";
+const UNUSED_PARENS: &str = "unused_parens";
 
 /// Macros from std that expand to no control flow of their own.
 const PLAIN_MACROS: &[&str] = &[
@@ -328,22 +333,24 @@ impl Walker<'_> {
                 self.b.close();
             }
             (Mode::Pattern(_), "field_pattern") => match field("pattern") {
-                Some(_) => {
+                Some(pattern) => {
                     let name = field("name");
                     let label = name.map(|x| self.text(&x));
-                    self.branch(
-                        n,
-                        attrs,
-                        label,
-                        Role::Reference(Member),
-                        mode,
-                        &name.into_iter().collect::<Vec<_>>(),
-                    );
+                    self.open(&n, attrs, label, Role::Reference(Member));
+                    let same = label == Some(self.text(&pattern));
+                    if attrs.is_empty() && pattern.kind() == "identifier" && same {
+                        self.shorthand(b"pattern", label);
+                    }
+                    self.children(n, mode, &name.into_iter().collect::<Vec<_>>());
+                    self.b.close();
                 }
                 // `S { a }` binds `a` and names the field `a`.
                 None => {
                     let name = field("name").map(|x| self.text(&x));
                     self.leaf(&n, name, Role::Opaque);
+                    if name == Some(self.text(&n)) {
+                        self.shorthand(b"pattern", name);
+                    }
                 }
             },
             (Mode::Pattern(_), "scoped_identifier") => {
@@ -421,16 +428,33 @@ impl Walker<'_> {
                     Role::Other
                 };
                 let name = member.map(|m| self.text(&m));
-                self.branch(
-                    n,
-                    attrs,
-                    name,
-                    role,
-                    Mode::Expr,
-                    &member.into_iter().collect::<Vec<_>>(),
-                );
+                self.open(&n, attrs, name, role);
+                let value = field("value").filter(|v| v.kind() == "identifier");
+                if attrs.is_empty() && name.is_some() && value.map(|v| self.text(&v)) == name {
+                    self.shorthand(b"init", name);
+                }
+                self.children(n, Mode::Expr, &member.into_iter().collect::<Vec<_>>());
+                self.b.close();
             }
-            (_, "shorthand_field_initializer") => self.leaf(&n, Some(self.text(&n)), Role::Opaque),
+            (_, "shorthand_field_initializer") => {
+                let name = self.text(&n);
+                self.leaf(&n, Some(name), Role::Opaque);
+                self.shorthand(b"init", Some(name));
+            }
+            (_, "parenthesized_expression") => {
+                self.open(&n, attrs, None, Role::Other);
+                // `(s.f)()` calls a field; `s.f()` a method.
+                let callee = n.parent().is_some_and(|p| {
+                    p.kind() == "call_expression"
+                        && p.child_by_field_name("function")
+                            .is_some_and(|f| f.id() == n.id())
+                });
+                if attrs.is_empty() && !callee && n.named_child_count() == 1 {
+                    self.b.respell(UNUSED_PARENS, Canonical::Transparent);
+                }
+                self.children(n, mode, &[]);
+                self.b.close();
+            }
             (_, "call_expression") => self.call(n, attrs),
             (_, "macro_invocation") => {
                 let mac = field("macro");
@@ -497,6 +521,17 @@ impl Walker<'_> {
         self.open(&n, attrs, name, role);
         self.children(n, mode, skip);
         self.b.close();
+    }
+
+    /// `S { a: a }` and `S { a }`, in an expression (`init`) or a pattern:
+    /// the field and the local read or bound are one name either way.
+    fn shorthand(&mut self, place: &[u8], name: Option<&str>) {
+        let Some(name) = name else { return };
+        let mut value = place.to_vec();
+        value.push(0);
+        value.extend_from_slice(name.as_bytes());
+        self.b
+            .respell(FIELD_INIT_SHORTHAND, Canonical::Value(value));
     }
 
     /// An item declaring its `name` field, which stays in its own text.

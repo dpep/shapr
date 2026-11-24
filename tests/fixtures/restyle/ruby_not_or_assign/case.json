@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: not normalized: a write node vs an or-write",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

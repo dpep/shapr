@@ -74,6 +74,7 @@ pub(super) fn run(change: &Change, _: &Alignments, _: &dyn Outside, labels: &mut
                 reason,
                 evidence: residual.evidence.clone(),
                 detail: Map::new(),
+                variants: Vec::new(),
             };
             label.claim(part);
         }
@@ -97,7 +98,7 @@ pub(super) fn rest(change: &Change, alignments: &Alignments, _: &dyn Outside, la
             if free.is_empty() {
                 continue;
             }
-            let logic = differing(trees, cover, &label.changed, &free);
+            let logic = differing(trees, cover, &cover.changed(), &label.changed, &free);
             let code = |tree: &Tree, lines: &BTreeSet<usize>, comment: bool| -> BTreeSet<usize> {
                 let pick = |l: &&usize| tree.line(**l).code && (comment || !tree.line(**l).comment);
                 lines.iter().filter(pick).copied().collect()
@@ -149,21 +150,29 @@ fn reformat(kind: Kind, lines: Claim) -> Part {
             values: Map::new(),
         },
         detail: Map::new(),
+        variants: Vec::new(),
     }
 }
 
 /// Of the changed lines, those holding code that differs beyond whitespace:
-/// code the alignment couldn't match, a renamed node no part explains, or
+/// `differs` (code the alignment couldn't match, and respelled code unless
+/// the caller is proving the respelling), a renamed node no part explains, or
 /// code it kept that also sits on such a line, or changed on one side only
 /// (a reformat closes on both sides).
-fn differing(trees: &Trees, alignment: &Cover, changed: &Claim, free: &Claim) -> Claim {
+pub(super) fn differing(
+    trees: &Trees,
+    alignment: &Cover,
+    differs: &(Vec<Span>, Vec<Span>),
+    changed: &Claim,
+    free: &Claim,
+) -> Claim {
     let code = (CodeLines::of(&trees.before), CodeLines::of(&trees.after));
     let lines = |(b, a): &(Vec<Span>, Vec<Span>), within: &Claim| Claim {
         before: code.0.touched(&within.before, |at| site::in_any(b, at)),
         after: code.1.touched(&within.after, |at| site::in_any(a, at)),
     };
     let renamed = lines(&alignment.renamed(trees), free);
-    let mut logic = lines(&alignment.differs, changed);
+    let mut logic = lines(differs, changed);
     logic.before.extend(renamed.before);
     logic.after.extend(renamed.after);
     let kept: Vec<Claim> = alignment

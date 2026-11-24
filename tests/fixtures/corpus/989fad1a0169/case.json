@@ -36,8 +36,8 @@
   "expect": {
     "hunks": [
       {
-        "kind": "logic",
-        "verdict": "behavior"
+        "kind": "restyle",
+        "verdict": "structure"
       }
     ]
   }

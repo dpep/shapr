@@ -58,6 +58,7 @@ nothing proven is one `logic` part.
 |---|---|---|
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic unless they are a run of their own (see [Runs](#runs)). |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
+| `restyle` | yes | The same program spelled another way: the code differs only in spellings the language's frontend proves equivalent (quote style, hash syntax, block delimiters, redundant parentheses, ...). See [Restyle](#restyle). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
 | `extract` | yes, unless it has `assumptions` | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
@@ -128,8 +129,9 @@ inlines in particular are linked to later bug fixes and still deserve review.
 Tree equality is exact: node kinds, child order, and every non-whitespace
 byte of each node's source must match, and leaves (string content, heredoc
 bodies, symbols, numbers) match byte for byte, whitespace included. So
-`do…end` versus `{…}`, a change of quote style, a trailing comma in Ruby, or
-any reordering is `logic`.
+`do…end` versus `{…}`, a change of quote style or a trailing comma in Ruby
+is not `format_only`; it is a `restyle` where the trees prove it the same
+program, and any reordering is `logic`.
 
 ## Proof status
 
@@ -171,6 +173,52 @@ runtime (`send("get_" + n)`) in a file outside the change, code in other
 languages (YAML, JavaScript), or other repositories beyond `public_api`. In
 a partial clone (the GitHub cache) the language's blobs at the after
 revision are fetched in one request first.
+
+## Restyle
+
+A `restyle` part holds changed lines whose code differs only in spellings
+of the same program. The frontend reduces each syntax with equivalent
+spellings to a canonical form holding everything it means, and two aligned
+subtrees whose canonical trees are equal, though their text differs, are a
+restyle. Where the parser resolves a spelling to a different tree, the
+trees differ and it stays `logic`: `puts foo(a) do … end` binds the block to
+`puts`, `ok = a and b` assigns `a`. A line that also holds other changed code
+is `logic`. A restyle relies on nothing outside the change, so it has no
+`assumptions`, and no line of it is read (`review_lines` 0).
+
+Ruby (prism), each named by the RuboCop cop that chooses among its
+spellings:
+
+| variant | the same program | not the same |
+|---|---|---|
+| `Style/StringLiterals` | `'a'`, `"a"`, `%q(a)`, `?a`, a plain heredoc: a string with no interpolation, compared by its value and its encoding and frozen flags | `"\u00e9"` vs `"é"` (the escape forces UTF-8); a regexp's or command's text; an interpolated string's quotes |
+| `Style/QuotedSymbols` | `:a`, `:"a"` | `:"a#{b}"` |
+| `Style/HashSyntax` | `{:a => 1}`, `{a: 1}`, `{"a b": 1}` (the key a symbol on both sides); `{x: x}`, `{x:}` where `x` is a local | `{"a": 1}` vs `{"a" => 1}` (a symbol vs a string key); `{x:}` reading a method |
+| `Style/WordArray`, `Style/SymbolArray` | `%w[a b]`, `["a", "b"]`; `%i[a b]`, `[:a, :b]` | |
+| `Style/NumericLiterals` | `1000`, `1_000`, `0x3e8`; `1.0`, `1.00`: by exact value and type | `1` vs `1.0` |
+| `Style/TrailingCommaInArrayLiteral`, `Style/TrailingCommaInHashLiteral`, `Style/TrailingCommaInArguments` | a trailing comma in a literal or a call's arguments | `\|a,\|` vs `\|a\|` in block parameters (destructures) |
+| `Style/RedundantParentheses` | `(expr)` with one statement, and `expr` | `(a; b)`; under `defined?` |
+| `Style/MethodCallWithArgsParentheses`, `Style/ColonMethodCall`, `Style/LambdaCall`, `Style/Not` | `foo(a)`, `foo a`; `a::b`, `a.b`; `f.(x)`, `f.call(x)`; `not x`, `!x`: one call, by its name, receiver, arguments and block | `foo` vs `foo()` (an undefined `foo` raises `NameError` vs `NoMethodError`); `a&.b` vs `a.b`; `foo(a: 1)` vs `foo({a: 1})` |
+| `Style/BlockDelimiters` | `{ … }`, `do … end` attached to the same call | `puts foo(a) { }` vs `puts foo(a) do end` |
+| `Style/AndOr` | `and`, `&&`; `or`, `\|\|` where the parse is the same | `ok = a and b` vs `ok = a && b` |
+| `Style/IfUnlessModifier`, `Style/OneLineConditional`, `Style/WhileUntilModifier` | `x if c`, `if c then x end`, `if c; x; end`, `c ? a : b`; `x while c`, `while c do x end` | `begin x end while c` (do-while); `if !c` vs `unless c`; `c ? true : false` vs `c` |
+| `Style/DefWithParentheses`, `Style/EndlessMethod` | `def f()`, `def f`; `def f = x`, `def f; x; end` | |
+| `Style/Semicolon` | `a; b`, `a` and `b` on two lines | |
+
+Rust (tree-sitter), named by the rustfmt option or lint:
+
+| variant | the same program | not the same |
+|---|---|---|
+| `use_field_init_shorthand` | `S { a: a }`, `S { a }`, in an expression or a pattern | `S { a: b }`; `S { ref a }` |
+| `unused_parens` | `(e)`, `e` | `(s.f)()` (calls a field) vs `s.f()` (a method); `(e,)`, a one-element tuple |
+
+Not normalized, so `logic`: `x = x || y` vs `x ||= y`, `unless`/`else` vs
+swapped branches, `foo(**{a: 1})` vs `foo(a: 1)`, `elsif` vs `else if`,
+lambda delimiters, and Rust `use` trees, derive order and literal suffixes.
+
+`detail.variants` lists the variants of the respelled syntax on either side
+of the part's code, sorted; `evidence.respelled` counts its respelled
+subtrees.
 
 ## Renames
 
@@ -406,6 +454,7 @@ Each part:
 |---|---|---|---|
 | `comparison` | string | always | `"ast"`: both sides parsed cleanly and their trees were compared. `"line"`: a side has a syntax error, so the region's text was compared, whitespace and comments aside. `"none"`: nothing was compared (no frontend for the file, a binary file, or content that couldn't be read). |
 | `code_similarity` | number 0–1 | `comparison` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
+| `respelled` | int | a `restyle` part | Aligned subtrees the part respells. |
 
 ## Extract and inline
 
@@ -670,7 +719,7 @@ Each norm:
 | `expected` | string or null | `inferred`, else `configured`. |
 | `direction` | string | `aligned` (new code follows `expected`), `converging` (it does, and replaces code that didn't, or the scope renormed), `diverging` (some new code doesn't) or `abstain` (nothing expected). |
 | `convergence` | string or null | When `converging`: `normalizing` (toward the surrounding norm) or `renorming` (the scope moved to a new one). |
-| `restyle` | bool | The same strings on both sides, in different styles: a respelling, not new code. The planned `restyle` part kind will prove the same per hunk. |
+| `restyle` | bool | The hunk's [`restyle`](#restyle) part respells this norm's variant (the norm's name is a variant's): a respelling, not new code. Layout and naming norms are never a restyle; their respellings are `format_only` and `rename` parts. |
 | `flagged` | bool | `restyle` and `diverging`: a change that respells code away from its norm. |
 | `deviations` | array | New code not in the `expected` style: `line`, `column`, `style`, `expected`, and `edit`, a unified diff that applies the expected style, `null` when there is no mechanical fix or it would reach outside the hunk's changed region. |
 

@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: the trailing comma in block parameters destructures",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

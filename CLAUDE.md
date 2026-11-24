@@ -2,7 +2,7 @@
 
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
 says which structural changes it holds (`format_only`, `comment_only`,
-`rename`, `move`, `extract`, `inline`), each as a part with the lines it
+`restyle`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
 explains, and the residual `logic` lines no part explains; it gives each hunk
 and the whole change a verdict: structure, behavior, or mixed (structure and
 behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
@@ -72,6 +72,8 @@ src/
     mod.rs          the Frontend trait and the registry (for_path)
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
+    ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
+                    ids from here
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
     rust/mod.rs     tree-sitter → TreeBuilder: own text, folded `;`/braces, attributes into their item,
                     macro token trees as leaves, trailing commas ignored
@@ -88,6 +90,8 @@ src/
     hazard.rs       blocks(op, hazard): which hazards stop which operations, one exhaustive table
     format.rs       the format_only / comment_only passes: a whole hunk first (tree or line
                     method), and last, the reformatted lines the other passes left
+    restyle.rs      the restyle pass: aligned subtrees whose canons agree (Node::canon, from
+                    the frontend's TreeBuilder::respell), their changed lines where nothing else differs
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
     moves.rs        the move pass: declarations the alignment left out, paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
@@ -140,7 +144,11 @@ literals), and `private_by_default` (definitions are private unless marked
 `PUBLIC`: Rust; otherwise visibility comes from `Visibility` roles).
 `TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
-whitespace.
+whitespace. `TreeBuilder::respell(variant, canonical)` gives a node with
+equivalent spellings a canonical form (its value, a stand-in for its own
+text, or transparency to its only child) in a named variant family;
+`Node::canon` hashes trees through those forms, and `restyle` compares it.
+A canonical form must hold everything the node means.
 
 `Node::flags` carries per-node facts that aren't a role: `SCOPE` (the node
 bounds the locals inside it: a method, class, module, impl or other namespace;

@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: a \\u escape forces the string's encoding to UTF-8",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

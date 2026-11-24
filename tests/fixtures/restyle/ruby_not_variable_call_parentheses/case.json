@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: an undefined bare foo raises NameError, foo() NoMethodError",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

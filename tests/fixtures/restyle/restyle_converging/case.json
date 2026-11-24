@@ -1,0 +1,20 @@
+{
+  "description": "a restyle toward the class's quote norm converges and isn't flagged",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "direction": "converging",
+              "flagged": false,
+              "norm": "Style/StringLiterals",
+              "restyle": true
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

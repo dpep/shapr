@@ -5,9 +5,9 @@ use super::Walker;
 use crate::norms::Replace;
 use ruby_prism::Node;
 
-pub const ARRAY: &str = "Style/TrailingCommaInArrayLiteral";
-pub const HASH: &str = "Style/TrailingCommaInHashLiteral";
-pub const ARGUMENTS: &str = "Style/TrailingCommaInArguments";
+pub const ARRAY: &str = crate::frontend::ruby::variants::TRAILING_COMMA_ARRAY;
+pub const HASH: &str = crate::frontend::ruby::variants::TRAILING_COMMA_HASH;
+pub const ARGUMENTS: &str = crate::frontend::ruby::variants::TRAILING_COMMA_ARGUMENTS;
 pub const STYLES: &[&str] = &["comma", "no_comma"];
 
 pub fn see_array(w: &mut Walker, node: &Node) {

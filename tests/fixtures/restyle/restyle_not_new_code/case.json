@@ -1,0 +1,20 @@
+{
+  "description": "a new string in the other quote style is new code, not a restyle",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "direction": "diverging",
+              "flagged": false,
+              "norm": "Style/StringLiterals",
+              "restyle": false
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

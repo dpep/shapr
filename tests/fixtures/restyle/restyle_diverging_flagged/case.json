@@ -1,0 +1,20 @@
+{
+  "description": "a restyle away from the class's quote norm is flagged",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "direction": "diverging",
+              "flagged": true,
+              "norm": "Style/StringLiterals",
+              "restyle": true
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

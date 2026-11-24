@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: String.new is ASCII-8BIT",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

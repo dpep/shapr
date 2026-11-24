@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: b is evaluated twice vs once",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

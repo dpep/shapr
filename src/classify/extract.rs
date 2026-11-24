@@ -447,6 +447,7 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
                     reason: reason.clone(),
                     evidence,
                     detail: detail.clone(),
+                    variants: Vec::new(),
                 };
                 label.claim(part);
             }

@@ -20,6 +20,7 @@
 use super::site::Site;
 use crate::change::{Change, Trees};
 use crate::tree::{NameKind, NodeId, Role, Span, Tree};
+use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 
 /// Per file of the change, its alignment when both sides parsed cleanly.
@@ -308,9 +309,29 @@ pub(super) struct Cover {
     /// Code the sides share, whitespace aside, as (before, after) spans:
     /// equal subtrees, and the own text of aligned nodes whose names agree.
     pub kept: Vec<(Vec<Span>, Vec<Span>)>,
+    /// Aligned subtrees that differ only in spellings of the same program
+    /// ([`Node::canon`](crate::tree::Node::canon)).
+    pub restyled: Vec<Restyled>,
+}
+
+/// An aligned pair of subtrees whose canons agree though their hashes don't.
+pub(super) struct Restyled {
+    pub before: Span,
+    pub after: Span,
+    /// The variants of the respelled nodes on either side, sorted.
+    pub variants: Vec<&'static str>,
 }
 
 impl Cover {
+    /// Code that differs beyond whitespace on each side: what doesn't align,
+    /// and what is respelled.
+    pub fn changed(&self) -> (Vec<Span>, Vec<Span>) {
+        let (mut before, mut after) = self.differs.clone();
+        before.extend(self.restyled.iter().map(|r| r.before.clone()));
+        after.extend(self.restyled.iter().map(|r| r.after.clone()));
+        (before, after)
+    }
+
     /// Where names changed, on each side: the renamed nodes' own text.
     pub fn renamed(&self, trees: &Trees) -> (Vec<Span>, Vec<Span>) {
         let own = |tree: &Tree, ids: &mut dyn Iterator<Item = NodeId>| -> Vec<Span> {
@@ -331,6 +352,10 @@ fn cover(trees: &Trees, site: &Site) -> Cover {
     let before = code(&trees.before, &site.before.cover);
     let after = code(&trees.after, &site.after.cover);
     let mut out = Cover::default();
+    if let Some(restyled) = respelled_region(trees, &before, &after) {
+        out.restyled.push(restyled);
+        return out;
+    }
     if before.len() != after.len() {
         let extents = |tree: &Tree, ids: &[NodeId]| -> Vec<Span> {
             ids.iter().map(|&id| tree.node(id).extent.clone()).collect()
@@ -356,13 +381,24 @@ fn pair(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, out: &mut Cover) {
         out.differs.0.push(bn.extent.clone());
         out.differs.1.push(an.extent.clone());
     };
-    if bn.kind != an.kind || bn.role != an.role {
-        return differs(out);
-    }
     if bn.hash == an.hash {
         out.kept
             .push((vec![bn.extent.clone()], vec![an.extent.clone()]));
         return;
+    }
+    // Before kinds: redundant parentheses on one side only are respelled.
+    if bn.canon == an.canon {
+        let mut variants = BTreeSet::new();
+        respelled(b, bi, a, ai, &mut variants);
+        out.restyled.push(Restyled {
+            before: bn.extent.clone(),
+            after: an.extent.clone(),
+            variants: variants.into_iter().collect(),
+        });
+        return;
+    }
+    if bn.kind != an.kind || bn.role != an.role {
+        return differs(out);
     }
     let (bc, ac): (Vec<NodeId>, Vec<NodeId>) =
         (b.code_children(bi).collect(), a.code_children(ai).collect());
@@ -390,6 +426,75 @@ fn pair(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, out: &mut Cover) {
     }
     for (b2, a2) in bc.into_iter().zip(ac) {
         pair(b, b2, a, a2, out);
+    }
+}
+
+/// The two covers' regions as one respelled pair, when they differ: each
+/// side's cover node (or the parent of several) lifted to the shallower
+/// side's depth, as a comma the region holds on one side only puts the
+/// list in that cover and an item in the other.
+fn respelled_region(trees: &Trees, before: &[NodeId], after: &[NodeId]) -> Option<Restyled> {
+    let (tb, ta) = (&trees.before, &trees.after);
+    let region = |tree: &Tree, ids: &[NodeId]| match ids {
+        [] => None,
+        [one] => Some(*one),
+        [first, ..] => tree.node(*first).parent,
+    };
+    let (mut b, mut a) = (region(tb, before)?, region(ta, after)?);
+    let depth = |tree: &Tree, id: NodeId| tree.ancestors(id).count();
+    while depth(tb, b) > depth(ta, a) {
+        b = tb.node(b).parent?;
+    }
+    while depth(ta, a) > depth(tb, b) {
+        a = ta.node(a).parent?;
+    }
+    let (bn, an) = (tb.node(b), ta.node(a));
+    if bn.hash == an.hash || bn.canon != an.canon {
+        return None;
+    }
+    let mut variants = BTreeSet::new();
+    respelled(tb, b, ta, a, &mut variants);
+    Some(Restyled {
+        before: bn.extent.clone(),
+        after: an.extent.clone(),
+        variants: variants.into_iter().collect(),
+    })
+}
+
+/// The variants of the nodes whose own spelling differs between two subtrees
+/// with equal canons, walked in step through transparent nodes.
+fn respelled(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, out: &mut BTreeSet<&'static str>) {
+    let (bn, an) = (b.node(bi), a.node(ai));
+    if bn.hash == an.hash {
+        return;
+    }
+    let only = |tree: &Tree, id: NodeId| tree.code_children(id).next();
+    let through = |tree: &Tree, id: NodeId| {
+        let respell = tree.node(id).respell.filter(|r| r.transparent)?;
+        Some((respell.variant, only(tree, id)?))
+    };
+    if let Some((variant, child)) = through(b, bi) {
+        out.insert(variant);
+        return respelled(b, child, a, ai, out);
+    }
+    if let Some((variant, child)) = through(a, ai) {
+        out.insert(variant);
+        return respelled(b, bi, a, child, out);
+    }
+    let (bc, ac): (Vec<NodeId>, Vec<NodeId>) =
+        (b.code_children(bi).collect(), a.code_children(ai).collect());
+    if bc.is_empty() || ac.is_empty() || b.own_text(bi, false) != a.own_text(ai, false) {
+        out.extend(
+            [bn.respell, an.respell]
+                .into_iter()
+                .flatten()
+                .map(|r| r.variant),
+        );
+    }
+    if bc.len() == ac.len() {
+        for (b2, a2) in bc.into_iter().zip(ac) {
+            respelled(b, b2, a, a2, out);
+        }
     }
 }
 

@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: + requires a String, interpolation calls to_s",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: keyword arguments vs a positional hash",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

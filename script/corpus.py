@@ -25,7 +25,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 # Kinds whose hunks are structure (docs/schema.md, "Hunk kinds").
-STRUCTURAL = {"format_only", "comment_only", "rename", "move", "extract", "inline"}
+STRUCTURAL = {"format_only", "comment_only", "restyle", "rename", "move", "extract", "inline"}
 GIT_ENV = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
 
 

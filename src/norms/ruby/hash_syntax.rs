@@ -4,7 +4,7 @@ use super::Walker;
 use crate::norms::Replace;
 use ruby_prism::Node;
 
-pub const NORM: &str = "Style/HashSyntax";
+pub const NORM: &str = crate::frontend::ruby::variants::HASH_SYNTAX;
 pub const STYLES: &[&str] = &["ruby19", "hash_rockets"];
 
 /// Each pair of a hash (or keyword arguments) with a symbol key that can be

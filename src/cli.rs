@@ -268,8 +268,16 @@ pub fn run() -> ExitCode {
         report::Meta::new(source),
     );
     let styles = crate::norms::styles(&change, snapshot, cli.norm_threshold);
-    for (hunk, style) in report.hunks.iter_mut().zip(styles) {
-        hunk.style = style;
+    for ((hunk, style), label) in report
+        .hunks
+        .iter_mut()
+        .zip(styles)
+        .zip(labels.iter().flatten())
+    {
+        hunk.style = style.map(|mut style| {
+            style.restyled(&label.restyled());
+            style
+        });
     }
     if !cli.quiet {
         let mut stdout = std::io::stdout().lock();

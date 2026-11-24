@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: an Integer vs a Float",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

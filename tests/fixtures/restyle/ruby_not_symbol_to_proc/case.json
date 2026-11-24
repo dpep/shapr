@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: Symbol#to_proc is a lambda: arity errors differ",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

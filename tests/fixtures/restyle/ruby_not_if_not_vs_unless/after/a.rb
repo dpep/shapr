@@ -1,0 +1,3 @@
+unless c
+  go
+end

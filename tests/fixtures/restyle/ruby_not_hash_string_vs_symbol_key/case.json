@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: {\"a\": 1} has the symbol key :a; {\"a\" => 1} a string key",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

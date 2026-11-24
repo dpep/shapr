@@ -24,6 +24,18 @@ pub struct HunkStyle {
     pub norms: Vec<Entry>,
 }
 
+impl HunkStyle {
+    /// Marks each norm the hunk's `restyle` part proved respelled, its
+    /// variants being norm ids, and flags those that diverge.
+    pub fn restyled(&mut self, variants: &[&str]) {
+        for e in &mut self.norms {
+            e.restyle = variants.contains(&e.norm);
+            e.flagged = e.restyle && e.direction == Direction::Diverging;
+        }
+        self.flagged = self.norms.iter().any(|e| e.flagged);
+    }
+}
+
 /// Ordered so the strongest signal is the largest: a hunk's rollup is the
 /// largest of its norms'.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -353,7 +365,6 @@ impl File<'_> {
         } else {
             Convergence::Normalizing
         });
-        let restyle = respelled(&removed, &added);
         let deviations = match &expected {
             Some(expected) => fresh
                 .iter()
@@ -384,8 +395,9 @@ impl File<'_> {
             expected,
             direction,
             convergence,
-            restyle,
-            flagged: restyle && direction == Direction::Diverging,
+            // Set from the hunk's restyle part: `HunkStyle::restyled`.
+            restyle: false,
+            flagged: false,
             deviations,
         })
     }
@@ -511,19 +523,4 @@ fn fresh<'a>(removed: &[&Observation], added: &[&'a Observation]) -> Vec<&'a Obs
         .into_iter()
         .filter(|o| !take(o, |k, o| k.style == o.style))
         .collect()
-}
-
-fn respelled(removed: &[&Observation], added: &[&Observation]) -> bool {
-    !removed.is_empty()
-        && multiset(removed, false) == multiset(added, false)
-        && multiset(removed, true) != multiset(added, true)
-}
-
-fn multiset<'a>(observations: &[&'a Observation], style: bool) -> Vec<(&'a str, &'a str)> {
-    let mut keys: Vec<(&str, &str)> = observations
-        .iter()
-        .map(|o| (o.key.as_str(), if style { o.style.as_str() } else { "" }))
-        .collect();
-    keys.sort();
-    keys
 }

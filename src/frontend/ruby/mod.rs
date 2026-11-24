@@ -3,6 +3,7 @@
 pub(crate) mod generated;
 mod reserved;
 mod roles;
+pub(crate) mod variants;
 
 use super::{Construct, Frontend};
 use crate::norms::Snapshot;
@@ -58,6 +59,7 @@ impl Frontend for Ruby {
             builder: &mut builder,
             roles: roles::Roles::default(),
             entered: Entered::default(),
+            parents: Vec::new(),
         }
         .visit(&result.node());
         if let Some(data) = result.data_loc() {
@@ -139,6 +141,8 @@ struct Walker<'b> {
     builder: &'b mut TreeBuilder,
     roles: roles::Roles,
     entered: Entered,
+    /// The open prism nodes, as (kind, start), for [`variants::respell`].
+    parents: Vec<(&'static str, usize)>,
 }
 
 /// The node an enter hook just saw, as (kind, start, end), for the
@@ -168,6 +172,13 @@ fn key(node: &Node<'_>) -> (&'static str, usize, usize) {
 }
 
 impl Walker<'_> {
+    fn respell(&mut self, node: &Node<'_>) {
+        let parent = self.parents.last().copied();
+        if let Some((variant, canonical)) = variants::respell(node, parent, self.builder.source()) {
+            self.builder.respell(variant, canonical);
+        }
+    }
+
     fn dispatched(&mut self, node: &Node<'_>) -> bool {
         self.entered.dispatched(node)
     }
@@ -188,9 +199,12 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
         self.builder.flag(roles::flags(&node));
+        self.respell(&node);
+        self.parents.push((kind, node.location().start_offset()));
     }
 
     fn visit_branch_node_leave(&mut self) {
+        self.parents.pop();
         self.builder.close();
     }
 
@@ -202,10 +216,12 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         // live on later lines and must still be compared byte for byte.
         if let Some(body) = heredoc_body(&node) {
             self.builder.open(kind, span(&node.location()), name, role);
+            self.respell(&node);
             self.builder.leaf("heredoc_body", body, None, Role::Other);
             self.builder.close();
         } else {
             self.builder.leaf(kind, span(&node.location()), name, role);
+            self.respell(&node);
         }
     }
 }

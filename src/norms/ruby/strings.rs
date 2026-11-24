@@ -4,7 +4,7 @@
 use super::{Walker, replace};
 use ruby_prism::Node;
 
-pub const NORM: &str = "Style/StringLiterals";
+pub const NORM: &str = crate::frontend::ruby::variants::STRING_LITERALS;
 pub const STYLES: &[&str] = &["single_quotes", "double_quotes"];
 
 /// Strings in an interpolation are another cop's.

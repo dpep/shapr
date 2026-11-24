@@ -1,0 +1,11 @@
+{
+  "description": "%w[] and a bracketed array of the same strings",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "verdict": "structure"
+      }
+    ]
+  }
+}

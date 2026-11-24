@@ -1,0 +1,11 @@
+{
+  "description": "%i[] and a bracketed array of the same symbols",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "verdict": "structure"
+      }
+    ]
+  }
+}

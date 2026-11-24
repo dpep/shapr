@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: a respelling on a line that also holds an edit",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

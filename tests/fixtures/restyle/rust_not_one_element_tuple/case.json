@@ -1,0 +1,10 @@
+{
+  "description": "not the same program, so logic: (a,) is a one-element tuple",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      }
+    }
+  }
+}

@@ -387,8 +387,9 @@ pub struct Node {
 /// spellings ([`TreeBuilder::respell`]). It replaces what [`Node::canon`]
 /// reads of the node, so it must hold everything the node means.
 pub enum Canonical {
-    /// The node's whole meaning; its own text and children aren't read (a
-    /// string literal's value and encoding, however it is quoted).
+    /// The node's whole meaning; its kind, own text and children aren't read
+    /// (a string literal's value and encoding, however it is quoted), so the
+    /// value starts with a tag of what it is.
     Value(Vec<u8>),
     /// Stands for the node's own text; its code children follow in the
     /// order the frontend reported them, not source order (a modifier `if`
@@ -915,13 +916,13 @@ fn canon(tree: &Tree, i: usize, leaf: bool, canonical: Option<&Canonical>) -> (u
             .filter(|c| !c.comment)
     };
     let mut h = DefaultHasher::new();
-    node.kind.hash(&mut h);
     match canonical {
         Some(Canonical::Value(value)) => {
             h.write_u8(b'v');
             value.hash(&mut h);
         }
         Some(Canonical::Syntax(text)) => {
+            node.kind.hash(&mut h);
             h.write_u8(b's');
             text.hash(&mut h);
             for child in code() {

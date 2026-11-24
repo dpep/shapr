@@ -16,6 +16,7 @@ mod format;
 mod hazard;
 mod moves;
 mod rename;
+mod restyle;
 mod runs;
 
 pub use facets::Facet;
@@ -34,6 +35,7 @@ use std::collections::BTreeSet;
 pub enum Kind {
     FormatOnly,
     CommentOnly,
+    Restyle,
     Rename,
     Move,
     Extract,
@@ -42,9 +44,10 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 7] = [
+    pub const ALL: [Kind; 8] = [
         Kind::FormatOnly,
         Kind::CommentOnly,
+        Kind::Restyle,
         Kind::Rename,
         Kind::Move,
         Kind::Extract,
@@ -61,6 +64,7 @@ impl Kind {
         match self {
             Kind::FormatOnly => "format_only",
             Kind::CommentOnly => "comment_only",
+            Kind::Restyle => "restyle",
             Kind::Rename => "rename",
             Kind::Move => "move",
             Kind::Extract => "extract",
@@ -168,6 +172,9 @@ pub struct Part {
     pub evidence: Evidence,
     /// Kind-specific facts about the change itself (e.g. rename pairs).
     pub detail: Map<String, Value>,
+    /// For a `restyle`, the spelling variants it respells, as the frontend
+    /// names them (norms judge the same names); empty for other kinds.
+    pub variants: Vec<&'static str>,
 }
 
 impl Part {
@@ -248,6 +255,15 @@ impl Label {
         }
     }
 
+    /// The variants a proven `restyle` part respells.
+    pub fn restyled(&self) -> Vec<&'static str> {
+        let restyles = self
+            .parts
+            .iter()
+            .filter(|p| p.kind == Kind::Restyle && p.structure());
+        restyles.flat_map(|p| p.variants.iter().copied()).collect()
+    }
+
     /// The one-word rollup: `logic` unless the hunk is all structure, else
     /// its most substantial part kind, in [`Kind::ALL`] order (a rename
     /// beside a reformat is a `rename`).
@@ -292,6 +308,7 @@ const PASSES: &[Pass] = &[
     rename::run,
     moves::run,
     extract::run,
+    restyle::run,
     format::rest,
 ];
 
@@ -383,6 +400,7 @@ mod tests {
                 values: Map::new(),
             },
             detail: Map::new(),
+            variants: Vec::new(),
         }
     }
 
