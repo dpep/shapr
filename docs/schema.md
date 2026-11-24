@@ -457,7 +457,17 @@ a Rails `db/schema.rb` aren't `generated` by name; mark them in
 extensionless DSL files RuboCop includes by default (`Gemfile`, `Rakefile`,
 `Guardfile`, `Podfile`, `Vagrantfile`, `Capfile`, `Brewfile`, `Fastfile` and
 the like; a file found only by its shebang is not) (parsed with prism) and `"rust"` for `.rs` (parsed with
-tree-sitter). Any other file is `null` and its hunks `logic`. The rules above
+tree-sitter). Any other file is `null` and its hunks `logic`.
+
+A parsed file isn't compared, and its hunks are `unknown` with
+`parsed: false` and a reason saying why, when its code nests deeper than
+10,000 levels, or when it is too big to compare: its removed lines times its
+added lines pass 16,000,000 (4,000 lines rewritten in place; the largest a
+corpus commit holds, 2,842 by 937, is under a fifth of it), or the change's
+compared files together pass 64,000,000, in diff order. Comparison grows
+with those pairs: a 4,000-line file shuffled takes seconds.
+
+The rules above
 are stated in Ruby's terms; for Rust:
 
 - Comments: `//`, `/* */` and doc comments (`///`, `//!`, `/** */`) are

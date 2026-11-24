@@ -1384,3 +1384,17 @@ fn a_diff_on_stdin_that_git_called_binary_for_an_attribute_is_code() {
         "{hunk:#}"
     );
 }
+
+#[test]
+fn a_file_too_big_to_compare_is_unknown_and_says_why() {
+    let side = |name: &str| -> String { (0..4001).map(|i| format!("{name}{i} = 1\n")).collect() };
+    let (before, after) = (side("x"), side("y"));
+    let report = classify(&[("lib/a.rb", &before)], &[("lib/a.rb", &after)]);
+    let file = &report["files"][0];
+    assert_eq!(file["parsed"], false, "{file:#}");
+    let hunk = &hunks(&report)[0];
+    assert_eq!(hunk["verdict"], "unknown");
+    let reason = lead(hunk)["reason"].as_str().unwrap();
+    assert!(reason.contains("too big to compare"), "{reason}");
+    assert_eq!(report["summary"]["verdict"], "unknown");
+}

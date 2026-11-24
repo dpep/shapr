@@ -52,6 +52,29 @@ impl FileChange {
 /// The passes recurse once per level.
 pub const MAX_DEPTH: usize = 10_000;
 
+/// Most removed-by-added line pairs one file may hold and be compared: the
+/// passes grow with the pairs (a 4,000-line file shuffled takes seconds; the
+/// largest a corpus commit holds is under a fifth of this).
+pub const MAX_PAIRS: usize = 16_000_000;
+
+/// Most pairs one change compares, over all its files; files past it aren't.
+pub const MAX_CHANGE_PAIRS: usize = 4 * MAX_PAIRS;
+
+/// Why a file holding PAIRS isn't compared after SPENT pairs; `None` when it is.
+fn too_big(pairs: usize, spent: usize) -> Option<String> {
+    if pairs > MAX_PAIRS {
+        Some(format!(
+            "too big to compare: {pairs} removed-by-added line pairs, past {MAX_PAIRS}"
+        ))
+    } else if spent + pairs > MAX_CHANGE_PAIRS {
+        Some(format!(
+            "too big to compare: the change's files hold more than {MAX_CHANGE_PAIRS} removed-by-added line pairs"
+        ))
+    } else {
+        None
+    }
+}
+
 /// Reads and parses every file the diff names. BEFORE and AFTER are the
 /// revisions the change starts from and ends in, when known.
 pub fn assemble(
@@ -82,6 +105,7 @@ pub fn assemble(
         false => git.linguist(&both, after),
     };
     let mut blobs = Blobs::new(git);
+    let mut spent = 0;
     let mut files = diffs
         .into_iter()
         .filter_map(|mut diff| {
@@ -98,7 +122,7 @@ pub fn assemble(
             if diff.hunks.is_empty() {
                 return None;
             }
-            Some(file_change(diff, &mut blobs, &attributes, &was))
+            Some(file_change(diff, &mut blobs, &attributes, &was, &mut spent))
         })
         .collect::<Vec<FileChange>>();
     let mut next = 0;
@@ -114,6 +138,7 @@ fn file_change(
     blobs: &mut Blobs,
     attributes: &HashMap<String, Linguist>,
     was: &HashMap<String, Linguist>,
+    spent: &mut usize,
 ) -> FileChange {
     // git calls a text file binary under an attribute (`-diff`, `binary`);
     // a range is diffed again as text, a diff on stdin can't be.
@@ -156,9 +181,14 @@ fn file_change(
     } else if category == Category::Fixture {
         Err("test data, not classified".to_string())
     } else {
+        let removed: usize = diff.hunks.iter().map(|h| h.removed.len()).sum();
+        let added: usize = diff.hunks.iter().map(|h| h.added.len()).sum();
+        let pairs = removed.saturating_mul(added);
         match frontend::for_path(diff.path()) {
             None => Err(format!("no frontend for {}", diff.path())),
+            Some(_) if let Some(why) = too_big(pairs, *spent) => Err(why),
             Some(frontend) => before.and_then(|before| {
+                *spent += pairs;
                 let after = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())?;
                 let before = frontend.parse(before);
                 let after = frontend.parse(after);
@@ -479,6 +509,18 @@ mod tests {
 
     fn category(path: &str) -> &'static str {
         Category::of(path, false, Linguist::default()).as_str()
+    }
+
+    #[test]
+    fn a_file_or_a_change_past_its_pairs_isnt_compared() {
+        assert_eq!(too_big(MAX_PAIRS, 0), None);
+        assert!(too_big(MAX_PAIRS + 1, 0).unwrap().contains("past"));
+        assert_eq!(too_big(MAX_PAIRS, MAX_CHANGE_PAIRS - MAX_PAIRS), None);
+        assert!(
+            too_big(1, MAX_CHANGE_PAIRS)
+                .unwrap()
+                .contains("the change's")
+        );
     }
 
     #[test]
