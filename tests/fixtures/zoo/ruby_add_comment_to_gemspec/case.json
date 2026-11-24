@@ -1,0 +1,28 @@
+{
+  "description": "add comment to gemspec (comment_only).",
+  "label": {
+    "judge": "author intent",
+    "label": "comment_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "comment_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[comment_only] add comment to gemspec"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "comment_only"
+          }
+        }
+      }
+    }
+  }
+}

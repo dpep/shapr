@@ -1,0 +1,21 @@
+{
+  "description": "edit text after __END__ (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] edit text after __END__"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

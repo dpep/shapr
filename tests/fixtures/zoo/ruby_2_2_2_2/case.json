@@ -1,0 +1,28 @@
+{
+  "description": "-2 ** 2 -> -(2 ** 2) (restyle).",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] -2 ** 2 -> -(2 ** 2)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "description": "Discount#apply: off = ... (extract_variable). Open: shapr has no extract-variable kind, so introducing a local is logic.",
+  "label": {
+    "judge": "author intent",
+    "label": "extract_variable",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "extract_variable"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[extract_variable] Discount#apply: off = ..."
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "extract",
+            "structure": true
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

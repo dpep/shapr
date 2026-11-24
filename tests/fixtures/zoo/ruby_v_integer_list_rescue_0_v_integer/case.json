@@ -1,0 +1,22 @@
+{
+  "description": "v = Integer(list) rescue 0 -> v = (Integer(list) rescue 0) (logic). Open: shapr proves a redundant-parens restyle; the author says logic (v = x rescue 0 already parses as v = (x rescue 0), so the label may be wrong).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] v = Integer(list) rescue 0 -> v = (Integer(list) rescue 0)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  },
+  "open": true
+}

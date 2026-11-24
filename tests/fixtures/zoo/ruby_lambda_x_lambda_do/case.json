@@ -1,0 +1,29 @@
+{
+  "description": "lambda ->(x) { } -> lambda do (restyle). Open: shapr: ->(x) { } to lambda { |x| } is logic; the author calls it restyle.",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] lambda ->(x) { } -> lambda do"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

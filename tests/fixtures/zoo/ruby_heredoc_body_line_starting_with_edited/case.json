@@ -1,0 +1,21 @@
+{
+  "description": "heredoc body line starting with # edited (comment_only?no: logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[comment_only?no: logic] heredoc body line starting with # edited"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

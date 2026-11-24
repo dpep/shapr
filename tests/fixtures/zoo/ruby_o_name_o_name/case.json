@@ -1,0 +1,29 @@
+{
+  "description": "o&.name -> o.name (restyle). Open: shapr: o&.name to o.name is logic; the author calls it restyle (it differs for nil, so the label may be wrong).",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] o&.name -> o.name"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

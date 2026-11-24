@@ -1,0 +1,21 @@
+{
+  "description": "%w element starting with # edited (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] %w element starting with # edited"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "description": "comment in spec (comment_only).",
+  "label": {
+    "judge": "author intent",
+    "label": "comment_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "comment_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[comment_only] comment in spec"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "comment_only"
+          }
+        }
+      }
+    }
+  }
+}

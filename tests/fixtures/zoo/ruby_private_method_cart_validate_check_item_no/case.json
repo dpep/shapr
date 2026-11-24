@@ -1,0 +1,29 @@
+{
+  "description": "private method Cart#validate -> check_item (no callers) (rename).",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[rename] private method Cart#validate -> check_item (no callers)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

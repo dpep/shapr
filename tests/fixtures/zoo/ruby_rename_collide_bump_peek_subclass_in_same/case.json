@@ -1,0 +1,21 @@
+{
+  "description": "rename Collide#bump -> peek; subclass in same file defines peek (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] rename Collide#bump -> peek; subclass in same file defines peek"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

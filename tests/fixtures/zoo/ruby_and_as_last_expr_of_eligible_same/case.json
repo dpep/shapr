@@ -1,0 +1,28 @@
+{
+  "description": "&& -> and as last expr of eligible? (same behaviour) (restyle).",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] && -> and as last expr of eligible? (same behaviour)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  }
+}
