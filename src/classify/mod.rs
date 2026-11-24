@@ -355,17 +355,32 @@ fn passes(change: &Change, outside: &dyn Outside) -> Labels {
 
 /// Refuses the structure of every hunk that moves code reading its own
 /// position (`__LINE__`, `line!()`): one holding the read, and one above it
-/// when the lines added and removed above it don't balance.
+/// when the lines added and removed above it don't balance. A read at the
+/// same line and column on both sides moved nowhere (an edit after it on its
+/// line); reads pair up in order, and when their counts differ every read
+/// counts as moved.
 fn shifted_reads(change: &Change, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
         let Ok(trees) = &file.trees else { continue };
-        let tree = &trees.after;
-        let reads = tree.nodes.iter().filter(|n| {
-            n.role
-                .hazard()
-                .is_some_and(|h| hazard::blocks(hazard::Op::Shift, h))
-        });
-        let reads: Vec<usize> = reads.map(|n| tree.line_of(n.span.start)).collect();
+        let positions = |tree: &crate::tree::Tree| -> Vec<(usize, usize)> {
+            let reads = tree.nodes.iter().filter(|n| {
+                n.role
+                    .hazard()
+                    .is_some_and(|h| hazard::blocks(hazard::Op::Shift, h))
+            });
+            reads
+                .map(|n| {
+                    let line = tree.line_of(n.span.start);
+                    (line, n.span.start - tree.line_start(line))
+                })
+                .collect()
+        };
+        let (before, after) = (positions(&trees.before), positions(&trees.after));
+        let same = before.len() == after.len();
+        let reads: Vec<usize> = (after.iter().enumerate())
+            .filter(|&(i, read)| !same || before[i] != *read)
+            .map(|(_, &(line, _))| line)
+            .collect();
         let hunks = &file.diff.hunks;
         let delta = |h: &Hunk| h.added.len() as isize - h.removed.len() as isize;
         let last = |h: &Hunk| h.after.start + h.after.count.saturating_sub(1);

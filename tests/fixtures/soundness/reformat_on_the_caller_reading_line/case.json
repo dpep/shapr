@@ -1,0 +1,7 @@
+{
+  "description": "a reformat on the line that reads its position, after the read (caller[2,10] becomes caller[2, 10]): no line above it changes, so the line it reports is the same, format_only",
+  "expect": {
+    "hunks": {"$every": {"kind": "format_only", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

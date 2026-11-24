@@ -81,7 +81,9 @@ and `dbg!`) or the call stack's (Ruby's `caller` and `caller_locations`, bare or
 `Kernel`, and `Thread.current.backtrace` or `backtrace_locations`;
 Rust's `Location::caller()`) changes value when it moves. A hunk holding such a read, or one
 above it in the file when the lines added and removed above the read don't
-balance, proves no structure: its lines are `logic`, with `detail.near`
+balance, proves no structure, unless the read keeps its line and column (an
+edit after it on its own line; reads pair up in order, and when a change
+adds or removes one, every read counts as moved): its lines are `logic`, with `detail.near`
 naming the kind it would have been and the confidence of the comparison
 that proved it. A shifted line an exception's backtrace
 reports is not checked, as every line added above any raise would shift it;
