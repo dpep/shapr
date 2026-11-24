@@ -1,0 +1,7 @@
+{
+  "description": "a class renamed with its one use, in a repository that sets up Zeitwerk, which finds a class by its file's name: not structure",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

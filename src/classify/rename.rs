@@ -627,7 +627,7 @@ fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
     if trees.before.semantics.file_scoped {
         return false;
     }
-    let zeitwerk = match outside.uses(file.diff.path(), "Zeitwerk") {
+    let zeitwerk = match outside.literal(file.diff.path(), "Zeitwerk") {
         proof::Search::Done {
             found, mentioned, ..
         } => !found.is_empty() || !mentioned.is_empty(),

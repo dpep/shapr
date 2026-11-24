@@ -1,0 +1,7 @@
+{
+  "description": "a class renamed with its one use, in a repository where another file calls a method by a computed name (send(name)): no autoloader, and a computed method name can't reach a class, so structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "rename", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

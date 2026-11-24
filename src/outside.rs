@@ -26,7 +26,8 @@ pub struct Repository<'a> {
     files: OnceCell<Option<Vec<(String, String)>>>,
     /// Languages whose blobs are fetched (or failed to).
     prefetched: RefCell<HashMap<&'static str, bool>>,
-    searches: RefCell<HashMap<(&'static str, String), Search>>,
+    /// By language, word, and whether computed names count.
+    searches: RefCell<HashMap<(&'static str, String, bool), Search>>,
     /// Per language, the files that name a method computed at runtime.
     computed: RefCell<HashMap<&'static str, Option<Computed>>>,
     /// Files parsed for a proof, each once however many names it's read for.
@@ -79,7 +80,22 @@ impl<'a> Repository<'a> {
             .as_deref()
     }
 
-    fn search(&self, frontend: &dyn Frontend, word: &str) -> Search {
+    /// Files holding `word`, and with `computed`, files whose computed
+    /// names could spell it, cached per language and word.
+    fn cached(&self, path: &str, word: &str, computed: bool) -> Search {
+        let Some(frontend) = frontend::for_path(path) else {
+            return Search::Unavailable;
+        };
+        let key = (frontend.language(), word.to_string(), computed);
+        if let Some(found) = self.searches.borrow().get(&key) {
+            return found.clone();
+        }
+        let found = self.search(frontend, word, computed);
+        self.searches.borrow_mut().insert(key, found.clone());
+        found
+    }
+
+    fn search(&self, frontend: &dyn Frontend, word: &str, with_computed: bool) -> Search {
         let Some(files) = self.files() else {
             return Search::Unavailable;
         };
@@ -125,6 +141,19 @@ impl<'a> Repository<'a> {
             }
         }
         let hits = self.grep(word, globs, &texts);
+        if !with_computed {
+            return match hits {
+                Ok((found, mentioned)) => Search::Done {
+                    searched: candidates.len(),
+                    found,
+                    mentioned,
+                },
+                Err(error) => {
+                    crate::verbose!("can't search for {word}: {error:#}");
+                    Search::Unavailable
+                }
+            };
+        }
         let mut computed = self.computed.borrow_mut();
         let computed = computed
             .entry(frontend.language())
@@ -256,16 +285,11 @@ impl Repository<'_> {
 
 impl Outside for Repository<'_> {
     fn uses(&self, path: &str, word: &str) -> Search {
-        let Some(frontend) = frontend::for_path(path) else {
-            return Search::Unavailable;
-        };
-        let key = (frontend.language(), word.to_string());
-        if let Some(found) = self.searches.borrow().get(&key) {
-            return found.clone();
-        }
-        let found = self.search(frontend, word);
-        self.searches.borrow_mut().insert(key, found.clone());
-        found
+        self.cached(path, word, true)
+    }
+
+    fn literal(&self, path: &str, word: &str) -> Search {
+        self.cached(path, word, false)
     }
 
     fn library(&self, path: &str) -> bool {
@@ -305,35 +329,11 @@ pub struct Union<'a, 'r>(pub &'r [Repository<'a>]);
 
 impl Outside for Union<'_, '_> {
     fn uses(&self, path: &str, word: &str) -> Search {
-        let mut all = self.0.iter().map(|r| r.uses(path, word));
-        let first = all.next().unwrap_or(Search::Unavailable);
-        all.fold(first, |acc, next| match (acc, next) {
-            (
-                Search::Done {
-                    searched,
-                    mut found,
-                    mut mentioned,
-                },
-                Search::Done {
-                    searched: more,
-                    found: also,
-                    mentioned: too,
-                },
-            ) => {
-                found.extend(also);
-                found.sort();
-                found.dedup();
-                mentioned.extend(too);
-                mentioned.sort();
-                mentioned.dedup();
-                Search::Done {
-                    searched: searched.max(more),
-                    found,
-                    mentioned,
-                }
-            }
-            (Search::Done { .. }, open) | (open, _) => open,
-        })
+        union(self.0.iter().map(|r| r.uses(path, word)))
+    }
+
+    fn literal(&self, path: &str, word: &str) -> Search {
+        union(self.0.iter().map(|r| r.literal(path, word)))
     }
 
     fn library(&self, path: &str) -> bool {
@@ -351,6 +351,38 @@ impl Outside for Union<'_, '_> {
         let first = found.next()?;
         found.all(|other| other == first).then_some(first)
     }
+}
+
+/// Several states' searches as one: a use in any of them is a use.
+fn union(mut all: impl Iterator<Item = Search>) -> Search {
+    let first = all.next().unwrap_or(Search::Unavailable);
+    all.fold(first, |acc, next| match (acc, next) {
+        (
+            Search::Done {
+                searched,
+                mut found,
+                mut mentioned,
+            },
+            Search::Done {
+                searched: more,
+                found: also,
+                mentioned: too,
+            },
+        ) => {
+            found.extend(also);
+            found.sort();
+            found.dedup();
+            mentioned.extend(too);
+            mentioned.sort();
+            mentioned.dedup();
+            Search::Done {
+                searched: searched.max(more),
+                found,
+                mentioned,
+            }
+        }
+        (Search::Done { .. }, open) | (open, _) => open,
+    })
 }
 
 /// Whether `path` matches one of `globs`: `*.ext` in any directory, or a

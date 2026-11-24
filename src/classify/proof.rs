@@ -74,6 +74,10 @@ pub trait Outside {
     /// reaching names in the language of the file at `path`.
     fn uses(&self, path: &str, word: &str) -> Search;
 
+    /// [`Outside::uses`] for files holding `word` as written, without the
+    /// files whose computed names could spell it.
+    fn literal(&self, path: &str, word: &str) -> Search;
+
     /// The file at `path` is library code: other packages can depend on its
     /// public definitions.
     fn library(&self, path: &str) -> bool;
@@ -100,6 +104,10 @@ pub struct Nowhere;
 
 impl Outside for Nowhere {
     fn uses(&self, _: &str, _: &str) -> Search {
+        Search::Unavailable
+    }
+
+    fn literal(&self, _: &str, _: &str) -> Search {
         Search::Unavailable
     }
 
@@ -281,6 +289,9 @@ mod tests {
                     found: vec!["a.rb".into(), "b.rb".into()],
                     mentioned: Vec::new(),
                 }
+            }
+            fn literal(&self, path: &str, word: &str) -> Search {
+                self.uses(path, word)
             }
             fn library(&self, _: &str) -> bool {
                 false
