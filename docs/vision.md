@@ -20,7 +20,7 @@ shapr is one evidence tool in a larger system: an automated PR reviewer that lea
 | Decomposer | Suggests how to split a mixed or oversized PR | Exists as a standalone agent persona; not yet wired in |
 | Blind reader | Summarizes a change from code alone, then checks the description against it | Planned |
 | Code context CLI | Who is changing what, and how risky the area is | Planned; name undecided |
-| TUI review mode | Steps through hunks to confirm or relabel; verdicts become fixtures | Planned |
+| TUI review mode | Steps through hunks to confirm or relabel; verdicts become fixtures | Planned, once hand labeling is the bottleneck |
 | Risk model | Predicts risk from diff features and retrospective outcomes | Planned |
 
 ## Architecture
@@ -46,7 +46,7 @@ grokr itself has two parts:
 
 | Specialist | Sees | Returns |
 |---|---|---|
-| Structure-vs-behavior classifier | The diff, shapr's JSON and repo read access; never the PR description | Per hunk: label, confidence, one-sentence reason; plus distinct-operation count and verdict |
+| Structure-vs-behavior classifier | The diff, shapr's JSON and repo read access; never the PR description | Per logic residual: label, confidence, one-sentence reason; plus distinct-operation count and verdict |
 | Decomposer | A mixed or oversized PR | Smaller PRs to ship in parallel or in sequence |
 | Blind reader | Code only | A summary of the change; a separate step compares it with the author's description and flags gaps |
 
@@ -54,22 +54,24 @@ The classifier accepts shapr's structural parts and judges only the logic residu
 
 - It may escalate structure to behavior on its own. Downgrading behavior to structure goes to the maintainer in the TUI.
 - Authority per change type grows once its record of disputes proves right.
-- Every label, from shapr or the classifier, carries a confidence. Low confidence goes to the TUI first, and scores are checked against the maintainer's verdicts for calibration.
+- A shapr part is proven or rests on named assumptions (uses outside the diff, an ambiguous match). Routing goes by that, not by a threshold on shapr's confidence, which only orders parts within a kind ([decisions](decisions.md) #37). The classifier's own confidence is checked against the maintainer's verdicts for calibration.
 
-| shapr | Classifier | Action |
+| shapr part | Classifier | Action |
 |---|---|---|
-| High, agrees | High | Accept |
-| Low | High | Lean on the classifier; downgrades still need sign-off |
-| Any gap between them | | Flag for closer review; the gap feeds the corpus |
+| Proven | | Accept; the classifier doesn't revisit it |
+| Rests on assumptions | Confident | Lean on the classifier; downgrades still need sign-off |
+| Rests on assumptions | Unsure, or disagrees | Flag for closer review; the gap feeds the corpus |
+
+Its ceiling is known: about 11% of sampled logic hunks are candidates to downgrade ([decisions](decisions.md) #31), so it is scored against hand labels before it joins the loop ([roadmap](roadmap.md)).
 
 ## shapr's place
 
 shapr answers *what kind of change is this*. [README.md](../README.md) covers usage, [schema.md](schema.md) the output contract, [refactorings.md](refactorings.md) which refactorings it can prove, and [research.md](research.md) the prior art.
 
-Ideas for shapr beyond what's built:
+shapr reads code and never runs it ([decisions](decisions.md) #38). Ideas beyond what's built, both waiting for evidence:
 
-- **Comments.** Flag comment bloat (comments growing well beyond the code they describe) and spell-check new comment text.
-- **Test evidence.** Run the old test suite against the new code; if a PR had to edit tests, behavior likely changed.
+- **Comments (shapr).** Flag comment bloat (comments growing well beyond the code they describe) and spell-check new comment text.
+- **Test evidence (grokr).** Run the old test suite against the new code; if a PR had to edit tests, behavior likely changed. shapr already says which changed lines are test code.
 
 ## Norms
 
@@ -79,9 +81,9 @@ Consistency wins: new code should match the code around it, unless the PR is del
 - **Otherwise, infer local norms** from the file and its neighbors and flag only code that departs from them.
 - **Deliberate format changes** land as their own format-only PR, which shapr can verify.
 
-v1 (in progress):
+v1 is quote style (`Style/StringLiterals`), in progress. The other norms below are the design it grows into, one at a time, each validated before the next starts ([decisions](decisions.md) #39). Norms output is experimental until then.
 
-| Aspect | v1 |
+| Aspect | Design |
 |---|---|
 | Per hunk | A `style` field: each deviation with norm, expected style, found style, confidence, location and a suggested edit |
 | Per file | `shapr norms <file>`: one record per norm (norm, scope, inferred style, confidence, deviating lines); no diff needed |
@@ -90,7 +92,7 @@ v1 (in progress):
 | Inference | Count each style per scope; a style is a norm at 80% or more (configurable). Below that, stay silent |
 | Scope | The enclosing method first, widening to class or file when needed. A new file compares against neighboring files. Uncertain means abstain |
 | Linter config | Lean on configured norms. A mismatch between configuration and the code's internal consistency is itself signal |
-| Mixed hunks | New code still scores as aligned or divergent, at lower weight |
+| Mixed hunks | New code is still checked against the norm |
 | Skipped | Generated, vendored and documentation files |
 | Modes | Report, with suggested edits as data. Rewrite comes next |
 | Validation | Small Ruby fixtures with known norms; compare inferred styles with `rubocop --auto-gen-config` on two real repos |
@@ -133,7 +135,7 @@ Every tool serves both ends of a PR. Authors (human or agent) run them before op
 
 | Tool | For the author |
 |---|---|
-| shapr | Warns that a change mixes structure and behavior or is too big, and suggests the split |
+| shapr | Reports that a change mixes structure and behavior and how big its behavior change is; the pack's rules decide what that means, and the decomposer suggests the split |
 | Norms | Fixes formatting to match local norms before the PR goes up |
 | Code context | Says how risky the area is and who owns it: whom to ask, how careful to be |
 
@@ -147,7 +149,7 @@ Problems get caught by the author, so review stays on what tools can't judge. An
 
 **Classifier loop.** Per hunk, record shapr's label, the classifier's and the maintainer's. Agreement is a confirmed example. Disagreement becomes a test fixture with the maintainer's label as truth, so every correction is a regression test and the failing set is shapr's to-do list. The classifier surfaces likely tool weaknesses; the maintainer settles disputes.
 
-- **Feedback surface.** First a local TUI, a mode of shapr (likely ratatui), that recreates GitHub-style before/after diffs and steps through hunks with single keys to confirm or relabel. Later, verdicts as PR replies once precision allows.
+- **Feedback surface.** Hand-labeled sample files first (`script/corpus.py sample`); then a local TUI, a mode of shapr (likely ratatui; [decisions](decisions.md) #15), that recreates GitHub-style before/after diffs and steps through hunks with single keys to confirm or relabel. Later, verdicts as PR replies once precision allows.
 - **Fixtures.** Verdicts write straight into a fixtures folder as a growing corpus: one JSON file per hunk (before code, after code, shapr label and confidence, classifier label and confidence, the maintainer's verdict), named by content hash to dedupe. A coding agent works through failing fixtures to improve shapr. A learnings log sits alongside the corpus.
 
 ## First push vs merge
@@ -193,7 +195,7 @@ Part of the feedback loop: learn from every PR as it goes.
 - **Labels:** retrospective outcomes (reverts, follow-up fixes) plus the maintainer's verdicts.
 - **Model, staged:** a simple, explainable model first; the baseline and the bar a feature must clear are in [decisions](decisions.md) #20. Consider learned embeddings only once the corpus is large.
 - **Use:** predicted risk sets review depth, alongside the reputation scores.
-- **Size gate:** bigger means riskier and less understood. A PR over a few files or a few hundred lines goes to the decomposer. Measure behavior-change size, not raw lines: exclude generated files and lockfiles, and score refactors by how mechanical they are. One rename applied across many files is one operation (high surface area, little change); several distinct renames or refactors count separately, and each could land as its own PR.
+- **Size gate:** bigger means riskier and less understood. A PR over a few files or a few hundred lines goes to the decomposer. Measure behavior-change size, not raw lines: exclude generated files and lockfiles, and score refactors by how mechanical they are. One rename applied across many files is one operation (high surface area, little change); several distinct renames or refactors count separately, and each could land as its own PR. Counting operations across hunks waits until the gate needs it ([decisions](decisions.md) #35).
 
 ## Rollout
 
