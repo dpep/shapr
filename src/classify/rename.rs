@@ -747,9 +747,14 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
                 && (literal_names(tree, id, &bare(name)) || directive_names(tree, id, name));
         };
         match n.role {
-            // A computed name reaches methods (`send(n)`, `define_method`).
+            // A computed name reaches methods (`send(n)`, `define_method`),
+            // or constants (`const_get(n)`, `n.constantize`).
             Role::DynamicName if found.contains('*') => {
-                scope == Scope::Method && spells(found, name)
+                let reaches = match n.flags.contains(Flags::CONSTANT) {
+                    true => Scope::Constant,
+                    false => Scope::Method,
+                };
+                scope == reaches && spells(found, name)
             }
             Role::DynamicName if scope == Scope::Field => bare(found) == bare(name),
             Role::DynamicName => scope != Scope::Local && found == name,

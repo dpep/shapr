@@ -180,8 +180,8 @@ by name, not resolved: a common name used for something else (another
 class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
 without its `?`, `!` or `=`. A file that reaches a method by a name built
-at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`) is read
-too, once per run (every file of the language is parsed for them), and held
+at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`), or a
+class or constant by one (`const_get(n)`, `n.constantize`), is read too, once per run (every file of the language is parsed for them), and held
 to the same rule as in the change: a computed name that could spell the old
 one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. The
 name as a whole word in any other file code may read (config such as YAML
@@ -322,7 +322,11 @@ every name that differs passes these checks:
   name counts when the name's fixed text could spell it:
   `define_method("get_#{x}")` could be `get_old`, and `public_send(name)` or
   `send("get_" + n)` could be anything, so in a change holding one no method
-  is renamed.
+  is renamed. A constant lookup by a computed name (`const_get`,
+  `qualified_const_get`, `const_defined?`, `constantize`,
+  `safe_constantize`) counts the same way for a class, module or constant,
+  matched on the name's last `::` segment (`const_get("Zoo::#{x}")` could be
+  any constant).
 - A local isn't renamed in a scope that reads locals by name at runtime
   (`binding`, `eval`, `local_variables`, a string `instance_eval`; an ERB
   template's `result(binding)`), and a method isn't renamed when it reads its

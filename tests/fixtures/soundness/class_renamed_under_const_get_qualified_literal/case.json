@@ -1,0 +1,15 @@
+{
+  "description": "a class renamed while an unchanged file looks it up by a qualified literal, Object.const_get(\"App::Widget\"): not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

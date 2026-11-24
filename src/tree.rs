@@ -165,7 +165,7 @@ pub enum Hazard {
 /// Facts a frontend marks on a node beside its role. Not in the hash or the
 /// output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Flags(u8);
+pub struct Flags(u16);
 
 impl Flags {
     /// Bounds local variables: a local's scope is the nearest node so
@@ -197,6 +197,9 @@ impl Flags {
     /// `Point = Struct.new(:x)`, `Class.new`, `Module.new`, `Data.define`):
     /// its name is a class's name.
     pub const CLASS_VALUE: Flags = Flags(1 << 7);
+    /// A [`Role::DynamicName`] that reaches a constant, not a method (Ruby's
+    /// `const_get(n)`, `n.constantize`).
+    pub const CONSTANT: Flags = Flags(1 << 8);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0

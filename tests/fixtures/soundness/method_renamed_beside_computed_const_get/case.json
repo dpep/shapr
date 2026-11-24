@@ -1,0 +1,6 @@
+{
+  "description": "a computed constant lookup (const_get(n)) reaches constants, not methods: a method rename beside it is structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "rename", "verdict": "structure"}}
+  }
+}

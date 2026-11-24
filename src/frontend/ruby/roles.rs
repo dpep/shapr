@@ -18,6 +18,10 @@ pub(super) const DISPATCH_WORDS: &[&str] = &[
     "instance_variable_get",
     "instance_variable_set",
     "const_get",
+    "qualified_const_get",
+    "const_defined?",
+    "constantize",
+    "safe_constantize",
     "alias_method",
     "attr",
     "attr_reader",
@@ -43,7 +47,22 @@ const SENDERS: &[&str] = &[
     "instance_method",
     "define_method",
     "respond_to?",
+    "const_get",
+    "qualified_const_get",
+    "const_defined?",
 ];
+
+/// Dynamic calls that reach a constant rather than a method.
+const CONSTANT_WORDS: &[&str] = &[
+    "const_get",
+    "qualified_const_get",
+    "const_defined?",
+    "constantize",
+    "safe_constantize",
+];
+
+/// Constant-reaching calls whose receiver is the name (`name.constantize`).
+const NAMED_BY_RECEIVER: &[&str] = &["constantize", "safe_constantize"];
 
 /// Remembers which literals are arguments to a dynamic call, and the
 /// argument lists of dynamic calls whose name is computed; prism visits a
@@ -54,6 +73,10 @@ pub(super) struct Roles {
     /// Argument lists, by start offset, with the pattern their computed
     /// name matches.
     computed: HashMap<usize, Vec<u8>>,
+    /// Nodes, by start offset, whose computed name reaches a constant.
+    constant: HashSet<usize>,
+    /// Literal arguments, by start offset, that name a constant.
+    constant_literals: HashSet<usize>,
 }
 
 impl Roles {
@@ -140,7 +163,7 @@ impl Roles {
                 let name = node.as_constant_path_node().and_then(|n| owned(n.name()));
                 return (Role::Reference(Constant), name);
             }
-            Node::CallNode { .. } => return (self.call(node), None),
+            Node::CallNode { .. } => return self.call(node),
             Node::ArgumentsNode { .. } => {
                 return match self.computed.remove(&node.location().start_offset()) {
                     Some(pattern) => (Role::DynamicName, Some(pattern)),
@@ -167,6 +190,11 @@ impl Roles {
                         .map(|s| s.unescaped().to_vec())
                         .unwrap_or_default(),
                 };
+                let start = node.location().start_offset();
+                let value = match self.constant_literals.remove(&start) {
+                    true => last_segment(value),
+                    false => value,
+                };
                 return (Role::DynamicName, Some(value));
             }
             Node::ReturnNode { .. } => Role::Hazard(Hazard::Return),
@@ -183,11 +211,22 @@ impl Roles {
         (role, None)
     }
 
-    fn call(&mut self, node: &Node<'_>) -> Role {
+    fn call(&mut self, node: &Node<'_>) -> (Role, Option<Vec<u8>>) {
         let Some(call) = node.as_call_node() else {
-            return Role::Other;
+            return (Role::Other, None);
         };
         let name = call.name().as_slice();
+        let constant = CONSTANT_WORDS.iter().any(|w| w.as_bytes() == name);
+        // `name.constantize`: a computed receiver may name any constant.
+        if NAMED_BY_RECEIVER.iter().any(|w| w.as_bytes() == name)
+            && let Some(receiver) = call.receiver()
+            && receiver.as_string_node().is_none()
+            && receiver.as_symbol_node().is_none()
+        {
+            let pattern = interpolated(&receiver).unwrap_or_else(|| b"*".to_vec());
+            self.constant.insert(node.location().start_offset());
+            return (Role::DynamicName, Some(last_segment(pattern)));
+        }
         let receiver = match call.receiver() {
             None => Receiver::Implicit,
             Some(r) if r.as_self_node().is_some() && names_its_message(&call) => Receiver::SelfRef,
@@ -207,6 +246,9 @@ impl Roles {
             for (i, arg) in args.arguments().iter().enumerate() {
                 if arg.as_symbol_node().is_some() || arg.as_string_node().is_some() {
                     self.dynamic_args.insert(arg.location().start_offset());
+                    if constant {
+                        self.constant_literals.insert(arg.location().start_offset());
+                    }
                 } else if let Some(pattern) = interpolated(&arg) {
                     computed.push(pattern);
                 } else if i == 0 && SENDERS.iter().any(|s| s.as_bytes() == name) {
@@ -219,12 +261,19 @@ impl Roles {
                 _ => Some(b"*".to_vec()),
             };
             if let Some(pattern) = pattern {
-                self.computed
-                    .insert(args.location().start_offset(), pattern);
+                let start = args.location().start_offset();
+                let pattern = match constant {
+                    true => {
+                        self.constant.insert(start);
+                        last_segment(pattern)
+                    }
+                    false => pattern,
+                };
+                self.computed.insert(start, pattern);
             }
         }
         if let Some(v) = visibility {
-            return Role::Visibility(v);
+            return (Role::Visibility(v), None);
         }
         let implicit = receiver == Receiver::Implicit;
         let blockless = call.block().is_none();
@@ -233,7 +282,7 @@ impl Roles {
                 .receiver()
                 .and_then(|r| r.as_constant_read_node())
                 .is_some_and(|c| c.name().as_slice() == b"Proc");
-        match name {
+        let role = match name {
             b"block_given?" | b"iterator?" if implicit => Role::Hazard(Hazard::BlockGiven),
             // With no block of its own, a proc takes the method's block.
             b"proc" | b"lambda" if implicit && blockless => Role::Hazard(Hazard::BlockGiven),
@@ -248,14 +297,33 @@ impl Roles {
             }
             b"__dir__" | b"require_relative" if implicit => Role::Hazard(Hazard::File),
             _ => Role::Call(receiver),
+        };
+        (role, None)
+    }
+
+    /// What the core reads off a node beside its role: a method, class or
+    /// module body bounds its locals; `def self.x` (or `self::x`) has a
+    /// receiver; a call's `arguments` list; a dynamic name reaching a
+    /// constant.
+    pub(super) fn flags(&mut self, node: &Node<'_>) -> Flags {
+        let flags = flags(node);
+        match self.constant.remove(&node.location().start_offset()) {
+            true => flags | Flags::CONSTANT,
+            false => flags,
         }
     }
 }
 
-/// What the core reads off a node beside its role: a method, class or
-/// module body bounds its locals; `def self.x` (or `self::x`) has a
-/// receiver; a call's `arguments` list.
-pub(super) fn flags(node: &Node<'_>) -> Flags {
+/// A constant path's last segment, which names the constant whatever
+/// namespace it is looked up in (`Zoo::*` may reach any constant).
+fn last_segment(name: Vec<u8>) -> Vec<u8> {
+    match name.windows(2).rposition(|w| w == b"::") {
+        Some(at) => name[at + 2..].to_vec(),
+        None => name,
+    }
+}
+
+fn flags(node: &Node<'_>) -> Flags {
     match node {
         Node::DefNode { .. } => {
             let singleton = node.as_def_node().is_some_and(|d| d.receiver().is_some());

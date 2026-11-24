@@ -1,0 +1,15 @@
+{
+  "description": "a class renamed while an unchanged file looks a class up with name.safe_constantize: not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "a class renamed while an unchanged file looks it up with Object.const_get('Wid' + 'get'): not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

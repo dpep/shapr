@@ -310,7 +310,8 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
-        self.builder.flag(roles::flags(&node));
+        let flags = self.roles.flags(&node);
+        self.builder.flag(flags);
         self.respell(&node);
         self.parents.push((kind, node.location().start_offset()));
     }
@@ -543,6 +544,30 @@ mod tests {
             .filter_map(|(_, n)| n.as_deref())
             .collect();
         assert_eq!(dynamic, ["*", "*", "get_*_now", "a_*", "go"]);
+    }
+
+    #[test]
+    fn constant_lookups_mark_constant_dynamic_names() {
+        let tree = parse(
+            "Object.const_get(\"App::Widget\")\nconst_get(n)\nconst_defined?(\"#{m}::Wid#{x}\")\n\
+             name.constantize\n\"#{a}Widget\".safe_constantize\n\"Widget\".constantize\nsend(n)\n",
+        );
+        let dynamic: Vec<(&str, bool)> = (tree.nodes.iter())
+            .filter(|n| n.role == Role::DynamicName)
+            .map(|n| {
+                let constant = n.flags.contains(crate::tree::Flags::CONSTANT);
+                (n.name.as_deref().unwrap_or_default(), constant)
+            })
+            .collect();
+        let expected = [
+            ("Widget", false),
+            ("*", true),
+            ("Wid*", true),
+            ("*", true),
+            ("*Widget", true),
+            ("*", false),
+        ];
+        assert_eq!(dynamic, expected);
     }
 
     #[test]
