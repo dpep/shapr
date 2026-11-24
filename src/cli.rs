@@ -24,8 +24,10 @@ EXAMPLES
   inherited stdin stays open. An empty stdin is no input (64), so a failed
   `git diff` upstream is an error, not an empty verdict.
 
-  Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0.
-  To leave them out: git diff main -- '*.rb' '*.rs' | shapr
+  Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0. Only
+  code, test, config and manifest files count toward the verdict: a docs-only change
+  is `none`, and lockfiles, vendored and binary files and unparsed languages are
+  `unknown`, counted in summary.verdicts.
 
 GITHUB
   RANGE may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,

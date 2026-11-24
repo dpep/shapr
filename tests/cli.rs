@@ -256,6 +256,9 @@ fn a_lockfile_is_generated_and_not_counted_in_size() {
     );
     assert_eq!(summary["behavior_lines"], 0);
     assert_eq!(summary["structure_share"], 1.0);
+    // Generated files are outside the verdict.
+    assert_eq!(lock["verdict"], "unknown");
+    assert_eq!(summary["verdict"], "structure");
 }
 
 /// Each file's path and category.
@@ -352,14 +355,95 @@ fn a_syntax_error_falls_back_to_lines_and_proves_no_structure() {
 }
 
 #[test]
-fn other_languages_are_unparsed_logic() {
-    let (report, code) = classify(&[("notes.md", "a\n")], &[("notes.md", "b\n")]);
+fn an_unparsed_language_is_logic_outside_the_verdict() {
+    let (report, code) = classify(&[("run.sh", "echo a\n")], &[("run.sh", "echo b\n")]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
+    assert_eq!(hunk["verdict"], "unknown");
     assert_eq!(lead(hunk)["confidence"], 0.0);
     assert_eq!(hunk["language"], Value::Null);
     assert_eq!(lead(hunk)["evidence"]["method"], "none");
+    assert_eq!(report["summary"]["verdict"], "unknown");
     assert_eq!(code, 0);
+}
+
+#[test]
+fn a_readme_only_change_has_no_verdict() {
+    let (report, code) = classify(&[("README.md", "# A\n")], &[("README.md", "# B\n")]);
+    let hunk = &report["hunks"][0];
+    assert_eq!(hunk["category"], "docs");
+    assert_eq!(hunk["verdict"], "none");
+    assert_eq!(hunk["review_lines"], 0);
+    let summary = &report["summary"];
+    assert_eq!(summary["verdict"], "none");
+    assert_eq!(summary["verdicts"]["none"], 1);
+    assert_eq!(summary["behavior_lines"], 0);
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn a_docs_edit_doesnt_flip_a_structure_verdict() {
+    let reformatted = METHOD.replace("greet(name)", "greet( name )");
+    let (report, _) = classify(
+        &[("a.rb", METHOD), ("README.md", "# A\n")],
+        &[("a.rb", &reformatted), ("README.md", "# B\n")],
+    );
+    assert_eq!(report["summary"]["verdict"], "structure");
+}
+
+#[test]
+fn a_config_change_is_behavior() {
+    let (report, _) = classify(
+        &[("config/app.yml", "port: 1\n")],
+        &[("config/app.yml", "port: 2\n")],
+    );
+    assert_eq!(report["hunks"][0]["category"], "config");
+    assert_eq!(report["hunks"][0]["verdict"], "behavior");
+    assert_eq!(report["summary"]["verdict"], "behavior");
+    assert_eq!(report["summary"]["review_lines"], 2);
+}
+
+#[test]
+fn trailing_whitespace_and_blank_lines_in_an_unparsed_file_are_neutral() {
+    let (report, _) = classify(
+        &[("config/app.yml", "a: 1\nb: 2\n")],
+        &[("config/app.yml", "a: 1  \n\nb: 2\n")],
+    );
+    assert_eq!(report["hunks"][0]["verdict"], "none");
+    assert_eq!(report["summary"]["verdict"], "none");
+    // Indentation is not neutral: YAML, Python and Makefiles read it.
+    let (report, _) = classify(
+        &[("config/app.yml", "a:\n  b: 1\n")],
+        &[("config/app.yml", "a:\nb: 1\n")],
+    );
+    assert_eq!(report["summary"]["verdict"], "behavior");
+}
+
+#[test]
+fn a_lockfile_alone_is_unknown() {
+    let (report, _) = classify(
+        &[("Gemfile.lock", "a (1)\n")],
+        &[("Gemfile.lock", "a (2)\n")],
+    );
+    assert_eq!(report["hunks"][0]["verdict"], "unknown");
+    assert_eq!(report["summary"]["verdict"], "unknown");
+    assert_eq!(report["summary"]["verdicts"]["unknown"], 1);
+}
+
+#[test]
+fn test_review_lines_are_split_out() {
+    let spec = "RSpec.describe Greeter do\n  it { expect(1).to eq(1) }\nend\n";
+    let (report, _) = classify(
+        &[("lib/a.rb", METHOD), ("spec/a_spec.rb", spec)],
+        &[
+            ("lib/a.rb", &METHOD.replace("hi", "yo")),
+            ("spec/a_spec.rb", &spec.replace("eq(1)", "eq(2)")),
+        ],
+    );
+    let summary = &report["summary"];
+    assert_eq!(summary["review_lines"], 4);
+    assert_eq!(summary["test_review_lines"], 2);
+    assert_eq!(summary["verdict"], "behavior");
 }
 
 #[test]
@@ -512,6 +596,7 @@ fn every_output_field_is_documented() {
         &report["summary"]["kinds"],
         &report["summary"]["facets"],
         &report["summary"]["categories"],
+        &report["summary"]["verdicts"],
     ];
     for record in records {
         for key in record.as_object().unwrap().keys() {

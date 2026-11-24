@@ -16,6 +16,9 @@ pub struct Change {
 pub struct FileChange {
     pub diff: FileDiff,
     pub category: Category,
+    /// Per hunk, in `diff.hunks` order: in a file no frontend reads, the
+    /// changed lines differ only in trailing whitespace and blank lines.
+    pub whitespace_only: Vec<bool>,
     /// Line count of the file before the change, when its content was read.
     pub lines_before: Option<usize>,
     /// Why the file couldn't be parsed: no frontend, binary, a blob not found.
@@ -79,6 +82,16 @@ fn file_change(
     let category = Category::of(diff.path(), diff.binary, linguist);
     let before = read(blobs, diff.old_blob.as_deref(), diff.old_path.as_deref());
     let lines_before = before.as_ref().ok().map(|b| line_count(b));
+    let mut whitespace_only = vec![false; diff.hunks.len()];
+    if let (false, None, Ok(before)) = (diff.binary, frontend::for_path(diff.path()), &before)
+        && let Ok(after) = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())
+    {
+        whitespace_only = diff
+            .hunks
+            .iter()
+            .map(|h| only_whitespace(h, before, &after))
+            .collect();
+    }
     let trees = if diff.binary {
         Err("binary file".to_string())
     } else {
@@ -114,6 +127,7 @@ fn file_change(
     FileChange {
         diff,
         category,
+        whitespace_only,
         lines_before,
         trees,
     }
@@ -328,6 +342,23 @@ fn read(blobs: &mut Blobs, id: Option<&str>, path: Option<&str>) -> Result<Vec<u
     blobs
         .read(id, path)
         .ok_or_else(|| format!("blob {id} not found"))
+}
+
+/// The hunk's removed and added lines are the same once trailing whitespace
+/// and blank lines are dropped. Indentation counts: YAML, Python and
+/// Makefiles read it.
+fn only_whitespace(hunk: &Hunk, before: &[u8], after: &[u8]) -> bool {
+    fn kept<'a>(source: &'a [u8], lines: &[usize]) -> Vec<&'a [u8]> {
+        let all: Vec<&[u8]> = source.split(|&b| b == b'\n').collect();
+        lines
+            .iter()
+            .filter_map(|&n| all.get(n - 1))
+            .map(|l| l.trim_ascii_end())
+            .filter(|l| !l.is_empty())
+            .collect()
+    }
+    !(hunk.removed.is_empty() && hunk.added.is_empty())
+        && kept(before, &hunk.removed) == kept(after, &hunk.added)
 }
 
 fn line_count(source: &[u8]) -> usize {

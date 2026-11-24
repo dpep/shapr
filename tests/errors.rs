@@ -107,11 +107,11 @@ fn a_rename_without_hunks_on_stdin_is_a_diff() {
     let out = shapr(dir.path(), &["-j"], &diff);
     assert_eq!(out.status.code(), Some(0));
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(report["summary"]["verdict"], "empty");
+    assert_eq!(report["summary"]["verdict"], "none");
 }
 
 #[test]
-fn an_empty_range_is_an_empty_verdict() {
+fn an_empty_range_has_no_verdict() {
     let dir = repo(&[&[("a.rb", METHOD)]]);
     let out = shapr(dir.path(), &["-J", "main..main"], "");
     let records: Vec<Value> = String::from_utf8_lossy(&out.stdout)
@@ -120,7 +120,7 @@ fn an_empty_range_is_an_empty_verdict() {
         .collect();
     assert_eq!(records.len(), 2, "a meta and a summary record");
     let summary = &records[1];
-    assert_eq!(summary["verdict"], "empty");
+    assert_eq!(summary["verdict"], "none");
     assert_eq!(out.status.code(), Some(0));
 }
 

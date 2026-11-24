@@ -4,7 +4,7 @@
 use crate::change::{Category, Change, FileChange};
 use crate::claims::{Claims, CodeFacts, Finding};
 use crate::classify::{
-    Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method, Verdict,
+    self, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
 use crate::diff::{Hunk, Lines};
 use serde::Serialize;
@@ -14,6 +14,78 @@ use std::io::{self, Write};
 
 /// Bumped on any breaking change to a record's fields.
 pub const SCHEMA: u32 = 1;
+
+/// What a hunk, or the whole change, does to the code that counts toward the
+/// verdict (categories code, test, config and manifest).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    /// Structure only.
+    Structure,
+    /// Behavior only.
+    Behavior,
+    Mixed,
+    /// Nothing that counts changed: docs, or whitespace in a file shapr
+    /// doesn't parse. For the change: no hunks, or only these.
+    None,
+    /// Outside the verdict: a generated, vendored, binary or unknown file,
+    /// or code shapr couldn't compare. For the change: nothing counted, and
+    /// something wasn't judged.
+    Unknown,
+}
+
+impl Verdict {
+    pub const ALL: [Verdict; 5] = [
+        Verdict::Structure,
+        Verdict::Behavior,
+        Verdict::Mixed,
+        Verdict::None,
+        Verdict::Unknown,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Verdict::Structure => "structure",
+            Verdict::Behavior => "behavior",
+            Verdict::Mixed => "mixed",
+            Verdict::None => "none",
+            Verdict::Unknown => "unknown",
+        }
+    }
+
+    /// Counts toward the change's verdict.
+    fn counted(self) -> bool {
+        matches!(
+            self,
+            Verdict::Structure | Verdict::Behavior | Verdict::Mixed
+        )
+    }
+
+    fn of(shape: classify::Verdict) -> Verdict {
+        match shape {
+            classify::Verdict::Structure => Verdict::Structure,
+            classify::Verdict::Behavior => Verdict::Behavior,
+            classify::Verdict::Mixed => Verdict::Mixed,
+            classify::Verdict::Empty => Verdict::None,
+        }
+    }
+}
+
+/// The first rule that matches; see docs/schema.md, "Verdicts".
+fn hunk_verdict(file: &FileChange, whitespace_only: bool, label: &Label) -> Verdict {
+    let compared = label.residual.evidence.method != Method::None || !label.parts.is_empty();
+    match file.category {
+        Category::Binary | Category::Generated | Category::Vendored => Verdict::Unknown,
+        Category::Docs => Verdict::None,
+        _ if !compared && whitespace_only => Verdict::None,
+        Category::Code | Category::Test | Category::Config | Category::Manifest if compared => {
+            Verdict::of(label.verdict())
+        }
+        // Their text differs beyond whitespace, and their text is the setting.
+        Category::Config | Category::Manifest => Verdict::Behavior,
+        Category::Code | Category::Test | Category::Unknown => Verdict::Unknown,
+    }
+}
 
 #[derive(Serialize)]
 pub struct Report<'a> {
@@ -101,9 +173,9 @@ pub struct HunkRecord<'a> {
     #[serde(flatten)]
     lines: LineCounts,
     parts: Vec<PartRecord>,
-    /// How the hunk was compared, for claims.
+    /// Of `review_lines`, those in test code.
     #[serde(skip)]
-    method: Method,
+    test_review_lines: usize,
 }
 
 /// A part of a hunk, or its residual (kind `logic`).
@@ -160,6 +232,7 @@ pub struct Summary {
     pub verdict: Verdict,
     hunks: usize,
     unparsed_hunks: usize,
+    verdicts: BTreeMap<&'static str, usize>,
     categories: BTreeMap<&'static str, usize>,
     kinds: BTreeMap<&'static str, usize>,
     move_contexts: BTreeMap<&'static str, usize>,
@@ -170,6 +243,7 @@ pub struct Summary {
     entropy: f64,
     #[serde(flatten)]
     lines: LineCounts,
+    test_review_lines: usize,
     behavior_lines: usize,
     structure_share: f64,
     claims: Claims,
@@ -180,13 +254,28 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
     let mut hunks = Vec::new();
     for (file, labels) in change.files.iter().zip(labels) {
         let mut totals = LineCounts::default();
-        for (hunk, label) in file.diff.hunks.iter().zip(labels) {
+        for ((hunk, label), &whitespace_only) in file
+            .diff
+            .hunks
+            .iter()
+            .zip(labels)
+            .zip(&file.whitespace_only)
+        {
             let mut lines = count_lines(file, hunk);
             let mut parts = part_records(file, label);
-            if !sized(file.category) {
+            if !reviewed(file.category) {
                 parts.iter_mut().for_each(|p| p.review_lines = 0);
             }
             lines.review_lines = parts.iter().map(|p| p.review_lines).sum();
+            let test_review_lines = if file.category == Category::Test {
+                lines.review_lines
+            } else {
+                parts
+                    .iter()
+                    .filter(|p| p.facets.contains(&Facet::Test))
+                    .map(|p| p.review_lines)
+                    .sum()
+            };
             totals.add(&lines);
             hunks.push(HunkRecord {
                 record: "hunk",
@@ -199,10 +288,10 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 before: hunk.before,
                 after: hunk.after,
                 kind: label.kind(),
-                verdict: label.verdict(),
+                verdict: hunk_verdict(file, whitespace_only, label),
                 lines,
                 parts,
-                method: label.residual.evidence.method,
+                test_review_lines,
             });
         }
         files.push(FileRecord {
@@ -313,15 +402,20 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         Context::ALL.iter().map(|c| (c.as_str(), 0)).collect();
     let mut facets: BTreeMap<&'static str, usize> =
         Facet::ALL.iter().map(|f| (f.as_str(), 0)).collect();
+    let mut verdicts: BTreeMap<&'static str, usize> =
+        Verdict::ALL.iter().map(|v| (v.as_str(), 0)).collect();
     let mut lines = LineCounts::default();
     let (mut structure, mut behavior, mut structure_lines, mut behavior_lines) = (0, 0, 0, 0);
+    let mut test_review_lines = 0;
     for hunk in hunks {
         *categories.entry(hunk.category.as_str()).or_default() += 1;
-        // A generated or vendored hunk sways the verdict but not the size.
+        *verdicts.entry(hunk.verdict.as_str()).or_default() += 1;
         let size = sized(hunk.category);
         if size {
             lines.add(&hunk.lines);
+            test_review_lines += hunk.test_review_lines;
         }
+        let counted = hunk.verdict.counted();
         for part in &hunk.parts {
             *kinds.entry(part.kind.as_str()).or_default() += 1;
             for context in &part.context {
@@ -329,6 +423,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
             for facet in &part.facets {
                 *facets.entry(facet.as_str()).or_default() += 1;
+            }
+            if !counted {
+                continue;
             }
             if part.structure {
                 structure += 1;
@@ -339,7 +436,10 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
         }
     }
-    let verdict = Verdict::of(structure > 0, behavior > 0);
+    let verdict = match Verdict::of(classify::Verdict::of(structure > 0, behavior > 0)) {
+        Verdict::None if hunks.iter().any(|h| h.verdict == Verdict::Unknown) => Verdict::Unknown,
+        verdict => verdict,
+    };
     let paths: Vec<&str> = files.iter().map(|f| f.file).collect();
     let dirs: BTreeSet<&str> = paths
         .iter()
@@ -350,10 +450,10 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         .map(|p| p.split_once('/').map_or(".", |(s, _)| s))
         .collect();
     let total = lines.changed();
-    // Only hunks shapr compared are evidence against a claim.
+    // Only hunks in the verdict are evidence against a claim.
     let compared: Vec<&HunkRecord> = hunks
         .iter()
-        .filter(|h| h.verdict != Verdict::Structure && h.method != Method::None)
+        .filter(|h| matches!(h.verdict, Verdict::Behavior | Verdict::Mixed))
         .collect();
     claims.check(&CodeFacts {
         structure: verdict == Verdict::Structure,
@@ -369,6 +469,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         verdict,
         hunks: hunks.len(),
         unparsed_hunks: hunks.iter().filter(|h| !h.parsed).count(),
+        verdicts,
         categories,
         kinds,
         move_contexts,
@@ -383,6 +484,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
                 .map(|f| f.lines.changed()),
         )),
         lines,
+        test_review_lines,
         behavior_lines,
         structure_share: if total == 0 {
             0.0
@@ -410,6 +512,12 @@ fn entropy(changed: impl Iterator<Item = usize>) -> f64 {
 /// elsewhere.
 fn sized(category: Category) -> bool {
     !matches!(category, Category::Generated | Category::Vendored)
+}
+
+/// Its code is read in review: prose, tool output and third-party code
+/// aren't.
+fn reviewed(category: Category) -> bool {
+    sized(category) && !matches!(category, Category::Docs | Category::Binary)
 }
 
 fn round2(value: f64) -> f64 {
@@ -472,8 +580,8 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
                 } else {
                     format!(" [{}]", facets.join(", "))
                 },
-                if !sized(hunk.category) && i == 0 {
-                    format!(" ({}: not counted in size)", hunk.category.as_str())
+                if !hunk.verdict.counted() && i == 0 {
+                    format!(" ({}: outside the verdict)", hunk.category.as_str())
                 } else {
                     String::new()
                 },
@@ -495,9 +603,15 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         }
         write!(out, ": ")?;
     }
+    let outside: Vec<String> = [Verdict::None, Verdict::Unknown]
+        .iter()
+        .map(|v| (v.as_str(), s.verdicts[v.as_str()]))
+        .filter(|(_, n)| *n > 0)
+        .map(|(v, n)| format!("{n} {v}"))
+        .collect();
     writeln!(
         out,
-        "{}: {} hunk{} ({}); review {} line{}{}; comments +{} -{}; structure share {:.2}",
+        "{}: {} hunk{} ({}){}; review {} line{}{}; comments +{} -{}; structure share {:.2}",
         s.verdict.as_str(),
         s.hunks,
         if s.hunks == 1 { "" } else { "s" },
@@ -506,12 +620,16 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         } else {
             kinds.join(", ")
         },
+        if outside.is_empty() {
+            String::new()
+        } else {
+            format!("; outside the verdict: {}", outside.join(", "))
+        },
         s.lines.review_lines,
         if s.lines.review_lines == 1 { "" } else { "s" },
-        match report.hunks.iter().filter(|h| !sized(h.category)).count() {
+        match s.test_review_lines {
             0 => String::new(),
-            1 => " (1 generated or vendored hunk not counted)".to_string(),
-            n => format!(" ({n} generated or vendored hunks not counted)"),
+            n => format!(", {n} in tests"),
         },
         s.lines.comment_added,
         s.lines.comment_deleted,

@@ -1,7 +1,7 @@
 # Output schema
 
 shapr's JSON is a public contract: field names and the values of closed
-vocabularies (`record`, `kind`, `verdict`, `evidence.method`)
+vocabularies (`record`, `kind`, `verdict`, `category`, `evidence.method`)
 change only with a bump of `schema` in the `meta` record. New fields may be
 added without a bump; consumers must ignore fields they don't know. Fields
 marked *experimental* may change in any release before 1.0.
@@ -68,10 +68,41 @@ new code in the residual can break a part's proof (a rename whose new name
 new code also defines): the part is then not claimed and its lines stay
 `logic`.
 
-A hunk's `verdict` is `structure` when every part is structure, `behavior`
-when none is, and `mixed` otherwise. Its `kind` is a one-word rollup:
-`logic` unless the verdict is `structure`, else its most substantial part
-kind in the table's order (a rename beside a reformat is a `rename`).
+A hunk's `kind` is a one-word rollup of its parts: `logic` unless every
+part is structure, else its most substantial part kind in the table's order
+(a rename beside a reformat is a `rename`). Its `verdict` also weighs the
+file's category: see [Verdicts](#verdicts).
+
+## Verdicts
+
+A verdict answers one question: what does the change do to the code that
+counts? Only files of category `code`, `test`, `config` and `manifest`
+count. `logic` means "no part proven", which is evidence of a behavior
+change only where shapr compared the code; elsewhere the verdict says it
+didn't judge.
+
+A hunk's `verdict` is the first that applies:
+
+| verdict | when |
+|---|---|
+| `unknown` | The file is `binary`, `generated` or `vendored`. |
+| `none` | The file is `docs`. |
+| `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
+| `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.method` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
+| `behavior` | A `config` or `manifest` file shapr has no parser for: its text changed beyond whitespace, and that text is the setting. |
+| `unknown` | Anything else: an `unknown` file, or `code` or `test` whose content couldn't be read (`evidence.method` `"none"`). |
+
+The change's `verdict` rolls up the hunks whose verdict is `structure`,
+`behavior` or `mixed`: `structure` when every part among them is structure,
+`behavior` when none is, `mixed` otherwise. Hunks whose verdict is `none` or
+`unknown` don't sway it. With no such hunks, it is `unknown` when some hunk
+is `unknown`, else `none`. So:
+
+- a README-only change is `none`, and so is an empty diff;
+- a README edit beside a reformat stays `structure`;
+- a config change is `behavior`;
+- a lockfile-only change is `unknown`, and a lockfile beside a reformat is
+  `structure`: check `summary.verdicts.unknown` for what wasn't judged.
 
 "Structure" describes the shape of a change, not its risk: extracts and
 inlines in particular are linked to later bug fixes and still deserve review.
@@ -194,8 +225,10 @@ revisions'.
 Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).
 
-Generated and vendored files don't count toward size: their `review_lines`
-is 0, and the summary's line sums, `behavior_lines`, `entropy` and
+A file's category decides whether its hunks count toward the verdict (see
+[Verdicts](#verdicts)). A `docs` file's `review_lines` is 0: prose isn't
+code to review. Generated and vendored files don't count toward size: their
+`review_lines` is 0, and the summary's line sums, `behavior_lines`, `entropy` and
 `structure_share` leave them out. Their own `added`, `deleted` and other
 line counts stay as the diff has them. Generated-but-reviewed files such as
 a Rails `db/schema.rb` aren't `generated` by name; mark them in
@@ -283,11 +316,11 @@ can check `schema` before reading the rest.
 | `parsed` | bool | Compared as trees. `false` when either side has a syntax error (compared as text instead) or the file wasn't parsed at all. |
 | `before`, `after` | line run | The changed region on each side. |
 | `kind` | string | The one-word rollup: `logic` unless `verdict` is `structure`, else the most substantial part kind. See [Parts](#parts). |
-| `verdict` | string | `structure` (every part is structure), `behavior` (none is) or `mixed`. |
+| `verdict` | string | `structure`, `behavior`, `mixed`, `none` or `unknown`. See [Verdicts](#verdicts). |
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `generated` or `vendored` file. |
+| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `docs`, `generated`, `vendored` or `binary` file. |
 | `parts` | array | The hunk's parts in the [Parts](#parts) table's order, the residual (`logic`) last. Below. |
 
 Each part:
@@ -414,8 +447,8 @@ Each conflict is a count of what the code shows, not a verdict on the author:
 | key | type | meaning |
 |---|---|---|
 | `claim` | string | The claimed category. |
-| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` compared hunks structural (their `verdict` is `behavior` or `mixed`). `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks outside the `test` category whose residual lacks the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and every hunk is structure. |
-| `count` | int | Behavior hunks behind the finding (0 for `no_behavior_hunks`). Hunks in files shapr didn't compare (`evidence.method` `"none"`) aren't counted: their `logic` is unknown, not evidence. |
+| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` hunks structural (their `verdict` is `behavior` or `mixed`). `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks outside the `test` category whose residual lacks the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and the change's verdict is `structure`. |
+| `count` | int | Behavior hunks behind the finding (0 for `no_behavior_hunks`). Hunks outside the verdict (`none`, `unknown`) aren't counted: they aren't evidence. |
 
 "Couldn't prove structural" is not "changes behavior": a `refactor` claim with
 behavior hunks may be a refactoring shapr can't recognize. The conflict says
@@ -508,10 +541,11 @@ enough to match by chance, and when several units could be its other half.
 | field | type | meaning |
 |---|---|---|
 | `record` | `"summary"` | |
-| `verdict` | string | `"structure"`: every part of every hunk is structure. `"behavior"`: no part is. `"mixed"`: both, in one hunk or across hunks. `"empty"`: no hunks. |
+| `verdict` | string | `structure`, `behavior`, `mixed`, `none` or `unknown`, over the hunks that count. See [Verdicts](#verdicts). |
+| `verdicts` | object | Hunk count per hunk `verdict`, every verdict present. `unknown` counts what shapr didn't judge. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
-| `categories` | object | Hunk count per [category](#categories), every category present. Generated and vendored hunks count in `hunks`, `kinds` and `verdict`, and in no size measure below. |
+| `categories` | object | Hunk count per [category](#categories), every category present. Generated and vendored hunks count in `hunks` and `kinds`, and in no size measure below. |
 | `kinds` | object | Part count per kind, every kind present: `logic` counts residuals. A hunk that is one part counts once. |
 | `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
 | `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |
@@ -520,8 +554,9 @@ enough to match by chance, and when several units could be its other half.
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
 | `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated or vendored. 0 for one file. |
 | `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated or vendored. |
-| `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings): the behavior change's size, comments and unchanged moved lines excluded. |
-| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
+| `test_review_lines` | int | Of `review_lines`, those in test code: every one in a `test` file, and a residual's carrying the `test` facet elsewhere. Reviewers weigh test changes apart from code changes. |
+| `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
+| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts of hunks whose verdict is `structure` or `mixed`, over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
 
 ## GitHub input
@@ -599,7 +634,7 @@ the change exits 0, whatever the verdict.
 | 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
 | 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
-An empty diff from a range (`shapr main..main`) is the verdict `empty`.
+An empty diff from a range (`shapr main..main`) is the verdict `none`.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe
 leaves, so it exits 64. A diff whose only change is a rename or mode change
-has file headers and no hunks, and is `empty` too.
+has file headers and no hunks, and is `none` too.
