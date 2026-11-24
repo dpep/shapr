@@ -506,6 +506,17 @@ enum Input {
 fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8)> {
     let usage = |message: String| (message, USAGE);
     let error = |error: anyhow::Error| (format!("{error:#}"), ERROR);
+    // git would read it as an option (`--output=FILE`); no revision starts so.
+    if let Some(rev) = cli
+        .merge_base
+        .iter()
+        .chain(&cli.args)
+        .find(|a| a.starts_with('-'))
+    {
+        return Err(usage(format!(
+            "`{rev}` starts with `-`: a revision never does (paths go after `--`)"
+        )));
+    }
     if let [arg] = cli.args.as_slice()
         && !dashdash
         && cli.merge_base.is_none()

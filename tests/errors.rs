@@ -278,3 +278,21 @@ fn a_repositorys_config_runs_no_program() {
         assert!(!marker.exists(), "{args:?} ran the repository's program");
     }
 }
+
+#[test]
+fn a_revision_that_looks_like_an_option_is_refused() {
+    let dir = repo(&[&[("a.rb", METHOD)], &[("a.rb", "def greet\nend\n")]]);
+    let written = dir.path().join("written");
+    let flag = format!("--merge-base=--output={}", written.display());
+    for args in [&["-J", &flag][..], &["-J", &flag, "HEAD"]] {
+        let message = error(&shapr(dir.path(), args), 64);
+        assert!(message.contains("starts with `-`"), "{message}");
+    }
+    assert!(!dir.path().join("written").exists());
+    assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| {
+        !e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("written")
+    }));
+}

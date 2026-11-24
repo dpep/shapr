@@ -108,7 +108,7 @@ impl Git {
                 "-U3",
             ])
             .args(cached.then_some("--cached"))
-            .args([range, "--"])
+            .args([END_OF_OPTIONS, range, "--"])
             .args(paths))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
@@ -126,7 +126,7 @@ impl Git {
     pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {
         let out = self
             .command()
-            .args(["merge-base", a, b, "--"])
+            .args(["merge-base", END_OF_OPTIONS, a, b])
             .output()
             .context("could not run git")?;
         if !out.status.success() {
@@ -145,7 +145,7 @@ impl Git {
         // `git log` disambiguates as `git diff` does; `rev-parse` doesn't.
         let out = self
             .command()
-            .args(["log", "-n0", "--format="])
+            .args(["log", "-n0", "--format=", END_OF_OPTIONS])
             .args(args)
             .output()
             .context("could not run git")?;
@@ -215,7 +215,8 @@ impl Git {
         };
         let out = run(self
             .command()
-            .args(["log", "--no-color", "--format=%H%x00%B%x1e", &commits, "--"])
+            .args(["log", "--no-color", "--format=%H%x00%B%x1e"])
+            .args([END_OF_OPTIONS, &commits, "--"])
             .args(paths))?;
         Ok(String::from_utf8_lossy(&out)
             .split('\x1e')
@@ -246,9 +247,10 @@ impl Git {
         if let Some(&n) = self.parents.borrow().get(rev) {
             return Ok(n);
         }
-        let out = run(self
-            .command()
-            .args(["rev-list", "--parents", "-n1", rev, "--"]))?;
+        let out =
+            run(self
+                .command()
+                .args(["rev-list", "--parents", "-n1", END_OF_OPTIONS, rev, "--"]))?;
         let n = String::from_utf8_lossy(&out)
             .split_whitespace()
             .count()
@@ -263,7 +265,7 @@ impl Git {
     fn verify_range(&self, range: &str) -> Result<()> {
         let out = self
             .command()
-            .args(["rev-parse", "--quiet", range, "--"])
+            .args(["rev-parse", "--quiet", END_OF_OPTIONS, range, "--"])
             .output()
             .context("could not run git")?;
         self.outside_repository(&String::from_utf8_lossy(&out.stderr))?;
@@ -285,7 +287,7 @@ impl Git {
     /// ARG names revisions in this repository (read-only; false outside one).
     pub fn resolves(&self, arg: &str) -> bool {
         self.command()
-            .args(["rev-parse", "--quiet", arg, "--"])
+            .args(["rev-parse", "--quiet", END_OF_OPTIONS, arg, "--"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -411,7 +413,11 @@ impl Git {
         }
         if let Some((from, to)) = range.split_once("...") {
             let side = |r: &str| if r.is_empty() { "HEAD" } else { r }.to_string();
-            let out = run(self.command().args(["merge-base", &side(from), &side(to)])).ok()?;
+            let out =
+                run(self
+                    .command()
+                    .args(["merge-base", END_OF_OPTIONS, &side(from), &side(to)]))
+                .ok()?;
             return Some(String::from_utf8_lossy(&out).trim().to_string());
         }
         Some(match range.split_once("..") {
@@ -448,14 +454,21 @@ impl Git {
                 }
             }
         }
-        run(self.command().args(["cat-file", "blob", name])).ok()
+        run(self
+            .command()
+            .args(["cat-file", "blob", END_OF_OPTIONS, name]))
+        .ok()
     }
 
     /// The files directly in DIR at REV (`""` for the top), as paths.
     pub fn ls(&self, rev: &str, dir: &str) -> Vec<String> {
         let tree = format!("{rev}:{dir}");
         // Without --full-tree, ls-tree filters by the cwd's path from the top.
-        let Ok(out) = run(self.command().args(["ls-tree", "-z", "--full-tree", &tree])) else {
+        let Ok(out) =
+            run(self
+                .command()
+                .args(["ls-tree", "-z", "--full-tree", END_OF_OPTIONS, &tree]))
+        else {
             return Vec::new();
         };
         String::from_utf8_lossy(&out)
@@ -486,9 +499,14 @@ impl Git {
     /// when `None`; paths from the top.
     pub fn files(&self, rev: Option<&str>) -> Result<Vec<(String, String)>> {
         let out = match rev {
-            Some(rev) => run(self
-                .command()
-                .args(["ls-tree", "-r", "-z", "--full-tree", rev]))?,
+            Some(rev) => run(self.command().args([
+                "ls-tree",
+                "-r",
+                "-z",
+                "--full-tree",
+                END_OF_OPTIONS,
+                rev,
+            ]))?,
             None => run(self
                 .command()
                 .args(["ls-files", "-z", "-s", "--full-name", "--", ":/"]))?,
@@ -551,7 +569,12 @@ impl Git {
     /// The object ids NAMES (`rev:path`) resolve to, from trees alone, so a
     /// partial clone needn't hold the blobs.
     pub fn object_ids(&self, names: &[&str]) -> Result<Vec<String>> {
-        let out = run(self.command().arg("rev-parse").args(names))?;
+        // `--revs-only` keeps rev-parse from echoing `--end-of-options` back.
+        let out = run(self
+            .command()
+            .args(["rev-parse", "--revs-only", END_OF_OPTIONS])
+            .args(names)
+            .arg("--"))?;
         Ok(String::from_utf8_lossy(&out)
             .lines()
             .map(str::to_string)
@@ -686,7 +709,7 @@ impl Git {
                 None
             }
         };
-        cmd.args(rev).arg("--").args(pathspecs);
+        cmd.arg(END_OF_OPTIONS).args(rev).arg("--").args(pathspecs);
         let out = cmd.output().context("could not run git")?;
         // Exit 1 with nothing on stderr: no match.
         if out.status.code() == Some(1) && out.stderr.is_empty() {
@@ -756,7 +779,7 @@ impl Git {
         }
         cmd.arg("check-attr");
         if let Some(source) = source {
-            cmd.args(["--source", source]);
+            cmd.arg(format!("--source={source}"));
         }
         cmd.args(["-z", "--stdin"]).args(LINGUIST);
         let out = match run_with_input(&mut cmd, &input) {
@@ -814,6 +837,10 @@ pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
 pub fn merge(rev: &str) -> String {
     format!("{rev} is a merge: diff it against one parent, {rev}^1..{rev} or {rev}^2..{rev}")
 }
+
+/// Ends git's options before a revision that comes from the command line or
+/// a repository, so `--output=FILE` can't be read as one.
+const END_OF_OPTIONS: &str = "--end-of-options";
 
 /// Arguments as revisions, then paths.
 pub type Split = (Vec<String>, Vec<String>);
@@ -1029,6 +1056,21 @@ mod tests {
         assert_eq!(git.show("HEAD", "nope.rb"), None);
         assert_eq!(git.show("HEAD", "a\nb"), None);
         assert_eq!(git.show("HEAD", "gen.rb").unwrap(), b"y\n");
+    }
+
+    /// A revision is never an option, whatever reaches git.
+    #[test]
+    fn a_revision_cant_be_an_option() {
+        let (dir, git) = repo();
+        let file = dir.path().join("written");
+        let option = format!("--output={}", file.display());
+        assert!(git.diff(&option, false, &[]).is_err());
+        assert!(git.messages(&format!("{option}..HEAD"), &[]).is_err());
+        assert!(git.merge_base(&option, "HEAD").is_err());
+        assert!(git.object_ids(&[&option]).is_err());
+        assert!(!git.resolves(&option));
+        assert!(git.files(Some(&option)).is_err());
+        assert!(!file.exists());
     }
 
     /// Every git shapr runs is built by `command()`. Test code may spawn its own.
