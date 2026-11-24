@@ -1,0 +1,7 @@
+{
+  "description": "a Rails controller's private helper renamed with its call: not an action, so structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "rename", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -168,6 +168,19 @@ impl Frontend for Ruby {
         ]
     }
 
+    /// A Rails application's controllers, mailers, jobs and channels: routes,
+    /// `deliver_later`, `perform_later` and clients reach their public methods
+    /// by name, and a template by the action's name.
+    fn called_by_name(&self, path: &str, exists: &dyn Fn(&str) -> bool) -> bool {
+        const DIRS: &[&str] = &[
+            "app/controllers/",
+            "app/mailers/",
+            "app/jobs/",
+            "app/channels/",
+        ];
+        DIRS.iter().any(|d| path.starts_with(d)) && exists("config/application.rb")
+    }
+
     /// A gem's code: under `lib/` beside a `*.gemspec`.
     fn library(&self, path: &str, files: &dyn Snapshot) -> bool {
         let segments: Vec<&str> = path.split('/').collect();

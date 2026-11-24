@@ -15,6 +15,7 @@ use super::proof::{self, Assumption, Search, Verified};
 use super::site::{self, CodeLines};
 use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
+use crate::frontend;
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -514,6 +515,11 @@ fn holds(
             "{from} names a class or module, which an autoloader finds by its file's name"
         ));
     }
+    if pair.space.scope == Scope::Method && framework_calls(change, facts, outside) {
+        return Err(format!(
+            "{from} is a public method a framework calls by name (a Rails action or job)"
+        ));
+    }
     if facts.exposed {
         return Err(format!("an attribute may read the name {from}"));
     }
@@ -606,6 +612,21 @@ fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
         _ => false,
     };
     zeitwerk || outside.read("config/application.rb").is_some()
+}
+
+/// A renamed definition is a public method a framework calls by name.
+fn framework_calls(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
+    let exists = |path: &str| outside.read(path).is_some();
+    facts.definitions.iter().any(|&(f, id)| {
+        let file = &change.files[f];
+        let path = file.diff.path();
+        let called = frontend::for_path(path).is_some_and(|fe| fe.called_by_name(path, &exists));
+        called
+            && file
+                .trees
+                .as_ref()
+                .is_ok_and(|t| proof::public(&t.before, id))
+    })
 }
 
 /// For a name code outside the change can reach: fails when a file outside

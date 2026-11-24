@@ -1,0 +1,15 @@
+{
+  "description": "a Rails controller's public action renamed (index to list): routes and the implicit template reach it by name, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

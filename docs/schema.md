@@ -336,6 +336,11 @@ every name that differs passes these checks:
   and global variables aren't renamed.
 - Neither name of a method rename is a [reserved name](#reserved-names): the
   language calls those without a call site shapr can see.
+- A public method of a Rails application's controller, mailer, job or
+  channel (a file under `app/controllers/`, `app/mailers/`, `app/jobs/` or
+  `app/channels/` beside `config/application.rb`) isn't renamed: routes,
+  templates, `deliver_later` and `perform_later` reach it by name. A job or
+  mailer class elsewhere is a documented limit.
 - A class or module (in Rust a struct, enum, union, trait or `mod`) renames
   like a constant, held to every rule here: in a library's public surface
   it assumes `public_api`. It isn't renamed in a Ruby repository that loads

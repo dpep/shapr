@@ -143,6 +143,10 @@ impl Frontend for Rust {
         &["*.rs"]
     }
 
+    fn called_by_name(&self, _: &str, _: &dyn Fn(&str) -> bool) -> bool {
+        false
+    }
+
     /// A library crate's source: the nearest `Cargo.toml` above it has a
     /// `[lib]` target or a `src/lib.rs`, isn't `publish = false`, and the file
     /// isn't one of its binaries, tests, examples, benches or build script.

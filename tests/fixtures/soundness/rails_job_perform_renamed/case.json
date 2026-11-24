@@ -1,0 +1,15 @@
+{
+  "description": "a Rails job's perform renamed: perform_later calls it by name, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}
