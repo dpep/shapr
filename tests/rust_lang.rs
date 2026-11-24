@@ -380,3 +380,15 @@ fn a_comma_making_a_one_element_tuple_is_logic() {
         &["logic"],
     );
 }
+
+#[test]
+fn editing_a_type_s_attributes_in_place_is_not_a_move() {
+    let fields = "    pub verbose: bool,\n    pub quiet: bool,\n    pub path: String,\n    pub depth: u32,\n";
+    let report = change(
+        &format!("#[derive(Parser)]\n#[command(about = \"old\")]\npub struct Cli {{\n{fields}}}\n"),
+        &format!(
+            "#[derive(Parser)]\n#[command(about = \"new\")]\npub struct Cli {{\n{fields}    pub color: bool,\n}}\n"
+        ),
+    );
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+}

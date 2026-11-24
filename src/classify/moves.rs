@@ -278,7 +278,7 @@ fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     if matches!(
         node.role,
         Role::Definition(NameKind::Class | NameKind::Module)
-    ) && let Some(name) = namespace_name(tree, id)
+    ) && let Some(name) = namespace_name(tree, id, false)
     {
         return Key::Namespace(name);
     }
@@ -293,12 +293,14 @@ fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     Key::Code(node.hash)
 }
 
-/// What tells one namespace from another: its name child's hash (`A::B`
-/// from `C::B`), together with any code before it (a Rust attribute:
-/// `#[cfg(unix)] mod imp` from `#[cfg(windows)] mod imp`) but not
-/// annotations (visibility). A namespace without a name stands by its first
-/// child (a Rust `impl`'s header).
-fn namespace_name(tree: &Tree, id: NodeId) -> Option<u64> {
+/// A namespace's name, as its name child's hash (`A::B` tells it from
+/// `C::B`); one without a name stands by its first child (a Rust `impl`'s
+/// header). With `context`, any code before the name counts too: a Rust
+/// attribute (`#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`),
+/// though not an annotation (visibility). Alignment pairs namespaces by name,
+/// so one whose attributes were edited still aligns; owners compare with
+/// context.
+fn namespace_name(tree: &Tree, id: NodeId, context: bool) -> Option<u64> {
     let code: Vec<NodeId> = tree
         .node(id)
         .children
@@ -311,7 +313,7 @@ fn namespace_name(tree: &Tree, id: NodeId) -> Option<u64> {
     };
     let ids: Vec<u64> = code
         .iter()
-        .take_while(|&&c| c != name)
+        .take_while(|&&c| context && c != name)
         .filter(|&&c| tree.node(c).role != Role::Annotation)
         .chain([&name])
         .map(|&c| tree.node(c).hash)
@@ -379,7 +381,7 @@ fn owner(tree: &Tree, node: NodeId) -> Option<Vec<u64>> {
     while let Some(id) = at {
         let n = tree.node(id);
         if matches!(n.role, Role::Definition(NameKind::Class | NameKind::Module)) {
-            chain.push(namespace_name(tree, id)?);
+            chain.push(namespace_name(tree, id, true)?);
         } else if !transparent(tree, id) {
             return None;
         }
