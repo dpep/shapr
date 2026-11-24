@@ -1,0 +1,80 @@
+name: Shape
+
+# shapr labels its own changes: advisory, never a gate on the verdict.
+on:
+  pull_request:
+    types: [ opened, synchronize ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+env:
+  # Judge a pull request with its base's build, so a change that breaks
+  # shapr can't grade itself; a push to main with its own.
+  BUILD_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+  RANGE: ${{ github.event_name == 'pull_request' && format('{0}...HEAD', github.event.pull_request.base.sha) || 'HEAD^!' }}
+
+jobs:
+  shape:
+    name: shapr
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: clone ${{ github.repository }}
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # shapr needs the base commit, not a shallow clone
+
+      - name: cached build
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/bin/shapr
+          key: shapr-${{ runner.os }}-${{ env.BUILD_SHA }}
+
+      - name: check out the build to run
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: git worktree add --detach "$RUNNER_TEMP/build" "$BUILD_SHA"
+
+      - name: setup Rust
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: cache cargo
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ runner.temp }}/build
+
+      - name: build shapr
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build --release --manifest-path "$RUNNER_TEMP/build/Cargo.toml"
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp "$RUNNER_TEMP/build/target/release/shapr" "$RUNNER_TEMP/bin/shapr"
+
+      - name: shape of the change
+        run: |
+          shapr="$RUNNER_TEMP/bin/shapr"
+          "$shapr" -J "$RANGE" > shape.ndjson
+          text=$("$shapr" "$RANGE")
+          verdict=$(tail -n1 shape.ndjson | jq -r .verdict)
+          echo "$text"
+          {
+            echo "### shapr: $verdict"
+            echo
+            echo '```'
+            echo "$text"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=shapr::$verdict ($RANGE)"
+
+      - name: keep the JSON
+        uses: actions/upload-artifact@v7
+        with:
+          name: shape
+          path: shape.ndjson
