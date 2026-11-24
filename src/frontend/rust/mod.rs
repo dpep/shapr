@@ -707,6 +707,18 @@ mod tests {
     }
 
     #[test]
+    fn argument_lists_are_marked() {
+        use crate::tree::Flags;
+        let tree = parse("fn a(x: u8) { f(x); self.g(); }");
+        let lists = tree
+            .nodes
+            .iter()
+            .filter(|n| n.flags.contains(Flags::ARGUMENTS))
+            .count();
+        assert_eq!(lists, 2);
+    }
+
+    #[test]
     fn annotations_mark_types_generics_and_visibility() {
         let tree = parse("pub fn a<T>(x: T) -> T where T: Copy { x }");
         let annotations = tree

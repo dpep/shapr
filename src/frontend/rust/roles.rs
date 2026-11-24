@@ -107,6 +107,12 @@ impl Walker<'_> {
         let field = |f: &str| n.child_by_field_name(f);
         match (mode, n.kind()) {
             (_, "expression_statement") => self.children(n, mode, &[]),
+            (_, "arguments") => {
+                self.open(&n, attrs, None, Role::Other);
+                self.b.flag(Flags::ARGUMENTS);
+                self.children(n, mode, &[]);
+                self.b.close();
+            }
 
             // Items.
             (_, "function_item" | "function_signature_item") => {

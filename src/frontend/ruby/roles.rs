@@ -182,7 +182,7 @@ impl Roles {
         let name = call.name().as_slice();
         let receiver = match call.receiver() {
             None => Receiver::Implicit,
-            Some(r) if r.as_self_node().is_some() => Receiver::SelfRef,
+            Some(r) if r.as_self_node().is_some() && names_its_message(&call) => Receiver::SelfRef,
             Some(_) => Receiver::Explicit,
         };
         let visibility = match name {
@@ -245,11 +245,36 @@ impl Roles {
 }
 
 /// What the core reads off a node beside its role: a method, class or
-/// module body bounds its locals.
+/// module body bounds its locals; `def self.x` has a receiver; a call's
+/// `arguments` list.
 pub(super) fn flags(node: &Node<'_>) -> Flags {
     match node {
-        Node::DefNode { .. } | Node::ClassNode { .. } | Node::ModuleNode { .. } => Flags::SCOPE,
+        Node::DefNode { .. } => {
+            // Only `def x.name` has one; `def x::name` is left out.
+            let dotted = node.as_def_node().is_some_and(|d| {
+                d.receiver().is_some() && d.operator_loc().is_some_and(|o| o.as_slice() == b".")
+            });
+            match dotted {
+                true => Flags::SCOPE | Flags::RECEIVER,
+                false => Flags::SCOPE,
+            }
+        }
+        Node::ClassNode { .. } | Node::ModuleNode { .. } => Flags::SCOPE,
+        Node::ArgumentsNode { .. } => Flags::ARGUMENTS,
         _ => Flags::default(),
+    }
+}
+
+/// Whether a call on `self` spells the method it calls the plain way:
+/// `self.name`, `self::name`, an operator (`self + x`) or an index
+/// (`self[x]`). `self&.name`, `-self` (`-@`) and `self.()` don't.
+fn names_its_message(call: &ruby_prism::CallNode<'_>) -> bool {
+    let name = call.name().as_slice();
+    let message = call.message_loc().map(|m| m.as_slice());
+    match call.call_operator_loc().map(|o| o.as_slice()) {
+        Some(b"." | b"::") => message.is_some(),
+        Some(_) => false,
+        None => message == Some(name) || name == b"[]",
     }
 }
 

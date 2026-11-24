@@ -13,7 +13,7 @@
 use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Label, Labels, Part, site};
 use crate::change::{Change, Trees};
-use crate::tree::{MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
+use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -220,7 +220,7 @@ fn find(
     let chunk = splice(calls, a_call, stmt, calls.node(body).kind, chunks, a_chunk)
         .ok_or("caller differs beyond the call")?;
     let b_stmts = code_children(calls, body);
-    let args = arguments(calls, call, &method);
+    let args = arguments(calls, call);
     let flow = Flow::of(chunks, a_chunk, &chunk);
 
     let wired = args
@@ -434,14 +434,10 @@ fn code_children(tree: &Tree, id: NodeId) -> Vec<NodeId> {
 
 /// The receiver a method is defined on (`def self.x`), by its hash.
 fn receiver(tree: &Tree, def: NodeId) -> Option<u64> {
-    let first = *code_children(tree, def).first()?;
-    let end = tree.node(first).extent.end;
-    // Only a receiver is followed by the `.` before the method's name
-    // (Ruby's `def self.name`); no other frontend's def has one.
-    let next = tree.source[end..]
-        .iter()
-        .find(|b| !b.is_ascii_whitespace())?;
-    (*next == b'.').then(|| tree.node(first).hash)
+    if !tree.node(def).flags.contains(Flags::RECEIVER) {
+        return None;
+    }
+    tree.code_children(def).next().map(|r| tree.node(r).hash)
 }
 
 /// Where a method sits: its ancestors' kinds and names, its own, and its
@@ -608,41 +604,25 @@ fn method_body(tree: &Tree, def: NodeId) -> Option<(Vec<String>, NodeId)> {
 }
 
 /// The call's arguments, when each is a plain local variable and nothing
-/// else (a block, a splat, a keyword) rides along: the call's own text is its
-/// name, optionally after a member access (`.`, `::`) and before empty
-/// parentheses, and its argument list holds only parentheses and commas.
-fn arguments(tree: &Tree, call: NodeId, method: &str) -> Option<Vec<String>> {
+/// else (a block, a splat, a keyword) rides along: besides its receiver, the
+/// call holds at most its argument list ([`Flags::ARGUMENTS`]).
+fn arguments(tree: &Tree, call: NodeId) -> Option<Vec<String>> {
     let mut children = code_children(tree, call);
     if tree.node(call).role == Role::Call(Receiver::SelfRef) {
         children.remove(0);
     }
-    let text = unmarked(own(tree, call, None));
-    let rest = [&b""[..], b".", b"::"]
-        .iter()
-        .find_map(|access| text.strip_prefix(*access)?.strip_prefix(method.as_bytes()))?;
-    if !(rest.is_empty() || rest == b"()") {
-        return None;
-    }
     match children[..] {
         [] => Some(Vec::new()),
-        [args] => {
-            if unmarked(own(tree, args, None))
-                .iter()
-                .any(|b| !b"(),".contains(b))
-            {
-                return None;
-            }
-            code_children(tree, args)
-                .into_iter()
-                .map(|a| {
-                    let node = tree.node(a);
-                    (node.role == Role::Reference(NameKind::Variable) && node.children.is_empty())
-                        .then(|| local_name(node))
-                        .flatten()
-                        .map(str::to_string)
-                })
-                .collect()
-        }
+        [args] if tree.node(args).flags.contains(Flags::ARGUMENTS) => code_children(tree, args)
+            .into_iter()
+            .map(|a| {
+                let node = tree.node(a);
+                (node.role == Role::Reference(NameKind::Variable) && node.children.is_empty())
+                    .then(|| local_name(node))
+                    .flatten()
+                    .map(str::to_string)
+            })
+            .collect(),
         _ => None,
     }
 }

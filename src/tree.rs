@@ -170,6 +170,12 @@ impl Flags {
     /// Bounds local variables: a local's scope is the nearest node so
     /// marked (a method, class or module body), else the file.
     pub const SCOPE: Flags = Flags(1);
+    /// A method definition whose first code child is the object it is
+    /// defined on (Ruby's `def self.name`).
+    pub const RECEIVER: Flags = Flags(1 << 1);
+    /// A call's argument list, holding exactly its positional arguments
+    /// and their separators: a block or a block argument is not one.
+    pub const ARGUMENTS: Flags = Flags(1 << 2);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0

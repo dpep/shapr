@@ -415,6 +415,31 @@ mod tests {
     }
 
     #[test]
+    fn receivers_argument_lists_and_calls_on_self_are_marked() {
+        use crate::tree::Flags;
+        let tree = parse("def self.a(x)\n  go(x)\n  self.go\n  self&.go\n  -self\nend\n");
+        let flagged = |flag: Flags| -> Vec<&str> {
+            tree.nodes
+                .iter()
+                .filter(|n| n.flags.contains(flag))
+                .map(|n| n.kind)
+                .collect()
+        };
+        assert_eq!(flagged(Flags::RECEIVER), ["def"]);
+        assert_eq!(flagged(Flags::ARGUMENTS), ["arguments"]);
+        let calls: Vec<Receiver> = tree
+            .nodes
+            .iter()
+            .filter_map(|n| match n.role {
+                Role::Call(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        use Receiver::*;
+        assert_eq!(calls, [Implicit, SelfRef, Explicit, Explicit]);
+    }
+
+    #[test]
     fn fields_of_a_fixed_node_type_reach_the_tree() {
         let tree = parse("def a(x, &b)\n  foo(1) if x\nend\n");
         let kinds = kinds(&tree, false);
