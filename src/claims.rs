@@ -34,18 +34,22 @@ pub enum Category {
     Perf,
     Test,
     Docs,
+    /// Formatting and lint fixes: the change should hold only reformatted
+    /// or respelled code.
+    Style,
     Chore,
     Revert,
 }
 
 impl Category {
-    pub const ALL: [Category; 8] = [
+    pub const ALL: [Category; 9] = [
         Category::Fix,
         Category::Feature,
         Category::Refactor,
         Category::Perf,
         Category::Test,
         Category::Docs,
+        Category::Style,
         Category::Chore,
         Category::Revert,
     ];
@@ -58,6 +62,7 @@ impl Category {
             Category::Perf => "perf",
             Category::Test => "test",
             Category::Docs => "docs",
+            Category::Style => "style",
             Category::Chore => "chore",
             Category::Revert => "revert",
         }
@@ -128,6 +133,9 @@ pub enum Finding {
     NonTestBehaviorHunks,
     /// Every hunk is structure.
     NoBehaviorHunks,
+    /// Hunks in code or tests shapr couldn't prove structural, against a
+    /// style claim.
+    LogicHunks,
 }
 
 #[derive(Serialize)]
@@ -161,6 +169,8 @@ pub struct HunkFacts {
     pub behavior: bool,
     /// In test code: a test file, or a residual with the `test` facet.
     pub test: bool,
+    /// In a code or test file, not config or a manifest.
+    pub code: bool,
 }
 
 impl Claims {
@@ -214,7 +224,7 @@ impl Claims {
     }
 
     /// Records each claim the code doesn't bear out. A purpose claim (refactor,
-    /// docs, test) conflicts only when no message also claims a behavior
+    /// docs, test, style) conflicts only when no message also claims a behavior
     /// change.
     pub fn check(&mut self, code: &CodeFacts) {
         let claimed = |c: Category| self.experimental.categories[c.as_str()] > 0;
@@ -250,6 +260,11 @@ impl Claims {
                     conflict(claim, finding, unproven.clone());
                 }
             }
+            // A linter's config and manifest edits come with its fixes.
+            let logic = ids(&|h| h.behavior && h.code && outside(h));
+            if claimed(Category::Style) && !logic.is_empty() {
+                conflict(Category::Style, Finding::LogicHunks, logic);
+            }
             let outside_tests = ids(&|h| h.behavior && !h.test);
             if tests && !outside_tests.is_empty() {
                 conflict(Category::Test, Finding::NonTestBehaviorHunks, outside_tests);
@@ -271,7 +286,7 @@ const TYPES: &[(&str, Category)] = &[
     ("fix", Category::Fix),
     ("feat", Category::Feature),
     ("refactor", Category::Refactor),
-    ("style", Category::Refactor),
+    ("style", Category::Style),
     ("perf", Category::Perf),
     ("test", Category::Test),
     ("docs", Category::Docs),
@@ -343,7 +358,11 @@ const KEYWORDS: &[(&str, Category)] = &[
     ("dependencies", Category::Chore),
     ("upgrade", Category::Chore),
     ("release", Category::Chore),
-    ("lint", Category::Chore),
+    ("rubocop", Category::Style),
+    ("autocorrect", Category::Style),
+    ("lint", Category::Style),
+    ("linting", Category::Style),
+    ("reformat", Category::Style),
     ("revert", Category::Revert),
     ("reverts", Category::Revert),
 ];
@@ -359,6 +378,10 @@ const NO_BEHAVIOR_CHANGE: &[&str] = &[
     "behaviour preserving",
     "pure refactor",
 ];
+
+/// Words that fix what a style word in the same subject names ("Fix lint
+/// errors"): they claim style, not a bug fix.
+const STYLE_FIXES: &[&str] = &["fix", "fixes", "fixed", "fixing"];
 
 /// Phrases saying the change is to test code, matched as `NO_BEHAVIOR_CHANGE`.
 const TEST_ONLY: &[&str] = &["test only", "tests only", "spec only", "specs only"];
@@ -420,9 +443,17 @@ fn hints_in(message: &Message) -> Vec<Hint> {
             }
             words = rest;
         }
-        for word in purpose_words(words) {
+        let words = purpose_words(words);
+        let style = words
+            .iter()
+            .any(|w| KEYWORDS.contains(&(w.as_str(), Category::Style)));
+        for word in words {
             if let Some((_, category)) = KEYWORDS.iter().find(|(k, _)| *k == word) {
-                add(HintKind::Keyword, &word, Some(*category), Field::Subject);
+                let category = match style && STYLE_FIXES.contains(&word.as_str()) {
+                    true => Category::Style,
+                    false => *category,
+                };
+                add(HintKind::Keyword, &word, Some(category), Field::Subject);
             }
         }
     }
@@ -638,6 +669,22 @@ mod tests {
     fn purpose_words_count_only_in_the_subject() {
         let found = hints("Speed up lookups\n\nThis fixes a bug and adds a test.");
         assert!(found.is_empty(), "{found:?}");
+    }
+
+    fn categories(text: &str) -> Vec<Option<Category>> {
+        hints(text).into_iter().map(|h| h.2).collect()
+    }
+
+    #[test]
+    fn style_words_claim_style_and_their_fix_with_them() {
+        let style = Some(Category::Style);
+        assert_eq!(categories("Fix lint errors"), [style, style]);
+        assert_eq!(categories("Rubocop fixes."), [style, style]);
+        assert_eq!(categories("Apply a reviewed rubocop pass"), [style]);
+        assert_eq!(categories("style: reformat the gate"), [style, style]);
+        // "format" names output formats as often as code layout.
+        assert!(hints("Format dates in the log").is_empty());
+        assert_eq!(categories("Fix the gate"), [Some(Category::Fix)]);
     }
 
     #[test]

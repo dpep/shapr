@@ -549,6 +549,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
                 behavior: matches!(h.verdict, Verdict::Behavior | Verdict::Mixed),
                 test: h.category == Category::Test
                     || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
+                code: matches!(h.category, Category::Code | Category::Test),
             })
             .collect(),
     });
@@ -809,6 +810,14 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
                 ),
             ),
             Finding::NoBehaviorHunks => ("conflict", "every hunk is structure".to_string()),
+            Finding::LogicHunks => (
+                "unproven",
+                format!(
+                    "{} hunk{plural} {} logic",
+                    conflict.count,
+                    if conflict.count == 1 { "is" } else { "are" }
+                ),
+            ),
         };
         emit(
             out,

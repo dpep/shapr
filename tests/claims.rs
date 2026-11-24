@@ -245,3 +245,59 @@ fn a_test_only_refactor_is_checked_outside_tests() {
     );
     assert_eq!(claims["experimental"]["conflicts"], json!([]), "{claims}");
 }
+
+/// The reports of a gate repo whose last commit holds `files`.
+fn classify_files(before: &[(&str, &str)], after: &[(&str, &str)], message: &str) -> Value {
+    let dir = tempfile::tempdir().unwrap();
+    init(dir.path());
+    commit(dir.path(), before, "Start");
+    commit(dir.path(), after, message);
+    report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]))
+}
+
+#[test]
+fn a_lint_fix_is_a_style_claim_and_logic_is_its_conflict() {
+    let (report, _) = classify(GATE, &flipped(), "Fix rubocop offenses");
+    let claims = &report["summary"]["claims"];
+    let categories = &claims["experimental"]["categories"];
+    assert_eq!(categories["style"], 1, "{claims}");
+    // The fix fixes the style: it isn't a bug-fix claim.
+    assert_eq!(categories["fix"], 0, "{claims}");
+    assert_eq!(
+        claims["experimental"]["conflicts"],
+        json!([{"claim": "style", "finding": "logic_hunks", "count": 1, "hunks": [0]}])
+    );
+}
+
+#[test]
+fn a_style_claim_over_reformatted_code_is_borne_out() {
+    let after = GATE.replace("    if n > 1", "    if n >   1");
+    let (report, _) = classify(GATE, &after, "Apply rubocop autocorrect");
+    let claims = &report["summary"]["claims"];
+    assert_eq!(claims["experimental"]["categories"]["style"], 1, "{claims}");
+    assert_eq!(claims["experimental"]["conflicts"], json!([]), "{claims}");
+}
+
+/// A linter upgrade edits the manifest; only code and tests can contradict a
+/// style claim.
+#[test]
+fn a_style_claim_ignores_manifest_hunks() {
+    let report = classify_files(
+        &[("Gemfile", "gem \"rubocop\", \"1.0\"\n")],
+        &[("Gemfile", "gem \"rubocop\", \"1.2\"\n")],
+        "Update rubocop",
+    );
+    let claims = &report["summary"]["claims"];
+    assert_eq!(claims["experimental"]["categories"]["style"], 1, "{claims}");
+    assert_eq!(claims["experimental"]["conflicts"], json!([]), "{claims}");
+}
+
+#[test]
+fn style_conflicts_show_in_text_output() {
+    let dir = gate_repo(GATE, &flipped(), "Fix lint errors");
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("unproven: claims style; 1 hunk is logic"),
+        "{text}"
+    );
+}
