@@ -1,0 +1,11 @@
+{
+  "description": "Ruby skips a leading byte order mark, so an encoding comment right after one is on line 1 and sets the source encoding",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

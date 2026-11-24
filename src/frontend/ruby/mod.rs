@@ -138,31 +138,35 @@ fn is_directive(text: &[u8]) -> bool {
 }
 
 /// A comment Ruby scans for a source encoding when it isn't a `key: value`
-/// magic comment (a vim modeline's `fileencoding=binary`): on line 1, or
-/// line 2 after a shebang, alone on its line, holding `coding` then `:` or
-/// `=` and a name. Mirrors `set_file_encoding` in Ruby's parse.y.
+/// magic comment (a vim modeline's `fileencoding=binary`): on line 1 after
+/// any byte order mark, or line 2 after a shebang, alone on its line,
+/// holding `coding`, optional whitespace, then `:` or `=`. Mirrors
+/// `set_file_encoding` in Ruby's parse.y, widened to any name after the
+/// separator: one Ruby rejects is an error, still code.
 fn sets_encoding(source: &[u8], at: &Span) -> bool {
+    // parse.y's ISSPACE, which unlike `is_ascii_whitespace` includes `\v`.
+    let space = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r');
+    let bom = if source.starts_with(b"\xef\xbb\xbf") {
+        3
+    } else {
+        0
+    };
     let line = source[..at.start].iter().filter(|&&b| b == b'\n').count();
     let line_start = source[..at.start]
         .iter()
         .rposition(|&b| b == b'\n')
-        .map_or(0, |i| i + 1);
-    let top = line == 0 || (line == 1 && source.starts_with(b"#!"));
-    if !top
-        || !source[line_start..at.start]
-            .iter()
-            .all(u8::is_ascii_whitespace)
-    {
+        .map_or(bom, |i| i + 1);
+    let top = line == 0 || (line == 1 && source[bom..].starts_with(b"#!"));
+    if !top || !source[line_start..at.start].iter().all(space) {
         return false;
     }
     let text = source[at.clone()].to_ascii_lowercase();
-    let named = |rest: &[u8]| {
-        let rest = rest.trim_ascii_start();
-        rest.first()
-            .is_some_and(|&b| b == b'-' || b == b'_' || b.is_ascii_alphanumeric())
-    };
-    text.windows(7).enumerate().any(|(i, w)| {
-        w.starts_with(b"coding") && matches!(w[6], b':' | b'=') && named(&text[i + 7..])
+    (0..text.len()).any(|i| {
+        text[i..].starts_with(b"coding")
+            && text[i + 6..]
+                .iter()
+                .find(|b| !space(b))
+                .is_some_and(|&b| b == b':' || b == b'=')
     })
 }
 
@@ -339,6 +343,8 @@ mod tests {
         assert!(code(
             "#!/usr/bin/env ruby\n# vim:fenc=latin1 coding=latin1\nx = 1\n"
         ));
+        assert!(code("  # coding = binary\nx = 1\n"));
+        assert!(code("# coding\x0b: binary\nx = 1\n"));
         assert!(!code("x = 1\n# vim: set fileencoding=binary :\n"));
         assert!(!code("# a\n# vim: set fileencoding=binary :\n"));
         assert!(!code("# vim: set ts=2 :\nx = 1\n"));

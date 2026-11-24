@@ -1,0 +1,11 @@
+{
+  "description": "Ruby skips whitespace before an encoding comment's `=` or `:` (`# coding = binary`), so dropping it changes the source encoding: code",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}
