@@ -1,0 +1,11 @@
+{
+  "description": "constants whose values run code keep their order",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    }
+  }
+}

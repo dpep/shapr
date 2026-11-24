@@ -1,0 +1,10 @@
+{
+  "description": "an interpolation whose fixed text can't spell either name leaves a rename be",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "kind": "rename"
+      }
+    }
+  }
+}

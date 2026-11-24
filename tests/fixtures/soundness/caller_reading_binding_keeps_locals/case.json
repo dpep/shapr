@@ -1,0 +1,21 @@
+{
+  "description": "the chunk's locals leave the frame `binding` reads: not extracted",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "jump"
+            }
+          }
+        }
+      }
+    }
+  }
+}

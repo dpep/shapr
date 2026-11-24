@@ -1,0 +1,10 @@
+{
+  "description": "`#[allow(dead_code)]` doesn't read names: a rename under it is a rename",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "rename"
+      }
+    ]
+  }
+}

@@ -79,6 +79,9 @@ report's own shape:
   `{"$every": P}` one whose every element matches. Use them where the
   number or order of elements isn't the point:
   `"parts": {"$some": {"kind": "logic", "detail": {"near": "extract"}}}`.
+- An object whose keys are all operators matches when each does:
+  `"hunks": {"$every": {"kind": "logic"}, "$some": {"parts": ...}}` says
+  every hunk is logic and one has the near miss.
 
 ```json
 {

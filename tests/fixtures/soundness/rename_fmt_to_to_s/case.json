@@ -1,0 +1,10 @@
+{
+  "description": "a method renamed from `fmt` to `to_s` crosses a name Ruby calls implicitly: logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

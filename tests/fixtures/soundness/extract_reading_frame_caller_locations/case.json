@@ -1,0 +1,21 @@
+{
+  "description": "a chunk reading its frame (caller_locations) is not extracted",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "jump"
+            }
+          }
+        }
+      }
+    }
+  }
+}

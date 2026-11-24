@@ -1,0 +1,10 @@
+{
+  "description": "a local read by name at runtime (erb_binding) is not renamed",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

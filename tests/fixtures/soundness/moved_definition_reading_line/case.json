@@ -1,0 +1,22 @@
+{
+  "description": "a moved definition reading its line changes position",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "verdict": "behavior"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "detail": {
+              "context": {
+                "$some": "position"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

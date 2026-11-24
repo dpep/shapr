@@ -1,0 +1,10 @@
+{
+  "description": "reordering constants with literal values, which run nothing, is a move",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "move"
+      }
+    ]
+  }
+}

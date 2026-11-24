@@ -1,0 +1,23 @@
+{
+  "description": "a whitespace edit in a file that doesn't parse is logic: text can't prove structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "format_only"
+            },
+            "evidence": {
+              "comparison": "line"
+            }
+          }
+        }
+      }
+    }
+  }
+}

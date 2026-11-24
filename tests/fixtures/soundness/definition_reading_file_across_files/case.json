@@ -1,0 +1,22 @@
+{
+  "description": "a definition reading its file changes position across files",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "verdict": "behavior"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "detail": {
+              "context": {
+                "$some": "position"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

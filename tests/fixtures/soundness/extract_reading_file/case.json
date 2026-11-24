@@ -1,0 +1,10 @@
+{
+  "description": "`__FILE__` reads the same in a new method in the same file: an extract",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "extract"
+      }
+    ]
+  }
+}

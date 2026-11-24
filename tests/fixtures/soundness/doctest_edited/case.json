@@ -1,0 +1,10 @@
+{
+  "description": "editing a doctest is logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

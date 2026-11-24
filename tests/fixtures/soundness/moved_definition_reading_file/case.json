@@ -1,0 +1,10 @@
+{
+  "description": "in the same file, a moved definition reading `__FILE__` is a move",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "move"
+      }
+    }
+  }
+}

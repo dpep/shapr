@@ -1,0 +1,10 @@
+{
+  "description": "a method renamed from `call` to `run` crosses a name Ruby calls implicitly: logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

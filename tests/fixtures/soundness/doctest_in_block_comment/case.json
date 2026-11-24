@@ -1,0 +1,10 @@
+{
+  "description": "a block doc comment's doctest is code",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

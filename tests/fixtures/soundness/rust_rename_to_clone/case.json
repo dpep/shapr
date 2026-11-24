@@ -1,0 +1,10 @@
+{
+  "description": "a method renamed to `clone` is logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

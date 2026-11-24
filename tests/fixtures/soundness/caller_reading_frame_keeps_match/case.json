@@ -1,0 +1,21 @@
+{
+  "description": "the match moves out of the frame that reads `$1`: not extracted",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "jump"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "a method reading its own name is not renamed",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

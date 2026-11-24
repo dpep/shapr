@@ -1,0 +1,10 @@
+{
+  "description": "a method renamed from `setup` to `initialize` crosses a name Ruby calls implicitly: logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

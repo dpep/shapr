@@ -1,0 +1,10 @@
+{
+  "description": "a fn renamed from `main` is logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

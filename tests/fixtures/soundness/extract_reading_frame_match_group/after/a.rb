@@ -1,0 +1,11 @@
+class A
+  def go(a)
+    show(a)
+    1
+  end
+
+  def show(a)
+    puts $1.to_s + a.to_s + 'zz'
+    puts a.to_s * 2
+  end
+end

@@ -1,0 +1,10 @@
+{
+  "description": "a local read by name at runtime (eval) is not renamed",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

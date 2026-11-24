@@ -1,0 +1,10 @@
+{
+  "description": "a function that doesn't invoke a macro moves past it freely",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "move"
+      }
+    ]
+  }
+}

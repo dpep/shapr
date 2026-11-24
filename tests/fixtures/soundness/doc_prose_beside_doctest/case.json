@@ -1,0 +1,10 @@
+{
+  "description": "doc prose beside a doctest is a comment",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "comment_only"
+      }
+    ]
+  }
+}

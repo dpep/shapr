@@ -1,0 +1,20 @@
+{
+  "description": "a Rust token split that breaks the parse is logic",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "format_only"
+            }
+          }
+        }
+      }
+    }
+  }
+}

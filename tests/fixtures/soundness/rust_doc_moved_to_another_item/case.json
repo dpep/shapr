@@ -1,0 +1,10 @@
+{
+  "description": "a doc comment moved to another item is comment_only, not format_only",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "comment_only"
+      }
+    ]
+  }
+}

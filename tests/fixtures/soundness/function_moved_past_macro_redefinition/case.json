@@ -1,0 +1,11 @@
+{
+  "description": "a function moved past a macro redefinition it invokes is not a move",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "a literal naming the new method collides",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "collision"
+            }
+          }
+        }
+      }
+    }
+  }
+}

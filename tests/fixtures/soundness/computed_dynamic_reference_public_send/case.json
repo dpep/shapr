@@ -1,0 +1,11 @@
+{
+  "description": "a computed dynamic reference (public_send) blocks method renames",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    }
+  }
+}

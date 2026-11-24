@@ -1,0 +1,21 @@
+{
+  "description": "a chunk extracted into `require`, a name Ruby calls implicitly, collides",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "collision"
+            }
+          }
+        }
+      }
+    }
+  }
+}

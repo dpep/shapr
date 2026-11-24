@@ -1,0 +1,21 @@
+{
+  "description": "a chunk reading its frame (blockless_proc) is not extracted",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "jump"
+            }
+          }
+        }
+      }
+    }
+  }
+}

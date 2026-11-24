@@ -1,0 +1,21 @@
+{
+  "description": "a Rust chunk extracted into `clone` collides",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic"
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "collision"
+            }
+          }
+        }
+      }
+    }
+  }
+}

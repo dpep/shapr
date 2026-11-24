@@ -1,0 +1,10 @@
+{
+  "description": "a Rust item under `#[pyfunction]`, which may read its name, is not renamed",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

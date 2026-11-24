@@ -1,0 +1,10 @@
+{
+  "description": "`#[must_use]` doesn't read names: a rename under it is a rename",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "rename"
+      }
+    ]
+  }
+}

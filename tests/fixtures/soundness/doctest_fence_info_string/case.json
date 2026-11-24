@@ -1,0 +1,10 @@
+{
+  "description": "a doctest fence's info string is code",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

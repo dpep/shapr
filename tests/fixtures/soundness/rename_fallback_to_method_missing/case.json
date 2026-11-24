@@ -1,0 +1,10 @@
+{
+  "description": "a method renamed from `fallback` to `method_missing` crosses a name Ruby calls implicitly: logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

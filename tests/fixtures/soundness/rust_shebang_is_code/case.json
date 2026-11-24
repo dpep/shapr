@@ -1,0 +1,10 @@
+{
+  "description": "a shebang is code",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}

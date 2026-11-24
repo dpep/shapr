@@ -143,31 +143,26 @@ fn run(case: &Path, spec: &Value) -> Result<Value, String> {
     Ok(report)
 }
 
-/// An operator node: an object whose only key starts with `$`.
-fn operator(expect: &Value) -> Option<(&str, &Value)> {
-    match expect.as_object() {
-        Some(map) if map.len() == 1 => {
-            let (key, value) = map.iter().next().unwrap();
-            key.starts_with('$').then_some((key.as_str(), value))
-        }
-        _ => None,
-    }
+/// An operator node's operators: an object whose every key starts with `$`.
+fn operators(expect: &Value) -> Option<&Map<String, Value>> {
+    let map = expect.as_object()?;
+    (!map.is_empty() && map.keys().all(|k| k.starts_with('$'))).then_some(map)
 }
 
 /// Where `actual` fails the pattern `expect`, by JSON path: an object
 /// matches when each of its keys does (others are ignored), an array when
 /// it has as many elements and each matches, a number by value, anything
-/// else by equality; `{"$not": P}`, `{"$some": P}` and `{"$every": P}` as
-/// docs/fixtures.md says.
+/// else by equality; an object of operators (`$not`, `$some`, `$every`)
+/// when each does, as docs/fixtures.md says.
 fn mismatches(at: &str, expect: &Value, actual: &Value, out: &mut Vec<String>) {
     let matches = |p: &Value, a: &Value| {
         let mut found = Vec::new();
         mismatches(at, p, a, &mut found);
         found.is_empty()
     };
-    if let Some((op, pattern)) = operator(expect) {
+    for (op, pattern) in operators(expect).into_iter().flatten() {
         let elements = actual.as_array();
-        match op {
+        match op.as_str() {
             "$not" if matches(pattern, actual) => {
                 out.push(format!("{at}: expected not {pattern}, got {actual}"));
             }
@@ -186,6 +181,8 @@ fn mismatches(at: &str, expect: &Value, actual: &Value, out: &mut Vec<String>) {
             }
             _ => out.push(format!("{at}: unknown operator {op}")),
         }
+    }
+    if operators(expect).is_some() {
         return;
     }
     match (expect, actual) {
@@ -255,7 +252,7 @@ fn default_expect(report: &Value) -> Value {
 /// takes the actual's length, each element shaped by the pattern at its
 /// index (or the last one).
 fn bless(expect: &Value, actual: &Value) -> Value {
-    if operator(expect).is_some() {
+    if operators(expect).is_some() {
         return expect.clone();
     }
     match (expect, actual) {
@@ -525,9 +522,14 @@ fn operators_negate_and_quantify() {
         [".parts: no element matches {\"kind\":\"rename\"}"]
     );
     assert_eq!(
-        failures(json!({"parts": {"$every": {"kind": "logic"}}}), actual),
+        failures(
+            json!({"parts": {"$every": {"kind": "logic"}}}),
+            actual.clone()
+        ),
         [".parts[0].kind: expected \"logic\", got \"move\""]
     );
+    let both = json!({"$every": {"kind": {"$not": "rename"}}, "$some": {"kind": "move"}});
+    assert!(failures(json!({"parts": both}), actual).is_empty());
 }
 
 #[test]

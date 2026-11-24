@@ -1,0 +1,10 @@
+{
+  "description": "an attribute on the enclosing impl reaches its methods: not renamed",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic"
+      }
+    ]
+  }
+}
