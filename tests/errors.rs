@@ -372,3 +372,13 @@ fn a_range_past_a_shallow_clones_history_is_an_error() {
     let out = shapr(clone.path(), &["-J", "HEAD"]);
     assert_eq!(out.status.code(), Some(0), "{out:?}");
 }
+
+#[test]
+fn one_revision_that_isnt_one_commit_is_a_usage_error() {
+    let dir = repo(&[&[("lib/a.rb", METHOD)], &[("lib/a.rb", "def greet\nend\n")]]);
+    for rev in ["HEAD^{tree}", "HEAD:lib/a.rb", "HEAD^@"] {
+        let message = error(&shapr(dir.path(), &["-J", rev]), 64);
+        assert!(message.starts_with(&format!("`{rev}`")), "{message}");
+        assert!(message.contains("one commit"), "{message}");
+    }
+}

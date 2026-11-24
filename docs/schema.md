@@ -1209,7 +1209,7 @@ the change exits 0, whatever the verdict.
 |---|---|
 | 0 | success |
 | 2 | operational error: git failed (not a repository, a bad revision, a name that is neither a revision nor a path, a range reaching past a shallow clone's history: `shallow clone: the base commit isn't fetched`, naming `fetch-depth: 0` and `git fetch --unshallow`), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`shapr R` or `R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), GitHub failed (unreachable, not found, rate limited, a fetch refused), or shapr itself failed (`internal error: ..., please report it`: a bug, never a verdict) |
-| 64 | usage: a bad command line (a revision starting with `-`, more than two revisions, a range beside another revision, a bare `--merge-base`), a name that is both a revision and a path (use `--`), a revision after a path, no input (no arguments and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
+| 64 | usage: a bad command line (a revision starting with `-`, one revision that isn't one commit: `REV^{tree}`, `REV:PATH`, `REV^@`, more than two revisions, a range beside another revision, a bare `--merge-base`), a name that is both a revision and a path (use `--`), a revision after a path, no input (no arguments and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `none`.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe

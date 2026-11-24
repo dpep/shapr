@@ -390,6 +390,17 @@ impl Git {
         Ok(())
     }
 
+    /// REV names one commit (not a tree, a blob, or several commits).
+    pub fn is_commit(&self, rev: &str) -> bool {
+        self.command()
+            .args(["rev-parse", "--verify", "--quiet", END_OF_OPTIONS])
+            .arg(format!("{rev}^{{commit}}"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
     /// ARG names revisions in this repository (read-only; false outside one).
     pub fn resolves(&self, arg: &str) -> bool {
         self.command()
