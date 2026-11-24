@@ -585,6 +585,8 @@ fn claim(
 fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
     let (tb, ta) = (from.tree(change), to.tree(change));
     let across = from.file != to.file;
+    // A visibility section applies to methods only.
+    let method = tb.node(from.node).role == Role::Definition(NameKind::Method);
     [
         (
             Context::Module,
@@ -593,7 +595,7 @@ fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
         (Context::Owner, owner(tb, from.node) != owner(ta, to.node)),
         (
             Context::Visibility,
-            visibility(tb, from.node) != visibility(ta, to.node),
+            method && visibility(tb, from.node) != visibility(ta, to.node),
         ),
         (
             Context::LoadOrder,
@@ -630,8 +632,8 @@ fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
 /// sorted: those that name what it declares at load time (`alias_method`,
 /// `private :x`, a constant read), that declare the same name, or that
 /// declare a name its own load-time code reads. For anything but a method,
-/// whose body runs later, every statement that isn't a declaration counts:
-/// a `require` or a call may run code that reads it.
+/// whose body runs later, every statement that runs code counts (not a
+/// declaration or a bare `private`): a `require` or a call may read it.
 fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     let Some(parent) = tree.node(node).parent else {
         return Vec::new();
@@ -652,7 +654,7 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
             continue;
         }
         let theirs = declared_name(tree, sibling);
-        let depends = (runs_now && !tree.node(sibling).role.is_declaration())
+        let depends = (runs_now && !inert(tree, sibling))
             || declared.is_some_and(|d| theirs == Some(d) || mentions(tree, sibling).contains(&d))
             || theirs.is_some_and(|t| reads.contains(&t));
         if depends {
@@ -661,6 +663,14 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     }
     out.sort_unstable();
     out
+}
+
+/// A statement that runs no code another could depend on: a declaration, or
+/// a bare visibility statement (`private`), which only marks a section.
+fn inert(tree: &Tree, node: NodeId) -> bool {
+    let n = tree.node(node);
+    n.role.is_declaration()
+        || matches!(n.role, Role::Visibility(_)) && n.children.iter().all(|&c| tree.node(c).comment)
 }
 
 fn declared_name(tree: &Tree, node: NodeId) -> Option<&str> {

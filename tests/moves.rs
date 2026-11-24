@@ -199,6 +199,18 @@ fn a_method_moved_below_private_is_a_move_in_a_new_visibility() {
 }
 
 #[test]
+fn a_constant_moved_out_from_under_private_is_a_move() {
+    // `private` applies to methods: a constant below it is public anyway.
+    let a = method("first", "2");
+    let limits = "  LIMITS = { low: 1, high: 9 }.freeze\n";
+    let report = classify(
+        &[("shape.rb", &class("Shape", &[&a, "  private\n", limits]))],
+        &[("shape.rb", &class("Shape", &[limits, &a, "  private\n"]))],
+    );
+    assert!(kinds(&report).iter().all(|k| *k == "move"), "{report:#}");
+}
+
+#[test]
 fn a_method_moved_into_another_class_is_a_move_to_a_new_owner() {
     let a = method("first", "2");
     let b = method("second", "3");
