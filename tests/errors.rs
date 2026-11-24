@@ -144,3 +144,37 @@ fn verbose_names_a_near_extract_with_an() {
     let log = String::from_utf8_lossy(&out.stderr);
     assert!(log.contains("`guard` not an extract"), "{log}");
 }
+
+#[test]
+fn deeply_nested_code_is_classified_or_not_compared() {
+    let sum = |n: usize| vec!["1"; n].join(" + ");
+    let blocks = |n: usize| format!("fn f() {{ {}{} }}\n", "{ ".repeat(n), "}".repeat(n));
+    // (path, before, comment, nested past the limit)
+    let cases = [
+        ("a.rb", format!("x = {}\n", sum(50_000)), "# c\n", true),
+        (
+            "lib.rs",
+            format!("fn f() -> i32 {{ {} }}\n", sum(10_000)),
+            "// c\n",
+            true,
+        ),
+        (
+            "lib.rs",
+            format!("fn f() -> i32 {{ {} }}\n", sum(5_000)),
+            "// c\n",
+            false,
+        ),
+        ("lib.rs", blocks(5_000), "// c\n", false),
+    ];
+    for (path, before, comment, too_deep) in cases {
+        let after = format!("{before}{comment}");
+        let report = classify(&[(path, &before)], &[(path, &after)]);
+        let hunk = &hunks(&report)[0];
+        assert_eq!(hunk["parsed"], !too_deep, "{path} {}", lead(hunk)["reason"]);
+        if too_deep {
+            assert_eq!(hunk["verdict"], "unknown", "{path}");
+            let reason = lead(hunk)["reason"].as_str().unwrap();
+            assert!(reason.contains("nested deeper than"), "{reason}");
+        }
+    }
+}

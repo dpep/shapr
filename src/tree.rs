@@ -425,6 +425,8 @@ pub struct Tree {
     ignored: Vec<Span>,
     line_starts: Vec<usize>,
     lines: Vec<LineFacts>,
+    /// The deepest nesting of nodes below the root.
+    pub depth: usize,
 }
 
 /// What a source line carries, ignoring whitespace.
@@ -684,6 +686,7 @@ pub struct TreeBuilder {
     semantics: Semantics,
     ignored: Vec<Span>,
     canonical: Vec<Option<(&'static str, Canonical)>>,
+    depth: usize,
 }
 
 impl TreeBuilder {
@@ -700,6 +703,7 @@ impl TreeBuilder {
             semantics: Semantics::default(),
             ignored: Vec::new(),
             canonical: Vec::new(),
+            depth: 0,
         };
         builder.push("root", 0..len, None, Role::Other, false);
         builder.stack.push(Tree::ROOT);
@@ -713,6 +717,7 @@ impl TreeBuilder {
     pub fn open(&mut self, kind: &'static str, span: Span, name: Option<&[u8]>, role: Role) {
         let id = self.push(kind, span, name, role, false);
         self.stack.push(id);
+        self.depth = self.depth.max(self.stack.len());
     }
 
     pub fn close(&mut self) {
@@ -819,6 +824,7 @@ impl TreeBuilder {
         let mut tree = Tree {
             line_starts: line_starts(&self.source),
             lines: Vec::new(),
+            depth: self.depth,
             source: self.source,
             nodes: self.nodes,
             errors: self.errors,

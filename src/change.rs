@@ -48,6 +48,10 @@ impl FileChange {
     }
 }
 
+/// Deepest nesting the classification walks; deeper code isn't compared.
+/// The passes recurse once per level.
+pub const MAX_DEPTH: usize = 10_000;
+
 /// Reads and parses every file the diff names. BEFORE is the revision the
 /// change starts from, when known.
 pub fn assemble(diffs: Vec<FileDiff>, git: &Git, before: Option<&str>) -> Change {
@@ -135,6 +139,9 @@ fn file_change(
                 let after = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())?;
                 let before = frontend.parse(before);
                 let after = frontend.parse(after);
+                if before.depth.max(after.depth) > MAX_DEPTH {
+                    return Err(format!("code nested deeper than {MAX_DEPTH} levels"));
+                }
                 let sites = diff
                     .hunks
                     .iter()
