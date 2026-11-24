@@ -8,6 +8,8 @@ use ruby_prism::Node;
 pub const ARRAY: &str = crate::frontend::ruby::variants::TRAILING_COMMA_ARRAY;
 pub const HASH: &str = crate::frontend::ruby::variants::TRAILING_COMMA_HASH;
 pub const ARGUMENTS: &str = crate::frontend::ruby::variants::TRAILING_COMMA_ARGUMENTS;
+/// `single_line_comma`, a trailing comma in a one-line list, is counted only
+/// where seen: RuboCop reports it under every style.
 pub const STYLES: &[&str] = &["comma", "no_comma"];
 
 pub fn see_array(w: &mut Walker, node: &Node) {
@@ -72,11 +74,38 @@ pub fn see_arguments(w: &mut Walker, node: &Node) {
 
 /// A list chooses when each item starts on its own line and the closing
 /// bracket sits on a line after the last: there RuboCop's `comma` and
-/// `consistent_comma` both want the comma, and `no_comma` doesn't.
+/// `consistent_comma` both want the comma, and `no_comma` doesn't. A
+/// one-line list with a trailing comma is an offense under every style.
 fn list(w: &mut Walker, norm: &'static str, open: usize, items: &[Node], close: usize) {
     let (Some(first), Some(last)) = (items.first(), items.last()) else {
         return;
     };
+    if w.index.line(open) == w.index.line(close) {
+        let end = last.location().end_offset();
+        // `a[1] = 2`'s value follows its bracket.
+        let gap = w.source.get(end..close).unwrap_or_default();
+        let Some(at) = gap.iter().position(|&b| b == b',') else {
+            return;
+        };
+        let line = w.index.line(close);
+        let fix = vec![Replace {
+            span: end + at..end + at + 1,
+            text: String::new(),
+        }];
+        let key = String::from_utf8_lossy(&w.source[first.location().start_offset()..end]);
+        w.push(
+            norm,
+            "single_line_comma",
+            end + at,
+            (line, line),
+            key.into_owned(),
+            vec![
+                ("comma".to_string(), fix.clone()),
+                ("no_comma".to_string(), fix),
+            ],
+        );
+        return;
+    }
     let starts: Vec<usize> = items
         .iter()
         .map(|i| w.index.line(i.location().start_offset()))
@@ -155,6 +184,15 @@ mod tests {
         let src = "a = {\n  b: 1, # one\n}\nc = [\n  <<~X,\n  body\n  X\n]\n";
         assert_eq!(styles(src, HASH), "comma@2");
         assert_eq!(styles(src, ARRAY), "");
+    }
+
+    #[test]
+    fn a_single_line_trailing_comma_is_its_own_style() {
+        let src =
+            "a = { \"k\" => v, }\nb = [1, 2, ]\nc = [1, 2]\nf(1, 2,)\ng({ x: 1 })\nh[1] = 2\n";
+        assert_eq!(styles(src, HASH), "single_line_comma@1");
+        assert_eq!(styles(src, ARRAY), "single_line_comma@2");
+        assert_eq!(styles(src, ARGUMENTS), "single_line_comma@4");
     }
 
     #[test]

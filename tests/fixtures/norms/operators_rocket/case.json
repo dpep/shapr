@@ -1,0 +1,32 @@
+{
+  "description": "a hash rocket with no space and an operator with two spaces after it aligned with nothing are offenses RuboCop's SpaceAroundOperators reports; the edits add and collapse the space",
+  "norm": "Layout/SpaceAroundOperators",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": "space",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 4,
+                  "column": 19,
+                  "style": "no_space",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -4,1 +4,1 @@\n-  auth = { \"token\"=>token }\n+  auth = { \"token\" => token }\n"
+                },
+                {
+                  "line": 5,
+                  "column": 11,
+                  "style": "extra_space",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -5,1 +5,1 @@\n-  sum = 1 +  2\n+  sum = 1 + 2\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
