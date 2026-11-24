@@ -32,7 +32,7 @@ pub enum Role {
     Call(Receiver),
     /// A string or symbol literal whose value (`name`) the language resolves
     /// to code at runtime, as in `send(:name)`; or the arguments of such a
-    /// call whose name is computed, with `name` a pattern where `*` stands
+    /// call reaching a method by a computed name, with `name` a pattern where `*` stands
     /// for the computed text (`send("get_#{x}")` is `get_*`, `send(n)` is
     /// `*`). See [`spells`].
     DynamicName,

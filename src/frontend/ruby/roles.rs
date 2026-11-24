@@ -24,7 +24,7 @@ const DYNAMIC: &[&str] = &[
     "attr_accessor",
 ];
 
-/// Dynamic calls whose first argument is the name they reach.
+/// Dynamic calls whose first argument is the name of the method they reach.
 const SENDERS: &[&str] = &[
     "send",
     "public_send",
@@ -35,9 +35,6 @@ const SENDERS: &[&str] = &[
     "instance_method",
     "define_method",
     "respond_to?",
-    "instance_variable_get",
-    "instance_variable_set",
-    "const_get",
 ];
 
 /// Remembers which literals are arguments to a dynamic call, and the

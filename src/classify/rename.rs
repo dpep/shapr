@@ -508,8 +508,12 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
             return scope != Scope::Local && literal_names(tree, id, &bare(name));
         };
         match n.role {
-            Role::DynamicName if scope == Scope::Field => spells(&bare(found), &bare(name)),
-            Role::DynamicName => scope != Scope::Local && spells(found, name),
+            // A computed name reaches methods (`send(n)`, `define_method`).
+            Role::DynamicName if found.contains('*') => {
+                scope == Scope::Method && spells(found, name)
+            }
+            Role::DynamicName if scope == Scope::Field => bare(found) == bare(name),
+            Role::DynamicName => scope != Scope::Local && found == name,
             Role::Opaque => found == name,
             Role::Call(crate::tree::Receiver::Implicit) if scope == Scope::Local => found == name,
             role => found == name && Scope::of(role) == Some(scope),
