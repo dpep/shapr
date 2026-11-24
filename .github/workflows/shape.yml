@@ -26,6 +26,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0   # shapr needs the base commit, not a shallow clone
+          # The PR's own head, not GitHub's merge commit, whose message would
+          # read as a claim.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: cached build
         id: cache
