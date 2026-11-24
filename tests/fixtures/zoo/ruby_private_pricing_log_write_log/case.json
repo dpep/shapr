@@ -1,0 +1,29 @@
+{
+  "description": "private Pricing#log -> write_log (rename).",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[rename] private Pricing#log -> write_log"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

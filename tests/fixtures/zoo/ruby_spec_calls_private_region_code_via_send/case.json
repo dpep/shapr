@@ -1,0 +1,26 @@
+{
+  "description": "spec calls private region_code via send (test_only).",
+  "label": {
+    "judge": "author intent",
+    "label": "test_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "test_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[test_only] spec calls private region_code via send"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    },
+    "hunks": {
+      "$some": {
+        "category": "test"
+      }
+    }
+  }
+}

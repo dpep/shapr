@@ -1,0 +1,21 @@
+{
+  "description": "ivar @call_count -> @tax_calls but subclass in other file reads @call_count (rename?).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[rename?] ivar @call_count -> @tax_calls but subclass in other file reads @call_count"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "description": "pad from report.rs to tokenizer.rs (no callers) (move). Documented: a cross-file Rust move changes the module, so it is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[move] pad from report.rs to tokenizer.rs (no callers)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": [
+                "module",
+                "directives"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

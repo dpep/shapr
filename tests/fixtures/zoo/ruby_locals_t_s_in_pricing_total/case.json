@@ -1,0 +1,29 @@
+{
+  "description": "locals t,s in Pricing#total (rename).",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[rename] locals t,s in Pricing#total"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

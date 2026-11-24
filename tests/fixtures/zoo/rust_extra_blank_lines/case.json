@@ -1,0 +1,28 @@
+{
+  "description": "extra blank lines (format_only).",
+  "label": {
+    "judge": "author intent",
+    "label": "format_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "format_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[format_only] extra blank lines"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "format_only"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "description": "y = 5 if c -> if c then y = 5 end (restyle).",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] y = 5 if c -> if c then y = 5 end"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  }
+}

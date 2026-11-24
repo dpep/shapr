@@ -1,0 +1,21 @@
+{
+  "description": "literal suffix 1 -> 1u64 (type inference: x was i32? ) (logic?).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[logic?] literal suffix 1 -> 1u64 (type inference: x was i32? )"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

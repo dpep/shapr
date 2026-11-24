@@ -1,0 +1,32 @@
+{
+  "description": "public Formatter#line -> render_line with all callers (public API in gem) (rename). Documented: a public method rename in a gem is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[rename] public Formatter#line -> render_line with all callers (public API in gem)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": false,
+            "assumptions": [
+              "public_api"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

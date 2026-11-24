@@ -1,0 +1,22 @@
+{
+  "description": "ivars inside instance_eval block -> method setup (extract?). Open: shapr proves an extract, but the extracted ivar writes land on the instance_eval receiver before and on self after; the author says not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[extract?] ivars inside instance_eval block -> method setup"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  },
+  "open": true
+}

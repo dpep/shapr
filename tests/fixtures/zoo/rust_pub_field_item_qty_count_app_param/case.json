@@ -1,0 +1,30 @@
+{
+  "description": "pub field Item.qty -> count (app), param stays (rename). Open: shapr leaves `Item { qty }` becoming `Item { count: qty }` (field rename expanding a shorthand) as logic, so the change is mixed.",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[rename] pub field Item.qty -> count (app), param stays"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": true
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

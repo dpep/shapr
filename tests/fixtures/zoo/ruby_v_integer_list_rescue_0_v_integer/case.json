@@ -1,0 +1,28 @@
+{
+  "description": "v = Integer(list) rescue 0 -> v = (Integer(list) rescue 0): an assignment's rescue modifier already covers only its right side (checked with ruby), so the parens are redundant: restyle; the toy repo mislabelled it logic.",
+  "label": {
+    "judge": "author intent, corrected after checking with ruby",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] v = Integer(list) rescue 0 -> v = (Integer(list) rescue 0)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "description": "unless -> if ! (restyle). Documented: unless to if ! is logic, not restyle.",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] unless -> if !"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic"
+          }
+        }
+      }
+    }
+  }
+}

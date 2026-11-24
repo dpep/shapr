@@ -1,0 +1,29 @@
+{
+  "description": "adjacent string literals -> single (restyle). Open: shapr: adjacent string literals 'a' 'b' joined to 'ab' is logic; the author calls it restyle.",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] adjacent string literals -> single"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

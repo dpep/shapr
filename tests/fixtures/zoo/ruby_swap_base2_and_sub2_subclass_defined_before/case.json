@@ -1,0 +1,21 @@
+{
+  "description": "swap Base2 and Sub2 (subclass defined before parent) (move?).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move?] swap Base2 and Sub2 (subclass defined before parent)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

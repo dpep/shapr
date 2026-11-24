@@ -1,0 +1,34 @@
+{
+  "description": "fn tag from cfg(unix) mod into cfg(windows) mod (disappears on mac) (move). Documented: a fn moved between modules changes its owner, so it is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[move] fn tag from cfg(unix) mod into cfg(windows) mod (disappears on mac)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": [
+                "owner"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "description": "o&.name -> o.name: different when o is nil (o.name raises), so it is logic; the toy repo mislabelled it restyle. Guards against a respelling that would be false structure.",
+  "label": {
+    "judge": "author intent, corrected after checking with ruby",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] o&.name -> o.name"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    },
+    "hunks": {
+      "$every": {
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "restyle"
+            }
+          }
+        }
+      }
+    }
+  }
+}

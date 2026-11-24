@@ -1,0 +1,21 @@
+{
+  "description": "rename ivar @hits -> @tally; subclass uses @tally in same file (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] rename ivar @hits -> @tally; subclass uses @tally in same file"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

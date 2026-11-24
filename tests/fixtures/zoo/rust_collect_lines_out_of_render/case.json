@@ -1,0 +1,28 @@
+{
+  "description": "collect_lines out of render (extract). Documented: a Rust extract that binds a local and takes an argument mid-block is logic.",
+  "label": {
+    "judge": "author intent",
+    "label": "extract",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "extract"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[extract] collect_lines out of render"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "description": "spacing and blank lines in Discount#apply (format_only).",
+  "label": {
+    "judge": "author intent",
+    "label": "format_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "format_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[format_only] spacing and blank lines in Discount#apply"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "format_only"
+          }
+        }
+      }
+    }
+  }
+}

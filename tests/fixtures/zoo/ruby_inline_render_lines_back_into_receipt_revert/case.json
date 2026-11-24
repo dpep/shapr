@@ -1,0 +1,32 @@
+{
+  "description": "inline render_lines back into receipt (revert of extract) (inline). Documented: removing a public method in a gem is not structure, even when inlined.",
+  "label": {
+    "judge": "author intent",
+    "label": "inline",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "inline"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[inline] inline render_lines back into receipt (revert of extract)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "inline",
+            "structure": false,
+            "assumptions": [
+              "public_api"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

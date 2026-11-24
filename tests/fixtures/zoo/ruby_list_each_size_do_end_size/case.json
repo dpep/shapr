@@ -1,0 +1,28 @@
+{
+  "description": "list.each { }.size -> list.each do end.size: the block binds to each either way (checked with ruby), so this is a block-delimiter restyle; the toy repo mislabelled it logic.",
+  "label": {
+    "judge": "author intent, corrected after checking with ruby",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[logic] list.each { }.size -> do end.size"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  }
+}

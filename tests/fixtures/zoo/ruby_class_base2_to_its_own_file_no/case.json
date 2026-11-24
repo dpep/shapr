@@ -1,0 +1,34 @@
+{
+  "description": "class Base2 to its own file (no require added; load order changes) (move). Documented: a class moved to its own file changes load order, so the move is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] class Base2 to its own file (no require added; load order changes)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": [
+                "load_order"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "description": "Rebate#label to Item (different owner) (move). Documented: a method moved to another owner is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] Rebate#label to Item (different owner)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": [
+                "owner",
+                "load_order"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

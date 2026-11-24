@@ -1,0 +1,34 @@
+{
+  "description": "Cart#count past private (visibility change) (move). Documented: a method moved into another visibility section is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] Cart#count past private (visibility change)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": [
+                "visibility"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

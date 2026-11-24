@@ -1,0 +1,29 @@
+{
+  "description": "reorder Pricing#tax and #shipping (move).",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] reorder Pricing#tax and #shipping"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

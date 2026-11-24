@@ -1,0 +1,29 @@
+{
+  "description": "Cart#remove to new file cart_ext.rb (+require) (move). Documented: in a gem, a method moved to a new file may be loaded without it, so the move is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] Cart#remove to new file cart_ext.rb (+require)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false
+          }
+        }
+      }
+    }
+  }
+}

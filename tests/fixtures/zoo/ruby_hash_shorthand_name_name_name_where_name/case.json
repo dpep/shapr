@@ -1,0 +1,29 @@
+{
+  "description": "hash shorthand (name: name -> name:) where name is a method not local (restyle). Open: shapr: name: name to name: is logic when name is a method call, not a local; the author calls it restyle.",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[restyle] hash shorthand (name: name -> name:) where name is a method not local"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

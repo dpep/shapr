@@ -1,0 +1,21 @@
+{
+  "description": "doctest edit (code, not comment; doctest now fails) (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[logic] doctest edit (code, not comment; doctest now fails)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

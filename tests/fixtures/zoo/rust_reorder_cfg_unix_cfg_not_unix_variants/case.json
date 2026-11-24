@@ -1,0 +1,29 @@
+{
+  "description": "reorder cfg(unix)/cfg(not(unix)) variants (same program) (move). Shapr calls the same change a reorder: Rust items in a module reorder as structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[move] reorder cfg(unix)/cfg(not(unix)) variants (same program)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "reorder",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

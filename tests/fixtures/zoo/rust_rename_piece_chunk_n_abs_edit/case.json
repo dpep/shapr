@@ -1,0 +1,19 @@
+{
+  "description": "rename piece->chunk + n.abs() edit (mixed).",
+  "label": {
+    "judge": "author intent",
+    "label": "mixed",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "mixed"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[mixed] rename piece->chunk + n.abs() edit"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}

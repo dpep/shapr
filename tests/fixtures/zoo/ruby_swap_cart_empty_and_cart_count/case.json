@@ -1,0 +1,29 @@
+{
+  "description": "swap Cart#empty? and Cart#count (move).",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] swap Cart#empty? and Cart#count"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "description": "reword // comment (comment_only).",
+  "label": {
+    "judge": "author intent",
+    "label": "comment_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "comment_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[comment_only] reword // comment"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "comment_only"
+          }
+        }
+      }
+    }
+  }
+}

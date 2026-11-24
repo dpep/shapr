@@ -1,0 +1,19 @@
+{
+  "description": "rename base->cost + change express multiplier 3->4 (mixed).",
+  "label": {
+    "judge": "author intent",
+    "label": "mixed",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "mixed"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[mixed] rename base->cost + change express multiplier 3->4"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}

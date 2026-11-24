@@ -1,0 +1,21 @@
+{
+  "description": "flip cfg(unix)->cfg(windows): both fns now compiled on mac (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[logic] flip cfg(unix)->cfg(windows): both fns now compiled on mac"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

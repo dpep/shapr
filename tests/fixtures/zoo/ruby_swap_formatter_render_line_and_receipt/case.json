@@ -1,0 +1,29 @@
+{
+  "description": "swap Formatter#render_line and #receipt (move).",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[move] swap Formatter#render_line and #receipt"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "description": "Formatter#receipt loop -> render_lines (extract).",
+  "label": {
+    "judge": "author intent",
+    "label": "extract",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "extract"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-ruby",
+    "note": "[extract] Formatter#receipt loop -> render_lines"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "extract",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}
