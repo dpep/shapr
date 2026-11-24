@@ -20,7 +20,7 @@ tests/fixtures/<area>/<case>/
   worktree/     files written over the working tree after both commits, uncommitted (optional)
 ```
 
-- `<area>` groups cases by what they exercise (`norms`, `soundness`,
+- `<area>` groups cases by what they exercise (`norms`, `soundness`, `repository`,
   `parts`, `corpus`). A `case.json` anywhere else under `tests/` fails the
   run, so a case can't sit where the runner doesn't look.
 - `<case>` is a short descriptive name for a hand-written case. A case

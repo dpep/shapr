@@ -1,0 +1,7 @@
+{
+  "description": "run from a subdirectory, .gitattributes still marks a file generated",
+  "args": ["-C", "lib", "-j", "HEAD~1..HEAD"],
+  "expect": {
+    "hunks": [{"category": "generated", "verdict": "unknown"}]
+  }
+}

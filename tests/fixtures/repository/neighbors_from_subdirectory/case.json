@@ -1,0 +1,20 @@
+{
+  "description": "run from a subdirectory, a new file is still compared with the files beside it",
+  "args": ["-C", "lib", "-j", "HEAD~1..HEAD"],
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "scope": "directory",
+              "surrounding": {"single_quotes": 4, "double_quotes": 0},
+              "direction": "diverging"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

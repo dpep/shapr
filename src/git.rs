@@ -176,7 +176,8 @@ impl Git {
     /// The files directly in DIR at REV (`""` for the top), as paths.
     pub fn ls(&self, rev: &str, dir: &str) -> Vec<String> {
         let tree = format!("{rev}:{dir}");
-        let Ok(out) = run(self.command().args(["ls-tree", "-z", &tree])) else {
+        // Without --full-tree, ls-tree filters by the cwd's path from the top.
+        let Ok(out) = run(self.command().args(["ls-tree", "-z", "--full-tree", &tree])) else {
             return Vec::new();
         };
         String::from_utf8_lossy(&out)

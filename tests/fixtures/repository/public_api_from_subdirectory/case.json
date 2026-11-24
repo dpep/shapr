@@ -1,0 +1,12 @@
+{
+  "description": "run from a subdirectory, a public gem method's rename still reads the gemspec at the top: public_api",
+  "args": ["-C", "lib", "-j", "HEAD~1..HEAD"],
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": {"$some": {"kind": "rename", "structure": false, "assumptions": ["public_api"]}}
+      }
+    ]
+  }
+}

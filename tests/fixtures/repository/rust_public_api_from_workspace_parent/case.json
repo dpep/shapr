@@ -1,0 +1,12 @@
+{
+  "description": "run from a workspace's crates directory, a library crate's pub fn rename still reads the member's manifest: public_api",
+  "args": ["-C", "crates", "-j", "HEAD~1..HEAD"],
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": {"$some": {"kind": "rename", "structure": false, "assumptions": ["public_api"]}}
+      }
+    ]
+  }
+}
