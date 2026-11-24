@@ -77,7 +77,7 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 
 ## Development
 
-`make check` runs the gate (`cargo fmt --check`, clippy with warnings denied, the tests, docs). See [CLAUDE.md](CLAUDE.md) for the design and layout.
+`make check` runs the gate (`cargo fmt --check`, clippy with warnings denied, the tests, docs). See [CLAUDE.md](CLAUDE.md) for the design and layout, and [docs/vision.md](docs/vision.md), [docs/roadmap.md](docs/roadmap.md) and [docs/decisions.md](docs/decisions.md) for where shapr is headed and why.
 
 ## References
 

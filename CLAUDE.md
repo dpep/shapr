@@ -12,6 +12,13 @@ agents and classifier prompts consume its JSON. shapr never calls an LLM.
 [docs/research.md](docs/research.md) is the prior-art survey behind the
 design.
 
+## Planning docs
+
+[docs/vision.md](docs/vision.md) is the review system shapr belongs to,
+[docs/roadmap.md](docs/roadmap.md) what's running and next, and
+[docs/decisions.md](docs/decisions.md) why. A decision gets a new row there;
+never edit an old one, mark it Superseded.
+
 ## First principles
 
 - **Unknown is `logic`.** A hunk is structural only when the evidence proves
