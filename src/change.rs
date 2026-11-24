@@ -63,6 +63,14 @@ pub const MAX_LINES: usize = 8_000;
 /// squared. Files past it aren't compared.
 pub const MAX_CHANGE_WORK: usize = 4 * MAX_LINES * MAX_LINES;
 
+/// DIFF's changed lines, removed plus added.
+fn changed_lines(diff: &FileDiff) -> usize {
+    diff.hunks
+        .iter()
+        .map(|h| h.removed.len() + h.added.len())
+        .sum()
+}
+
 /// Why a file of LINES changed lines isn't compared after SPENT work;
 /// `None` when it is.
 fn too_big(lines: usize, spent: usize) -> Option<String> {
@@ -108,25 +116,32 @@ pub fn assemble(
     };
     let mut blobs = Blobs::new(git);
     let mut spent = 0;
-    let mut files = diffs
-        .into_iter()
-        .filter_map(|mut diff| {
-            if diff.binary && diff.hunks.is_empty() {
-                // Stands for the whole file, so a binary change is never silent.
-                let whole = Lines { start: 1, count: 0 };
-                diff.hunks.push(Hunk {
-                    before: whole,
-                    after: whole,
-                    ..Hunk::default()
-                });
-            }
-            // A pure rename or mode change: no content to classify.
-            if diff.hunks.is_empty() {
-                return None;
-            }
-            Some(file_change(diff, &mut blobs, &attributes, &was, &mut spent))
-        })
-        .collect::<Vec<FileChange>>();
+    // The change's budget is spent smallest file first, so files named to
+    // sort first can't push a small edit out of the verdict.
+    let mut diffs: Vec<Option<FileDiff>> = diffs.into_iter().map(Some).collect();
+    let mut by_size: Vec<usize> = (0..diffs.len()).collect();
+    by_size.sort_by_key(|&i| diffs[i].as_ref().map_or(0, changed_lines));
+    let mut made: Vec<Option<FileChange>> = diffs.iter().map(|_| None).collect();
+    for i in by_size {
+        let Some(mut diff) = diffs[i].take() else {
+            continue;
+        };
+        if diff.binary && diff.hunks.is_empty() {
+            // Stands for the whole file, so a binary change is never silent.
+            let whole = Lines { start: 1, count: 0 };
+            diff.hunks.push(Hunk {
+                before: whole,
+                after: whole,
+                ..Hunk::default()
+            });
+        }
+        // A pure rename or mode change: no content to classify.
+        if diff.hunks.is_empty() {
+            continue;
+        }
+        made[i] = Some(file_change(diff, &mut blobs, &attributes, &was, &mut spent));
+    }
+    let mut files: Vec<FileChange> = made.into_iter().flatten().collect();
     let mut next = 0;
     for file in &mut files {
         file.ids = (next..next + file.diff.hunks.len()).collect();
@@ -184,11 +199,7 @@ fn file_change(
     } else if category == Category::Fixture {
         Err("test data, not classified".to_string())
     } else {
-        let lines: usize = diff
-            .hunks
-            .iter()
-            .map(|h| h.removed.len() + h.added.len())
-            .sum();
+        let lines = changed_lines(&diff);
         match frontend::for_path(diff.path()) {
             None => Err(format!("no frontend for {}", diff.path())),
             Some(_) if let Some(why) = too_big(lines, *spent) => Err(why),

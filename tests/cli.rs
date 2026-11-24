@@ -1506,6 +1506,27 @@ fn a_file_too_big_to_compare_is_unknown_and_says_why() {
     assert_eq!(report["summary"]["verdict"], "unknown");
 }
 
+/// The change's budget is spent smallest file first, so big files named to
+/// sort first can't push a small edit out of the verdict.
+#[test]
+fn big_files_cant_push_a_small_edit_past_the_change_budget() {
+    let big = "#\n".repeat(8000);
+    let names = ["lib/a.rb", "lib/b.rb", "lib/c.rb", "lib/d.rb"];
+    let mut before: Vec<(&str, &str)> = names.iter().map(|n| (*n, big.as_str())).collect();
+    before.push(("lib/z.rb", "def z\n  1\nend\n"));
+    let dir = repo(&[&before]);
+    for name in names {
+        git(dir.path(), &["rm", "-q", name]);
+    }
+    commit(dir.path(), &[("lib/z.rb", "def z\n  2\nend\n")], "delete");
+    let report = report(&shapr(dir.path(), &["-j", "HEAD"]));
+    let hunk = hunks(&report)
+        .iter()
+        .find(|h| h["file"] == "lib/z.rb")
+        .unwrap();
+    assert_eq!(hunk["verdict"], "behavior", "{hunk:#}");
+}
+
 /// A file only added has no removed-by-added pairs, but its declarations
 /// are compared with each other: its lines count against the same cap.
 #[test]
