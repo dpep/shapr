@@ -449,7 +449,7 @@ fn unique_def(tree: &Tree, want: &Key<'_>) -> Option<NodeId> {
 
 /// The siblings of A and B with no equal counterpart on the other side, as
 /// (call side, chunk side), aligned by longest common subsequence. `None`
-/// when the container itself differs.
+/// when the container itself differs, or too much of it to align.
 fn changed_siblings(
     calls: &Tree,
     scope: NodeId,
@@ -469,10 +469,30 @@ fn changed_siblings(
             .filter(|c| !skip.contains(c))
             .collect()
     };
-    let left = side(calls, scope, skip_calls);
-    let right = side(chunks, chunk_scope, skip_chunks);
+    let mut left = side(calls, scope, skip_calls);
+    let mut right = side(chunks, chunk_scope, skip_chunks);
+    let equal = |l: &NodeId, r: &NodeId| calls.node(*l).hash == chunks.node(*r).hash;
+    // Most siblings are untouched: trim the equal ends before the quadratic part.
+    let head = left
+        .iter()
+        .zip(&right)
+        .take_while(|(l, r)| equal(l, r))
+        .count();
+    left.drain(..head);
+    right.drain(..head);
+    let tail = left
+        .iter()
+        .rev()
+        .zip(right.iter().rev())
+        .take_while(|(l, r)| equal(l, r))
+        .count();
+    left.truncate(left.len() - tail);
+    right.truncate(right.len() - tail);
     let (n, m) = (left.len(), right.len());
-    let same = |i: usize, j: usize| calls.node(left[i]).hash == chunks.node(right[j]).hash;
+    if n.saturating_mul(m) > MAX_ALIGN {
+        return None;
+    }
+    let same = |i: usize, j: usize| equal(&left[i], &right[j]);
     // lcs[i][j]: common subsequence length of left[i..] and right[j..].
     let mut lcs = vec![vec![0usize; m + 1]; n + 1];
     for i in (0..n).rev() {
@@ -879,6 +899,9 @@ fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
     }
     out
 }
+
+/// Largest sibling alignment table worth building; past it, give up.
+const MAX_ALIGN: usize = 1 << 20;
 
 /// Stands for a child in [`own`]; never a byte of Ruby source text.
 const MARK: u8 = 0xff;
