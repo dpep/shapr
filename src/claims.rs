@@ -115,6 +115,8 @@ pub struct Conflict {
     pub claim: Category,
     pub finding: Finding,
     pub count: usize,
+    /// The ids of the hunks behind the finding.
+    pub hunks: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -148,10 +150,17 @@ pub struct Experimental {
 pub struct CodeFacts {
     /// Every hunk is structure (and there is at least one).
     pub structure: bool,
-    /// Hunks whose verdict is behavior or mixed.
-    pub behavior: usize,
-    /// Of those, the ones outside test code.
-    pub non_test_behavior: usize,
+    /// The hunks in the verdict (structure, behavior or mixed): hunks shapr
+    /// couldn't compare are unknown, not evidence.
+    pub hunks: Vec<HunkFacts>,
+}
+
+pub struct HunkFacts {
+    pub id: usize,
+    /// Its verdict is behavior or mixed.
+    pub behavior: bool,
+    /// In test code: a test file, or a residual with the `test` facet.
+    pub test: bool,
 }
 
 impl Claims {
@@ -206,42 +215,50 @@ impl Claims {
 
     /// Records each claim the code doesn't bear out. A purpose claim (refactor,
     /// docs, test) conflicts only when no message also claims a behavior
-    /// change; hunks shapr couldn't compare are unknown, not evidence.
+    /// change.
     pub fn check(&mut self, code: &CodeFacts) {
         let claimed = |c: Category| self.experimental.categories[c.as_str()] > 0;
         let behavior = Category::ALL.iter().any(|&c| c.behavior() && claimed(c));
+        let ids = |keep: &dyn Fn(&HunkFacts) -> bool| -> Vec<usize> {
+            code.hunks
+                .iter()
+                .filter(|h| keep(h))
+                .map(|h| h.id)
+                .collect()
+        };
         let mut conflicts = Vec::new();
-        let mut conflict = |claim, finding, count| {
+        let mut conflict = |claim, finding, hunks: Vec<usize>| {
             conflicts.push(Conflict {
                 claim,
                 finding,
-                count,
+                count: hunks.len(),
+                hunks,
             })
         };
         if !behavior {
             // A test claim says the tests changed: only code outside them
-            // can contradict a refactor or docs claim beside it.
-            let (finding, count) = match claimed(Category::Test) {
-                true => (Finding::NonTestBehaviorHunks, code.non_test_behavior),
-                false => (Finding::BehaviorHunks, code.behavior),
+            // can contradict a purpose claim beside it.
+            let tests = claimed(Category::Test);
+            let outside = |h: &HunkFacts| !(tests && h.test);
+            let finding = match tests {
+                true => Finding::NonTestBehaviorHunks,
+                false => Finding::BehaviorHunks,
             };
+            let unproven = ids(&|h| h.behavior && outside(h));
             for claim in [Category::Refactor, Category::Docs] {
-                if claimed(claim) && count > 0 {
-                    conflict(claim, finding, count);
+                if claimed(claim) && !unproven.is_empty() {
+                    conflict(claim, finding, unproven.clone());
                 }
             }
-            if claimed(Category::Test) && code.non_test_behavior > 0 {
-                conflict(
-                    Category::Test,
-                    Finding::NonTestBehaviorHunks,
-                    code.non_test_behavior,
-                );
+            let outside_tests = ids(&|h| h.behavior && !h.test);
+            if tests && !outside_tests.is_empty() {
+                conflict(Category::Test, Finding::NonTestBehaviorHunks, outside_tests);
             }
         }
         if code.structure {
             for claim in Category::ALL.into_iter().filter(|&c| c.behavior()) {
                 if claimed(claim) {
-                    conflict(claim, Finding::NoBehaviorHunks, 0);
+                    conflict(claim, Finding::NoBehaviorHunks, Vec::new());
                 }
             }
         }
@@ -356,9 +373,13 @@ const NOT_ISSUE_KEYS: &[&str] = &["UTF", "SHA", "ISO", "RFC", "PEP", "MD", "CVE"
 /// the subject. Purpose words count only there (a body says too much in
 /// passing); a body adds reverts, issues, breaking footers and phrases.
 fn hints_in(message: &Message) -> Vec<Hint> {
-    let mut lines = message.text.lines().skip_while(|l| l.trim().is_empty());
-    let subject = lines.next().unwrap_or_default().trim();
-    let body: Vec<&str> = lines.collect();
+    let subject = subject(&message.text);
+    let body: Vec<&str> = message
+        .text
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .skip(1)
+        .collect();
     let body = body.join("\n");
     let mut hints: Vec<Hint> = Vec::new();
     let mut add = |hint: HintKind, value: &str, category: Option<Category>, field: Field| {
@@ -452,6 +473,14 @@ fn hints_in(message: &Message) -> Vec<Hint> {
         }
     }
     hints
+}
+
+/// The first non-empty line.
+fn subject(text: &str) -> &str {
+    text.lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default()
+        .trim()
 }
 
 /// `type(scope)!: rest` as (type, breaking, rest), for a known type.

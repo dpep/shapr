@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Category, Change, FileChange};
-use crate::claims::{Claims, CodeFacts, Finding};
+use crate::claims::{Claims, CodeFacts, Finding, HunkFacts};
 use crate::classify::{
     self, Assumption, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
@@ -539,18 +539,18 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         .collect();
     let total = lines.changed();
     // Only hunks in the verdict are evidence against a claim.
-    let compared: Vec<&HunkRecord> = hunks
-        .iter()
-        .filter(|h| matches!(h.verdict, Verdict::Behavior | Verdict::Mixed))
-        .collect();
     claims.check(&CodeFacts {
         structure: verdict == Verdict::Structure,
-        behavior: compared.len(),
-        non_test_behavior: compared
+        hunks: hunks
             .iter()
-            .filter(|h| h.category != Category::Test)
-            .filter(|h| !h.parts.iter().any(|p| p.facets.contains(&Facet::Test)))
-            .count(),
+            .filter(|h| h.verdict.counted())
+            .map(|h| HunkFacts {
+                id: h.id,
+                behavior: matches!(h.verdict, Verdict::Behavior | Verdict::Mixed),
+                test: h.category == Category::Test
+                    || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
+            })
+            .collect(),
     });
     Summary {
         record: "summary",

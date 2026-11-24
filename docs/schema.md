@@ -737,7 +737,8 @@ Each conflict is a count of what the code shows, not a verdict on the author:
 |---|---|---|
 | `claim` | string | The claimed category. |
 | `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature`, `perf` or `test`, and shapr couldn't prove `count` hunks structural (their `verdict` is `behavior` or `mixed`). `non_test_behavior_hunks`: the same for a `test` claim, and for a `refactor` or `docs` claim beside one, counting behavior hunks outside the `test` category whose residual lacks the `test` facet. The text output says `unproven` for these two. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and the change's verdict is `structure`. |
-| `count` | int | Behavior hunks behind the finding (0 for `no_behavior_hunks`). Hunks outside the verdict (`none`, `unknown`) aren't counted: they aren't evidence. |
+| `count` | int | The hunks behind the finding, `hunks`' length (0 for `no_behavior_hunks`). Hunks outside the verdict (`none`, `unknown`) aren't counted: they aren't evidence. |
+| `hunks` | array | The `id`s of the hunks behind the finding, for pointing at them; empty for `no_behavior_hunks`. |
 
 "Couldn't prove structural" is not "changes behavior": a `refactor` claim with
 behavior hunks may be a refactoring shapr can't recognize. The conflict says

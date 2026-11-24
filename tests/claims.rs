@@ -58,7 +58,7 @@ fn a_refactor_claim_with_behavior_hunks_is_a_conflict() {
     assert_eq!(claims["experimental"]["categories"]["refactor"], 1);
     assert_eq!(
         claims["experimental"]["conflicts"],
-        json!([{"claim": "refactor", "finding": "behavior_hunks", "count": 1}])
+        json!([{"claim": "refactor", "finding": "behavior_hunks", "count": 1, "hunks": [0]}])
     );
 }
 
@@ -87,7 +87,7 @@ fn a_fix_claim_with_only_structure_is_a_conflict() {
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(
         report["summary"]["claims"]["experimental"]["conflicts"],
-        json!([{"claim": "fix", "finding": "no_behavior_hunks", "count": 0}])
+        json!([{"claim": "fix", "finding": "no_behavior_hunks", "count": 0, "hunks": []}])
     );
 }
 
