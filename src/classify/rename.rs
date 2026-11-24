@@ -15,7 +15,7 @@ use super::proof::{self, Assumption, Verified};
 use super::site::{self, CodeLines};
 use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
-use crate::tree::{Hazard, NameKind, NodeId, Role, Tree, spells};
+use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -320,6 +320,16 @@ fn judged<'v>(
     verdicts: &'v Verdicts,
 ) -> Result<(&'v Pair, &'v Verdict), String> {
     let node = trees.before.node(diff.before);
+    if node.flags.contains(Flags::MEMBER) {
+        let to = trees
+            .after
+            .node(diff.after)
+            .name
+            .as_deref()
+            .unwrap_or_default();
+        let from = node.name.as_deref().unwrap_or_default();
+        return Err(format!("{from} also names a field, which becomes {to}"));
+    }
     let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
         // Accepted when it follows a rename made elsewhere in the change;
         // an opaque name may follow a local's, in the same scope.

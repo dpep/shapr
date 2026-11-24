@@ -347,10 +347,11 @@ impl Walker<'_> {
                 // `S { a }` binds `a` and names the field `a`.
                 None => {
                     let name = field("name").map(|x| self.text(&x));
-                    self.leaf(&n, name, Role::Opaque);
+                    self.member(&n, name);
                     if name == Some(self.text(&n)) {
                         self.shorthand(b"pattern", name);
                     }
+                    self.b.close();
                 }
             },
             (Mode::Pattern(_), "scoped_identifier") => {
@@ -438,8 +439,9 @@ impl Walker<'_> {
             }
             (_, "shorthand_field_initializer") => {
                 let name = self.text(&n);
-                self.leaf(&n, Some(name), Role::Opaque);
+                self.member(&n, Some(name));
                 self.shorthand(b"init", Some(name));
+                self.b.close();
             }
             (_, "parenthesized_expression") => {
                 self.open(&n, attrs, None, Role::Other);
@@ -521,6 +523,13 @@ impl Walker<'_> {
         self.open(&n, attrs, name, role);
         self.children(n, mode, skip);
         self.b.close();
+    }
+
+    /// Opens `S { a }`'s `a`: a field's name and a local at once, so opaque
+    /// to a rename and marked as naming a member.
+    fn member(&mut self, n: &Node<'_>, name: Option<&str>) {
+        self.open(n, &[], name, Role::Opaque);
+        self.b.flag(Flags::MEMBER);
     }
 
     /// `S { a: a }` and `S { a }`, in an expression (`init`) or a pattern:

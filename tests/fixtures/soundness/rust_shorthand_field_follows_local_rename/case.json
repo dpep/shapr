@@ -1,0 +1,12 @@
+{
+  "description": "a local renamed through field-init shorthand: `S { a }` names the field too, so `S { c }` sets another field and the line is logic",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {"$not": "structure"},
+        "parts": {"$some": {"kind": "logic", "lines": {"after": [{"start": 9, "count": 1}]}}}
+      }
+    ],
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}
