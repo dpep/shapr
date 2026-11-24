@@ -40,6 +40,39 @@ impl Snapshot for Worktree {
     }
 }
 
+/// A snapshot whose reads are kept: every file's config lookup asks for the
+/// same few paths.
+pub struct Cached<S> {
+    inner: S,
+    read: RefCell<HashMap<String, Option<Vec<u8>>>>,
+}
+
+impl<S: Snapshot> Cached<S> {
+    pub fn new(inner: S) -> Self {
+        Cached {
+            inner,
+            read: RefCell::default(),
+        }
+    }
+}
+
+impl<S: Snapshot> Snapshot for Cached<S> {
+    fn read(&self, path: &str) -> Option<Vec<u8>> {
+        if let Some(found) = self.read.borrow().get(path) {
+            return found.clone();
+        }
+        let found = self.inner.read(path);
+        self.read
+            .borrow_mut()
+            .insert(path.to_string(), found.clone());
+        found
+    }
+
+    fn list(&self, dir: &str) -> Vec<String> {
+        self.inner.list(dir)
+    }
+}
+
 /// A revision's files, each read once: every file's config lookup asks for
 /// the same few paths.
 pub struct Revision<'a> {
@@ -151,5 +184,28 @@ mod tests {
         assert_eq!(resolve("a", "../../x.yml"), None);
         assert_eq!(parent("a/b.rb"), "a");
         assert_eq!(parent("b.rb"), "");
+    }
+
+    #[test]
+    fn a_cached_snapshot_reads_each_path_once() {
+        struct Counted(RefCell<Vec<String>>);
+        impl Snapshot for Counted {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                self.0.borrow_mut().push(path.to_string());
+                (path == ".rubocop.yml").then(|| b"x".to_vec())
+            }
+            fn list(&self, _: &str) -> Vec<String> {
+                Vec::new()
+            }
+        }
+        let cached = Cached::new(Counted(RefCell::default()));
+        for _ in 0..2 {
+            assert_eq!(cached.read(".rubocop.yml").as_deref(), Some(&b"x"[..]));
+            assert_eq!(cached.read("lib/.rubocop.yml"), None);
+        }
+        assert_eq!(
+            *cached.inner.0.borrow(),
+            [".rubocop.yml", "lib/.rubocop.yml"]
+        );
     }
 }

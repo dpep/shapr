@@ -14,7 +14,7 @@ pub mod snapshot;
 pub mod trajectory;
 
 pub use align::{HunkStyle, styles, text};
-pub use snapshot::{Index, Revision, Snapshot, Worktree, join};
+pub use snapshot::{Cached, Index, Revision, Snapshot, Worktree, join};
 pub use trajectory::{Trajectory, trajectory};
 
 use crate::change::Category;

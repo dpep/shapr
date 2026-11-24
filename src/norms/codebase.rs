@@ -3,13 +3,13 @@
 //! least like the rest (hotspots).
 
 use super::{
-    Analysis, Configured, Counts, Language, NormDef, Observation, ScopeKind, Worktree, count,
-    for_path, infer, skipped,
+    Analysis, Cached, Configured, Counts, Language, NormDef, Observation, ScopeKind, Worktree,
+    count, for_path, infer, skipped,
 };
 use crate::change::Category;
 use crate::git::Linguist;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -72,13 +72,18 @@ pub fn collect(paths: &[PathBuf]) -> Result<Collected, String> {
     }
     let mut seen = BTreeSet::new();
     named.retain(|(p, _)| seen.insert(p.clone()));
-    let located: Vec<(PathBuf, String)> = named.iter().map(|(p, _)| locate(Path::new(p))).collect();
+    let mut roots = HashMap::new();
+    let located: Vec<(PathBuf, String)> = (named.iter())
+        .map(|(p, _)| locate(Path::new(p), &mut roots))
+        .collect();
     let linguist = linguist(&located);
     let mut out = Collected {
         sources: Vec::new(),
         files: Vec::new(),
         skipped: SKIPS.iter().map(|s| (*s, 0)).collect(),
     };
+    // Config files read once per repository, however many files they configure.
+    let mut snapshots: HashMap<PathBuf, Cached<Worktree>> = HashMap::new();
     for ((path, explicit), (root, rel)) in named.into_iter().zip(located) {
         let language = for_path(&path);
         let category = Category::of(&rel, false, linguist.get(&rel).copied().unwrap_or_default());
@@ -94,7 +99,9 @@ pub fn collect(paths: &[PathBuf]) -> Result<Collected, String> {
             if analysis.errors {
                 reason = Some("syntax_error");
             } else {
-                let configured = language.configured(&rel, &Worktree(root.clone()));
+                let snapshot = (snapshots.entry(root.clone()))
+                    .or_insert_with(|| Cached::new(Worktree(root.clone())));
+                let configured = language.configured(&rel, snapshot);
                 source = Some(Source {
                     path: path.clone(),
                     rel,
@@ -174,10 +181,12 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// The repository top above PATH, and PATH from it.
-fn locate(path: &Path) -> (PathBuf, String) {
+fn locate(path: &Path, roots: &mut HashMap<PathBuf, PathBuf>) -> (PathBuf, String) {
     let full = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let dir = full.parent().unwrap_or(Path::new("")).to_path_buf();
-    let root = repo_root(&dir);
+    let root = (roots.entry(dir))
+        .or_insert_with_key(|dir| repo_root(dir))
+        .clone();
     let rel = full.strip_prefix(&root).unwrap_or(&full);
     let rel: Vec<String> = (rel.components())
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
