@@ -11,7 +11,6 @@ use crate::git::Linguist;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// One file read for its norms.
 pub struct Source {
@@ -142,7 +141,7 @@ fn list(dir: &Path) -> Vec<String> {
         let text = joined.display().to_string();
         text.strip_prefix("./").map(str::to_string).unwrap_or(text)
     };
-    let tracked = Command::new("git")
+    let tracked = crate::git::command()
         .arg("-C")
         .arg(dir)
         .args(["-c", "core.quotePath=false", "ls-files", "-z", "--cached"])
