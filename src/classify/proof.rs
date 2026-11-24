@@ -18,7 +18,8 @@ use std::collections::BTreeSet;
 #[serde(rename_all = "snake_case")]
 pub enum Assumption {
     /// Code outside the change may use a name the part changes, removes or
-    /// adds, and the repository couldn't be searched (no repository).
+    /// adds, and the repository couldn't be searched (no repository), or
+    /// holds the name in text shapr can't parse for a use (YAML, JavaScript).
     UnseenUses,
     /// The repository holds more files than shapr searches: uses outside
     /// the change weren't checked.
@@ -52,8 +53,14 @@ impl Assumption {
 /// What a search of the repository found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Search {
-    /// `searched` files were read; `found` holds the word, sorted.
-    Done { searched: usize, found: Vec<String> },
+    /// `searched` files were read; `found` holds the word, sorted;
+    /// `mentioned`, files of no language shapr reads (YAML, JavaScript) that
+    /// hold it as a word.
+    Done {
+        searched: usize,
+        found: Vec<String>,
+        mentioned: Vec<String>,
+    },
     /// Too many files to search.
     Capped,
     /// No repository to search, or the search failed.
@@ -120,15 +127,23 @@ pub(super) fn verify(
         tree.is_none_or(|tree| !tree.errors.is_empty() || uses(&tree))
     };
     match outside.uses(path, word) {
-        Search::Done { searched, found } => {
+        Search::Done {
+            searched,
+            found,
+            mentioned,
+        } => {
             let used: Vec<String> = found
                 .into_iter()
                 .filter(|f| !covered.contains(f.as_str()) && used_in(f))
                 .collect();
-            if used.is_empty() {
-                Verified::Clear { searched }
-            } else {
+            if !used.is_empty() {
                 Verified::Used(used)
+            } else if !mentioned.is_empty() {
+                // Text code may read (config, templates, another language)
+                // can't be parsed for a use.
+                Verified::Open(Assumption::UnseenUses)
+            } else {
+                Verified::Clear { searched }
             }
         }
         Search::Capped => Verified::Open(Assumption::SearchCapped),
@@ -248,6 +263,7 @@ mod tests {
                 Search::Done {
                     searched: 3,
                     found: vec!["a.rb".into(), "b.rb".into()],
+                    mentioned: Vec::new(),
                 }
             }
             fn library(&self, _: &str) -> bool {

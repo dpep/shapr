@@ -4,9 +4,10 @@
 //! partial clone works once the blobs are prefetched in one request; the
 //! index or the working tree is searched when the change ends there.
 
+use crate::change::Category;
 use crate::classify::proof::{Outside, Search};
 use crate::frontend::{self, Frontend};
-use crate::git::{Git, State};
+use crate::git::{Git, Linguist, State};
 use crate::norms::Snapshot;
 use crate::tree::{Role, Tree, spells};
 use std::cell::{OnceCell, RefCell};
@@ -51,11 +52,20 @@ impl<'a> Repository<'a> {
     fn files(&self) -> Option<&[(String, String)]> {
         self.files
             .get_or_init(|| {
-                match self.git.files(match &self.state {
+                let files = self.git.files(match &self.state {
                     State::Revision(rev) => Some(rev),
                     State::Index | State::Worktree => None,
-                }) {
-                    Ok(files) => Some(files),
+                });
+                // The working tree's untracked files have no blob id.
+                let untracked = match self.state {
+                    State::Worktree => self.git.untracked(),
+                    State::Revision(_) | State::Index => Ok(Vec::new()),
+                };
+                match files.and_then(|f| Ok((f, untracked?))) {
+                    Ok((mut files, untracked)) => {
+                        files.extend(untracked.into_iter().map(|p| (p, String::new())));
+                        Some(files)
+                    }
                     Err(error) => {
                         crate::verbose!("can't list the repository's files: {error:#}");
                         None
@@ -81,10 +91,25 @@ impl<'a> Repository<'a> {
             );
             return Search::Capped;
         }
+        // Text of no language shapr reads that code may still use a name
+        // from: config, templates, another language. Prose, tool output and
+        // third-party code don't count.
+        let texts: Vec<&(String, String)> = files
+            .iter()
+            .filter(|(p, _)| frontend::for_path(p).is_none_or(|f| !matches(f.search_globs(), p)))
+            .filter(|(p, _)| {
+                !matches!(
+                    Category::of(p, false, Linguist::default()),
+                    Category::Docs | Category::Generated | Category::Vendored | Category::Binary
+                )
+            })
+            .collect();
         if matches!(self.state, State::Revision(_)) {
             let mut prefetched = self.prefetched.borrow_mut();
             let fetched = *prefetched.entry(frontend.language()).or_insert_with(|| {
-                let ids: BTreeSet<&str> = candidates.iter().map(|(_, id)| id.as_str()).collect();
+                let ids: BTreeSet<&str> = (candidates.iter().chain(&texts))
+                    .map(|(_, id)| id.as_str())
+                    .collect();
                 let ids: Vec<&str> = ids.into_iter().collect();
                 self.git
                     .prefetch(&ids)
@@ -96,12 +121,13 @@ impl<'a> Repository<'a> {
             }
         }
         let found = self.git.grep(&self.state, word, &pathspecs(globs));
+        let mentioned = self.mentions(word, &texts);
         let mut computed = self.computed.borrow_mut();
         let computed = computed
             .entry(frontend.language())
             .or_insert_with(|| self.computed_names(frontend, &candidates));
-        match (found, &*computed) {
-            (Ok(mut found), Some(computed)) => {
+        match (found.and_then(|f| Ok((f, mentioned?))), &*computed) {
+            (Ok((mut found, mentioned)), Some(computed)) => {
                 found.extend(
                     (computed.iter())
                         .filter(|(_, patterns)| patterns.iter().any(|p| spells(p, word)))
@@ -112,6 +138,7 @@ impl<'a> Repository<'a> {
                 Search::Done {
                     searched: candidates.len(),
                     found,
+                    mentioned,
                 }
             }
             (Ok(_), None) => Search::Unavailable,
@@ -124,6 +151,20 @@ impl<'a> Repository<'a> {
 }
 
 impl Repository<'_> {
+    /// Which of TEXTS hold WORD as a whole word, searched by path in
+    /// batches that keep the command line short.
+    fn mentions(&self, word: &str, texts: &[&(String, String)]) -> anyhow::Result<Vec<String>> {
+        let mut found = Vec::new();
+        for batch in texts.chunks(500) {
+            let paths: Vec<String> = batch
+                .iter()
+                .map(|(p, _)| format!(":(top,literal){p}"))
+                .collect();
+            found.extend(self.git.grep(&self.state, word, &paths)?);
+        }
+        Ok(found)
+    }
+
     /// Parses every candidate file once for [`Computed`] names.
     fn computed_names(
         &self,
@@ -260,7 +301,8 @@ mod tests {
             repo.uses("a.rb", "go"),
             Search::Done {
                 searched: 2,
-                found: vec!["a.rb".into(), "b.rb".into()]
+                found: vec!["a.rb".into(), "b.rb".into()],
+                mentioned: Vec::new(),
             }
         );
         repo = Repository::new(&shell, State::Worktree, &Empty);

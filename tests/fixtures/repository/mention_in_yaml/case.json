@@ -1,0 +1,6 @@
+{
+  "description": "the old name in a tracked YAML file is a use shapr can't read: the rename isn't proven",
+  "expect": {
+    "hunks": [{"verdict": "behavior", "parts": {"$some": {"kind": "rename", "structure": false, "assumptions": ["unseen_uses"]}}}]
+  }
+}

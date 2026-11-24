@@ -394,9 +394,28 @@ impl Git {
         })
     }
 
+    /// The working tree's untracked files git doesn't ignore, as paths from
+    /// the top.
+    pub fn untracked(&self) -> Result<Vec<String>> {
+        let out = run(self.command().args([
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+            "--full-name",
+            "--",
+            ":/",
+        ]))?;
+        Ok(String::from_utf8_lossy(&out)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
     /// Files of STATE matching PATHSPECS that hold WORD as a whole word, as
-    /// paths from the top. Never fetches: a blob a partial clone lacks is an
-    /// error.
+    /// paths from the top; the working tree's untracked files included.
+    /// Never fetches: a blob a partial clone lacks is an error.
     pub fn grep(&self, state: &State, word: &str, pathspecs: &[String]) -> Result<Vec<String>> {
         let mut cmd = self.command();
         cmd.env("GIT_NO_LAZY_FETCH", "1").args([
@@ -416,7 +435,10 @@ impl Git {
                 cmd.arg("--cached");
                 None
             }
-            State::Worktree => None,
+            State::Worktree => {
+                cmd.arg("--untracked");
+                None
+            }
         };
         cmd.args(rev).arg("--").args(pathspecs);
         let out = cmd.output().context("could not run git")?;

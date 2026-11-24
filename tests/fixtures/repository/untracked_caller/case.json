@@ -1,0 +1,7 @@
+{
+  "description": "against the working tree, an untracked file calling the old name is a use",
+  "args": ["-j", "HEAD~1"],
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

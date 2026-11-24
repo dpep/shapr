@@ -151,7 +151,7 @@ What the search can't settle stays on the part:
 
 | assumption | meaning |
 |---|---|
-| `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), so code outside the change may still use the name. |
+| `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), or holds the name in a file shapr can't parse for a use (YAML, JavaScript; see below), so code outside the change may still use the name. |
 | `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
 | `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false`, outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
@@ -164,7 +164,7 @@ a hunk is `behavior` or `mixed`.
 
 The search reads the files a language's code can reach a name from (Ruby:
 `.rb`, `.rake`, `.gemspec`, `.ru`, ERB, Haml, Slim and builder templates,
-`Gemfile`, `Rakefile`; Rust: `.rs`), tracked files only. A use is matched
+`Gemfile`, `Rakefile`; Rust: `.rs`): tracked files, and when the change ends in the working tree its untracked files too (not ignored ones). A use is matched
 by name, not resolved: a common name used for something else (another
 class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
@@ -172,9 +172,11 @@ without its `?`, `!` or `=`. A file that reaches a method by a name built
 at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`) is read
 too, once per run (every file of the language is parsed for them), and held
 to the same rule as in the change: a computed name that could spell the old
-one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. It
-can't see code in other languages (YAML, JavaScript), or other repositories
-beyond `public_api`. In
+one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. The
+name as a whole word in any other file code may read (config such as YAML
+or JSON, another language such as JavaScript, a file of no known kind; not
+docs, generated, vendored or binary files) can't be parsed for a use, so it
+leaves `unseen_uses`. It can't see other repositories beyond `public_api`. In
 a partial clone (the GitHub cache) the language's blobs at the after
 revision are fetched in one request first.
 
