@@ -93,6 +93,39 @@ The verdict is in the output; the exit code says only whether shapr ran.
 | 2 | error (not a repository, a bad revision, stdin that isn't a diff) |
 | 64 | usage (including no input) |
 
+## CI recipe
+
+A pull request gate that fails a change mixing structure with behavior:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0   # shapr needs the base commit, not a shallow clone
+- run: script/shape-gate.sh origin/${{ github.base_ref }}
+```
+
+```sh
+#!/usr/bin/env bash
+# script/shape-gate.sh BASE: fail when the change is `mixed`.
+set -uo pipefail
+out=$(shapr -J "$1...HEAD")   # three dots: the PR's own commits, as GitHub shows them
+case $? in
+  0) ;;
+  64) echo "shape-gate: usage error" >&2; exit 2 ;;
+  *) echo "shape-gate: shapr failed" >&2; exit 2 ;;
+esac
+head -n1 <<<"$out" | jq -e '.record == "meta" and .schema == 1' >/dev/null \
+  || { echo "shape-gate: unexpected schema" >&2; exit 2; }
+verdict=$(tail -n1 <<<"$out" | jq -r .verdict)
+echo "shape: $verdict"
+[ "$verdict" != mixed ]
+```
+
+- Read the schema version from the first record, `meta.schema`, and stop on one you don't know.
+- Gate on verdicts, not on lists of kinds: the summary's `verdict`, a hunk's `verdict`, or a part's `structure`. A kind with `structure: false` (a public API rename) is behavior, and new kinds may appear.
+- `none` (docs only) and `unknown` (lockfiles, unparsed files) are outside the verdict; `summary.verdicts` counts them.
+- The exit code is 0 whatever the verdict, 2 when shapr couldn't run, 64 for a usage error. The policy (failing on `mixed`) is the script's.
+
 ## Development
 
 `make check` runs the gate (`cargo fmt --check`, clippy with warnings denied, the tests, docs). See [CLAUDE.md](CLAUDE.md) for the design and layout, and [docs/vision.md](docs/vision.md), [docs/roadmap.md](docs/roadmap.md) and [docs/decisions.md](docs/decisions.md) for where shapr is headed and why.
