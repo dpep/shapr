@@ -651,8 +651,7 @@ fn scan(tree: &Tree, method: &str) -> Result<Vec<NodeId>, &'static str> {
 }
 
 /// The class or module body definition `def` sits directly in, and its
-/// receiver: the first node around it that may change `self` must be a
-/// class or module.
+/// receiver.
 fn home_of_def(tree: &Tree, frontend: &dyn Frontend, def: NodeId) -> Option<Home> {
     let container = tree
         .ancestors(def)
@@ -663,6 +662,23 @@ fn home_of_def(tree: &Tree, frontend: &dyn Frontend, def: NodeId) -> Option<Home
                 Role::Definition(NameKind::Class | NameKind::Module)
             )
         })?;
+    // Only statement lists and a visibility call (`private def x`) between:
+    // a definition under a condition may not exist, and the call then
+    // reaches an inherited method.
+    let plain = |p: NodeId| {
+        let node = tree.node(p);
+        let visibility = |id: NodeId| matches!(tree.node(id).role, Role::Visibility(_));
+        super::align::transparent(tree, p)
+            || visibility(p)
+            || (node.flags.contains(Flags::ARGUMENTS) && node.parent.is_some_and(visibility))
+    };
+    if !tree
+        .ancestors(def)
+        .take_while(|&p| p != container)
+        .all(plain)
+    {
+        return None;
+    }
     let path = tree.path(container);
     Some(Home {
         container: path

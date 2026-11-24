@@ -1,0 +1,17 @@
+{
+  "description": "a method defined only under a condition may be missing, and the call reach an inherited one with another default",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

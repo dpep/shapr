@@ -258,7 +258,9 @@ call is proven to reach one definition:
 - The method called is defined exactly once in the repository at the change's
   after revision (searched as for a rename: `git grep -w`, then parsed), in
   the same class or module, the same way nested, on the same receiver (both
-  `def x` or both `def self.x`), in a class or module body. Nothing else may
+  `def x` or both `def self.x`), unconditionally in a class or module body
+  (not under an `if`, where it may not exist and the call reach an inherited
+  method; `private def x` is fine). Nothing else may
   name it: no `send`, `define_method`, `alias`, `attr_*` or a computed name
   that could spell it, and no plain literal such as `:fetch` (a delegation or
   a memoizer). A file shapr can't parse that names it counts against it.
