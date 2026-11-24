@@ -958,7 +958,9 @@ class and method holding a deviation, a `step` record per plan step, then a
 directory.
 
 `file`: `file`, `language` (`null` when no language has norms) and
-`skipped` (as in a hunk's `style`, or `unsupported`; `null` when judged).
+`skipped` (as in a hunk's `style`, or `unsupported`: no language has norms
+for it, or it isn't a regular file inside the repository, such as a symbolic
+link resolving outside it; `null` when judged).
 
 ### `norm` record
 

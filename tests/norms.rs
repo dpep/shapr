@@ -552,3 +552,66 @@ fn editorconfig_ranges_match_without_expanding() {
         serde_json::json!([".editorconfig: line 5 not read (a section glob over 1024 characters)"])
     );
 }
+
+/// A symbolic link out of the repository is never followed: not a source
+/// file under a directory or named, not a config file, not a directory an
+/// `inherit_from` passes through.
+#[cfg(unix)]
+#[test]
+fn links_out_of_the_repository_are_not_followed() {
+    use std::os::unix::fs::symlink;
+    let outer = tempfile::tempdir().unwrap();
+    let outside = outer.path().join("outside");
+    write(
+        &outside,
+        &[
+            ("secret.rb", "TOKEN = \"t\"\nKEY = \"k\"\n"),
+            (
+                "base.yml",
+                "Layout/SpaceInsideHashLiteralBraces:\n  EnforcedStyle: space\n",
+            ),
+            (
+                "rubocop.yml",
+                "Style/StringLiterals:\n  EnforcedStyle: double_quotes\n",
+            ),
+        ],
+    );
+    let root = outer.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    init(&root);
+    write(
+        &root,
+        &[
+            ("lib/a.rb", "A = 'a'\nB = 'b'\n"),
+            (
+                "lib/.rubocop.yml",
+                "inherit_from:\n  - ../.rubocop.yml\n  - ../shared/base.yml\n",
+            ),
+        ],
+    );
+    symlink(outside.join("secret.rb"), root.join("lib/settings.rb")).unwrap();
+    symlink(outside.join("rubocop.yml"), root.join(".rubocop.yml")).unwrap();
+    symlink(&outside, root.join("shared")).unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "links"]);
+
+    let report = norms_json(&root, &["lib"]);
+    assert_eq!(report["summary"]["files"], 1, "{report:#}");
+    let strings = norm(&report, "Style/StringLiterals");
+    assert_eq!(strings["deviations"], serde_json::json!([]), "{report:#}");
+    assert_eq!(strings["configured"], Value::Null);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([
+            "inherit_from: ../.rubocop.yml (not found)",
+            "inherit_from: ../shared/base.yml (not found)"
+        ])
+    );
+    assert_eq!(
+        norm(&report, "Layout/SpaceInsideHashLiteralBraces")["configured"],
+        Value::Null
+    );
+
+    let named = norms_json(&root, &["lib/settings.rb"]);
+    assert_eq!(named["files"][0]["skipped"], "unsupported", "{named:#}");
+}

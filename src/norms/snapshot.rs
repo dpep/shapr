@@ -6,7 +6,7 @@
 use crate::git::Git;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub trait Snapshot {
     fn read(&self, path: &str) -> Option<Vec<u8>>;
@@ -18,15 +18,18 @@ pub trait Snapshot {
     }
 }
 
+/// The working tree under a repository's top. A symbolic link is followed
+/// only where it resolves inside the top.
 pub struct Worktree(pub PathBuf);
 
 impl Snapshot for Worktree {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.0.join(path)).ok()
+        let file = inside(&self.0, path)?;
+        file.is_file().then(|| std::fs::read(file).ok()).flatten()
     }
 
     fn list(&self, dir: &str) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(self.0.join(dir)) else {
+        let Some(Ok(entries)) = inside(&self.0, dir).map(std::fs::read_dir) else {
             return Vec::new();
         };
         let mut files: Vec<String> = entries
@@ -38,6 +41,13 @@ impl Snapshot for Worktree {
         files.sort();
         files
     }
+}
+
+/// `root/rel` with every link resolved, when that stays inside `root`.
+pub fn inside(root: &Path, rel: &str) -> Option<PathBuf> {
+    let top = root.canonicalize().ok()?;
+    let full = root.join(rel).canonicalize().ok()?;
+    full.starts_with(&top).then_some(full)
 }
 
 /// A snapshot whose reads are kept: every file's config lookup asks for the
