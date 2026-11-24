@@ -176,6 +176,9 @@ impl Flags {
     /// A call's argument list, holding exactly its positional arguments
     /// and their separators: a block or a block argument is not one.
     pub const ARGUMENTS: Flags = Flags(1 << 2);
+    /// A comment the language reads as code ([`TreeBuilder::directive`]);
+    /// set by the builder.
+    pub const DIRECTIVE: Flags = Flags(1 << 3);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
@@ -794,7 +797,10 @@ impl TreeBuilder {
                 comment: !directive,
                 name: None,
                 role: Role::Other,
-                flags: Flags::default(),
+                flags: match directive {
+                    true => Flags::DIRECTIVE,
+                    false => Flags::default(),
+                },
                 hash: 0,
             });
             self.leaf.push(true);

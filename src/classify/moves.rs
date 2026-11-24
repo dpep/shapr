@@ -24,7 +24,7 @@ use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Labels, Part, rounded};
 use crate::change::{Change, Trees};
-use crate::tree::{Hazard, NameKind, NodeId, Role, Tree, Visibility, spells};
+use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
 use serde_json::{Map, json};
 use std::collections::HashMap;
@@ -767,7 +767,7 @@ fn directives(tree: &Tree) -> Vec<u64> {
         .children
         .iter()
         .map(|&c| tree.node(c))
-        .filter(|n| n.kind == "directive")
+        .filter(|n| n.flags.contains(Flags::DIRECTIVE))
         .map(|n| n.hash)
         .collect();
     out.sort_unstable();
