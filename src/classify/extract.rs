@@ -36,9 +36,10 @@ pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels
             let methods: Vec<NodeId> = ids(calls)
                 .filter(|&id| calls.node(id).role == Role::Definition(NameKind::Method))
                 .collect();
+            let defs = def_counts(chunks);
             for b in methods {
                 // B is new for an extract and gone after an inline.
-                if unique_def(chunks, &key(calls, b)).is_some() {
+                if defs.get(&key(calls, b)) == Some(&1) {
                     continue;
                 }
                 match find(change, calls, chunks, b, dir) {
@@ -557,6 +558,15 @@ fn key(tree: &Tree, def: NodeId) -> Key<'_> {
     let path = tree.path(def);
     let path = path.iter().map(|s| (s.kind, s.name, s.header)).collect();
     (path, receiver(tree, def))
+}
+
+/// How many methods sit at each [`Key`].
+fn def_counts(tree: &Tree) -> HashMap<Key<'_>, usize> {
+    let mut counts = HashMap::new();
+    for id in ids(tree).filter(|&id| tree.node(id).role == Role::Definition(NameKind::Method)) {
+        *counts.entry(key(tree, id)).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn unique_def(tree: &Tree, want: &Key<'_>) -> Option<NodeId> {
