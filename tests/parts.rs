@@ -1,93 +1,10 @@
 //! End to end: a hunk's parts (the structural changes proven in it) and its
 //! residual (the lines no part explains).
 
-use serde_json::{Value, json};
-use std::path::Path;
-use std::process::Command;
+use serde_json::json;
 
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// `shapr -j` over one commit writing each (path, content) pair.
-fn classify(before: &[(&str, &str)], after: &[(&str, &str)]) -> Value {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path();
-    git(path, &["init", "-q", "-b", "main"]);
-    git(path, &["config", "user.email", "test@example.com"]);
-    git(path, &["config", "user.name", "Test"]);
-    for files in [before, after] {
-        for (name, content) in files {
-            std::fs::write(path.join(name), content).unwrap();
-        }
-        git(path, &["add", "-A"]);
-        git(path, &["commit", "-q", "--allow-empty", "-m", "state"]);
-    }
-    let out = command(env!("CARGO_BIN_EXE_shapr"), path)
-        .args(["-j", "HEAD~1..HEAD"])
-        .output()
-        .unwrap();
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))
-}
-
-fn one(before: &str, after: &str) -> Value {
-    classify(&[("a.rb", before)], &[("a.rb", after)])
-}
-
-fn hunks(report: &Value) -> &Vec<Value> {
-    report["hunks"].as_array().unwrap()
-}
-
-fn part_kinds(hunk: &Value) -> Vec<&str> {
-    hunk["parts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| p["kind"].as_str().unwrap())
-        .collect()
-}
-
-fn part<'h>(hunk: &'h Value, kind: &str) -> &'h Value {
-    hunk["parts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| p["kind"] == kind)
-        .unwrap_or_else(|| panic!("no {kind} part: {hunk:#}"))
-}
-
-/// A part's lines as (before, after) line numbers.
-fn lines(part: &Value) -> (Vec<u64>, Vec<u64>) {
-    let side = |key: &str| {
-        part["lines"][key]
-            .as_array()
-            .unwrap()
-            .iter()
-            .flat_map(|run| {
-                let start = run["start"].as_u64().unwrap();
-                start..start + run["count"].as_u64().unwrap()
-            })
-            .collect()
-    };
-    (side("before"), side("after"))
-}
+mod common;
+use common::*;
 
 const CART: &str = "class Cart
   def subtotal(items)
@@ -150,7 +67,7 @@ fn a_rename_and_an_edit_in_one_hunk_are_a_rename_part_and_a_residual() {
 fn a_rename_and_a_reformat_are_two_structure_parts() {
     let before = "def area(n)\n  m  =  1\n  n + m\nend\n";
     let after = "def area(count)\n  m = 1\n  count + m\nend\n";
-    let report = one(before, after);
+    let report = ruby(before, after);
     let hunk = &hunks(&report)[0];
     assert_eq!(part_kinds(hunk), ["format_only", "rename"], "{report:#}");
     assert_eq!(lines(part(hunk, "format_only")), (vec![2], vec![2]));
@@ -166,7 +83,7 @@ fn a_rename_and_a_reformat_are_two_structure_parts() {
 fn a_reformat_beside_an_edit_is_a_format_part_and_a_residual() {
     let before = "def area\n  x  =  1\n  y = 2\nend\n";
     let after = "def area\n  x = 1\n  y = 3\nend\n";
-    let report = one(before, after);
+    let report = ruby(before, after);
     let hunk = &hunks(&report)[0];
     assert_eq!(part_kinds(hunk), ["format_only", "logic"], "{report:#}");
     assert_eq!(lines(part(hunk, "format_only")), (vec![2], vec![2]));
@@ -229,7 +146,7 @@ fn a_move_with_an_edit_is_a_move_part_and_a_residual() {
     let mut after: Vec<&str> = vec![&a];
     after.extend(filler.iter().map(String::as_str));
     after.push(&changed);
-    let report = one(&class("Shape", &before), &class("Shape", &after));
+    let report = ruby(&class("Shape", &before), &class("Shape", &after));
     let [from, to] = &hunks(&report)[..] else {
         panic!("{report:#}")
     };
@@ -260,7 +177,7 @@ fn a_move_into_another_class_is_a_move_part_that_is_not_structure() {
         class("Left", &[&a]),
         class("Right", &[&method("z", "1"), &b])
     );
-    let report = one(&source, &target);
+    let report = ruby(&source, &target);
     for hunk in hunks(&report) {
         let moved = part(hunk, "move");
         assert_eq!(moved["structure"], false, "{report:#}");
@@ -307,7 +224,7 @@ end
 
 #[test]
 fn an_extract_beside_an_edit_is_an_extract_part_and_a_residual() {
-    let report = one(RENDER, RENDER_EXTRACTED);
+    let report = ruby(RENDER, RENDER_EXTRACTED);
     let hunk = &hunks(&report)[0];
     assert!(part_kinds(hunk).contains(&"extract"), "{report:#}");
     assert_eq!(hunk["kind"], "logic");
