@@ -104,7 +104,8 @@ fn a_parameter_rename_is_a_rename_but_adding_one_is_logic() {
 fn swapping_parameters_is_logic() {
     let before = "def pair(a, b)\n  [a, b]\nend\n";
     let after = "def pair(b, a)\n  [b, a]\nend\n";
-    logic_because(&ruby(before, after), "is still used");
+    // A swap, not a rename: no rename story.
+    logic_because(&ruby(before, after), "code differs");
 }
 
 #[test]
@@ -289,4 +290,36 @@ fn rename_fields_are_documented() {
             );
         }
     }
+}
+
+/// A pair the alignment reads as a rename, whose old name is still there
+/// after the change and new name already was before it, is a swap or a
+/// replaced call: its reason tells no rename story.
+#[test]
+fn a_swap_or_replaced_call_tells_no_rename_story() {
+    let reports = [
+        rust(
+            "extern \"C\" {\n    fn a();\n    fn b();\n}\n",
+            "extern \"C\" {\n    fn b();\n    fn a();\n}\n",
+        ),
+        rust(
+            "fn a() -> u8 {\n    1\n}\n\nfn b() -> u8 {\n    2\n}\n\nfn t() -> u8 {\n    a() + b()\n}\n",
+            "fn b() -> u8 {\n    2\n}\n\npub(super) fn a() -> u8 {\n    1\n}\n\nfn t() -> u8 {\n    a() + b()\n}\n",
+        ),
+        rust(
+            "fn f(x: u8) -> u8 {\n    strip_uuid(x)\n}\n\nfn strip_uuid(x: u8) -> u8 {\n    x\n}\n\nfn g() -> u8 {\n    create(1)\n}\n",
+            "fn f(x: u8) -> u8 {\n    create(x)\n}\n\nfn strip_uuid(x: u8) -> u8 {\n    x\n}\n\nfn g() -> u8 {\n    strip_uuid(1)\n}\n",
+        ),
+        rust(
+            "fn f(v: &[u8]) -> usize {\n    v.iter().count()\n}\n\nfn g(v: &[u8]) {\n    v.zip();\n}\n",
+            "fn f(v: &[u8]) -> usize {\n    v.zip().count()\n}\n\nfn g(v: &[u8]) {\n    v.iter();\n}\n",
+        ),
+    ];
+    let stories: Vec<&str> = (reports.iter())
+        .flat_map(|r| hunks(r).iter())
+        .flat_map(|h| h["parts"].as_array().unwrap())
+        .filter_map(|p| p["reason"].as_str())
+        .filter(|r| r.starts_with("renames "))
+        .collect();
+    assert!(stories.is_empty(), "{stories:?}");
 }

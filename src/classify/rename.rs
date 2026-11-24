@@ -218,7 +218,11 @@ pub(super) fn run(
             .iter()
             .map(|diff| (diff, judged(t, hunk.file, diff, &verdicts)))
             .partition(|(_, verdict)| verdict.is_ok());
-        if let Some((_, Err(why))) = rejected.first() {
+        // A rejection with no rename story keeps the plain reason.
+        let story = rejected
+            .iter()
+            .find_map(|(_, v)| v.as_ref().err().filter(|w| !w.is_empty()));
+        if let Some(why) = story {
             label.residual.reason = why.clone();
         }
         // A line holding code that differs, or a rename that fails, is logic.
@@ -440,8 +444,21 @@ fn judge(
     {
         return Err(format!("calls {} instead of {}", pair.to, pair.from));
     }
-    holds(change, pair, facts, all, outside)
-        .map_err(|why| format!("renames {} to {}, but {why}", pair.from, pair.to))
+    holds(change, pair, facts, all, outside).map_err(|why| match swapped(change, pair, facts) {
+        true => String::new(),
+        false => format!("renames {} to {}, but {why}", pair.from, pair.to),
+    })
+}
+
+/// Both names are there on both sides of the change: the old one still
+/// after it, the new one already before it. A swap or a replaced call,
+/// not a rename, so a rejection tells no rename story.
+fn swapped(change: &Change, pair: &Pair, facts: &Facts) -> bool {
+    let (before, after) = roots(change, pair, facts);
+    let scope = pair.space.scope;
+    let has =
+        |roots: &Roots, name: &str| roots.iter().any(|&(_, t, r)| conflicts(t, r, scope, name));
+    has(&before, &pair.to) && has(&after, &pair.from)
 }
 
 /// Whether method `pair.to` has a definition, in the change's after side or
