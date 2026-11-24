@@ -958,7 +958,9 @@ class and method holding a deviation, a `step` record per plan step, then a
 directory.
 
 `file`: `file`, `language` (`null` when no language has norms) and
-`skipped` (as in a hunk's `style`, or `unsupported`; `null` when judged).
+`skipped` (as in a hunk's `style`, or `unsupported`: no language has norms
+for it, or it isn't a regular file inside the repository, such as a symbolic
+link resolving outside it; `null` when judged).
 
 ### `norm` record
 
@@ -1042,7 +1044,7 @@ per tier, and each tier's change classifies as its `expect_kind`.
 | `withheld` | int | Of `unfixed`, those where config doesn't check the cop, with an edit or not. |
 | `adherence_before`, `adherence_after` | number 0–1 or null | The norm's adherence before and after the step, to 2 decimals. |
 | `files`, `lines_touched` | int | Files and lines its edits change. |
-| `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes. |
+| `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes; a path holding a quote, backslash or control character is quoted in its headers as git quotes it (`"a/dir\nname/f.rb"`). |
 
 For a pull request per tier:
 `shapr norms -J | jq -r 'select(.record == "step" and .tier == 1) | .edits[].diff' | git apply`.
@@ -1052,7 +1054,9 @@ For a pull request per tier:
 style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
 `lines_touched` (over the steps) and `config_unread`: config the files fall
 under that shapr didn't read, one note each (`inherit_gem: NAME`,
-`inherit_from: PATH (not found)` or `(remote)`, `FILE: lines N not read`),
+`inherit_from: PATH (not found)`, `(remote)`, `(cycle)` or `(past 32 config
+files)`, `FILE: lines N not read`, `FILE: pattern P not read (over 256
+alternatives)`, `FILE: line N not read (a section glob over 1024 characters)`, `FILE: not read (over 1 MiB)`),
 so their norms were judged without it. Each note is also one stderr line,
 under `shapr norms` and a change's hunks alike.
 

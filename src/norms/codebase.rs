@@ -88,8 +88,12 @@ pub fn collect(paths: &[PathBuf]) -> Result<Collected, String> {
     for ((path, explicit), (root, rel)) in named.into_iter().zip(located) {
         let language = for_path(&path);
         let category = Category::of(&rel, false, linguist.get(&rel).copied().unwrap_or_default());
+        // A link out of the repository, or anything but a file, isn't read.
+        let outside = std::fs::symlink_metadata(&path).is_ok()
+            && super::snapshot::inside(&root, &rel).is_none_or(|f| !f.is_file());
         let mut reason = match language {
             None => Some("unsupported"),
+            Some(_) if outside => Some("unsupported"),
             Some(_) => skipped(&rel, category),
         };
         let mut source = None;

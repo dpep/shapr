@@ -435,3 +435,237 @@ fn deviations_config_excludes_are_withheld_and_rank_no_hotspot() {
         "{text}"
     );
 }
+
+/// `shapr` in `dir`, which must exit within `secs`: config built to blow up
+/// is refused, not run to exhaustion.
+fn shapr_within(dir: &std::path::Path, args: &[&str], secs: u64) -> std::process::Output {
+    let out = tempfile::tempdir().unwrap();
+    let (stdout, stderr) = (out.path().join("out"), out.path().join("err"));
+    let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir)
+        .args(args)
+        .stdout(std::fs::File::create(&stdout).unwrap())
+        .stderr(std::fs::File::create(&stderr).unwrap())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(secs) {
+            child.kill().unwrap();
+            panic!("shapr {args:?} ran past {secs}s");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    std::process::Output {
+        status,
+        stdout: std::fs::read(stdout).unwrap(),
+        stderr: std::fs::read(stderr).unwrap(),
+    }
+}
+
+/// An `inherit_from` that lists itself, many times over, reads each file
+/// once and names the cycle.
+#[test]
+fn an_inherit_from_cycle_is_read_once_and_named() {
+    let config = format!(
+        "inherit_from:\n{}Style/StringLiterals:\n  EnforcedStyle: double_quotes\n",
+        "  - .rubocop.yml\n".repeat(12)
+    );
+    let dir = repo(&[&[(".rubocop.yml", &config), ("a.rb", "def a\n  'x'\nend\n")]]);
+    let out = shapr_within(dir.path(), &["norms", "-j", "a.rb"], 30);
+    let report = report(&out);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!(["inherit_from: .rubocop.yml (cycle)"])
+    );
+    assert_eq!(
+        norm(&report, "Style/StringLiterals")["configured"],
+        "double_quotes"
+    );
+}
+
+/// Path patterns built to backtrack or expand exponentially finish: one
+/// past the brace cap can't be read, so it counts against the file and is
+/// named; star-heavy ones are matched in linear time.
+#[test]
+fn path_patterns_built_to_blow_up_finish() {
+    let bomb = format!("x{}", "{a,b}".repeat(26));
+    let config = format!(
+        "AllCops:\n  Exclude:\n    - '{}b'\n    - '{}{}x'\n\
+         Style/StringLiterals:\n  EnforcedStyle: double_quotes\n  Exclude:\n    - '{bomb}'\n\
+         Layout/SpaceInsideHashLiteralBraces:\n  EnforcedStyle: space\n",
+        "*a".repeat(16),
+        "**/".repeat(16),
+        "a".repeat(24),
+    );
+    let name = format!("{}{}.rb", "a/".repeat(20), "a".repeat(40));
+    let dir = repo(&[&[(".rubocop.yml", &config), (&name, "def a\n  'x'\nend\n")]]);
+    let out = shapr_within(dir.path(), &["norms", "-j", &name], 30);
+    let report = report(&out);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([format!(
+            ".rubocop.yml: pattern {bomb} not read (over 256 alternatives)"
+        )])
+    );
+    // The unread pattern may exclude the file, so config sets no style.
+    assert_eq!(
+        norm(&report, "Style/StringLiterals")["configured"],
+        Value::Null
+    );
+    assert_eq!(
+        norm(&report, "Layout/SpaceInsideHashLiteralBraces")["configured"],
+        "space"
+    );
+}
+
+/// `.editorconfig` numeric ranges match by comparing, so neither the
+/// widest range nor a product of ranges is expanded; a section glob past the
+/// length cap is ignored and named.
+#[test]
+fn editorconfig_ranges_match_without_expanding() {
+    let config = format!(
+        "[v{{-9223372036854775808..9223372036854775807}}.rb]\ntrim_trailing_whitespace = true\n\
+         [{{0..999}}{{0..999}}{{0..999}}.rb]\ninsert_final_newline = true\n\
+         [{}]\nindent_size = 3\n",
+        "a".repeat(2000)
+    );
+    let dir = repo(&[&[
+        (".editorconfig", &config),
+        ("lib/v-12.rb", "def a\n  'x'\nend\n"),
+    ]]);
+    let out = shapr_within(dir.path(), &["norms", "-j", "lib/v-12.rb"], 30);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let report = report(&out);
+    assert_eq!(
+        norm(&report, "Layout/TrailingWhitespace")["configured"],
+        "no_trailing_whitespace"
+    );
+    assert_eq!(
+        norm(&report, "Layout/TrailingEmptyLines")["configured"],
+        Value::Null
+    );
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([".editorconfig: line 5 not read (a section glob over 1024 characters)"])
+    );
+}
+
+/// A symbolic link out of the repository is never followed: not a source
+/// file under a directory or named, not a config file, not a directory an
+/// `inherit_from` passes through.
+#[cfg(unix)]
+#[test]
+fn links_out_of_the_repository_are_not_followed() {
+    use std::os::unix::fs::symlink;
+    let outer = tempfile::tempdir().unwrap();
+    let outside = outer.path().join("outside");
+    write(
+        &outside,
+        &[
+            ("secret.rb", "TOKEN = \"t\"\nKEY = \"k\"\n"),
+            (
+                "base.yml",
+                "Layout/SpaceInsideHashLiteralBraces:\n  EnforcedStyle: space\n",
+            ),
+            (
+                "rubocop.yml",
+                "Style/StringLiterals:\n  EnforcedStyle: double_quotes\n",
+            ),
+        ],
+    );
+    let root = outer.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    init(&root);
+    write(
+        &root,
+        &[
+            ("lib/a.rb", "A = 'a'\nB = 'b'\n"),
+            (
+                "lib/.rubocop.yml",
+                "inherit_from:\n  - ../.rubocop.yml\n  - ../shared/base.yml\n",
+            ),
+        ],
+    );
+    symlink(outside.join("secret.rb"), root.join("lib/settings.rb")).unwrap();
+    symlink(outside.join("rubocop.yml"), root.join(".rubocop.yml")).unwrap();
+    symlink(&outside, root.join("shared")).unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "links"]);
+
+    let report = norms_json(&root, &["lib"]);
+    assert_eq!(report["summary"]["files"], 1, "{report:#}");
+    let strings = norm(&report, "Style/StringLiterals");
+    assert_eq!(strings["deviations"], serde_json::json!([]), "{report:#}");
+    assert_eq!(strings["configured"], Value::Null);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([
+            "inherit_from: ../.rubocop.yml (not found)",
+            "inherit_from: ../shared/base.yml (not found)"
+        ])
+    );
+    assert_eq!(
+        norm(&report, "Layout/SpaceInsideHashLiteralBraces")["configured"],
+        Value::Null
+    );
+
+    let named = norms_json(&root, &["lib/settings.rb"]);
+    assert_eq!(named["files"][0]["skipped"], "unsupported", "{named:#}");
+}
+
+/// A path with a newline or quote is quoted in a plan's diff header as git
+/// quotes it, so it can't forge a second file header, and `git apply`
+/// takes the diff as is.
+#[test]
+fn a_plan_diff_quotes_a_path_as_git_does() {
+    let name = "lib/x\n+++ b/evil.rb\"\\/a.rb";
+    let dir = repo(&[&[("lib/b.rb", &"a = 'a'\n".repeat(12)), (name, "g = \"g\"\n")]]);
+    let plan = norms_json(dir.path(), &["lib"]);
+    let edit = &plan["steps"][0]["edits"][0];
+    assert_eq!(edit["file"], name);
+    let diff = edit["diff"].as_str().unwrap();
+    assert!(
+        diff.starts_with(
+            "--- \"a/lib/x\\n+++ b/evil.rb\\\"\\\\/a.rb\"\n+++ \"b/lib/x\\n+++ b/evil.rb\\\"\\\\/a.rb\"\n@@"
+        ),
+        "{diff}"
+    );
+    let patch = dir.path().join("../plan.diff");
+    std::fs::write(&patch, diff).unwrap();
+    git(dir.path(), &["apply", patch.to_str().unwrap()]);
+    let applied = std::fs::read_to_string(dir.path().join(name)).unwrap();
+    assert_eq!(applied, "g = 'g'\n");
+}
+
+/// A config file past the size cap isn't parsed, once per file judged or
+/// at all: it is named instead.
+#[test]
+fn a_config_file_past_the_size_cap_is_named_not_read() {
+    let rubocop = format!(
+        "Style/StringLiterals:\n  EnforcedStyle: double_quotes\n{}",
+        "# padding\n".repeat(110_000)
+    );
+    let editorconfig = format!(
+        "[*]\ntrim_trailing_whitespace = true\n{}",
+        "; pad\n".repeat(200_000)
+    );
+    let dir = repo(&[&[
+        (".rubocop.yml", &rubocop),
+        (".editorconfig", &editorconfig),
+        ("a.rb", "def a\n  'x'\nend\n"),
+    ]]);
+    let report = norms_json(dir.path(), &["a.rb"]);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([
+            ".editorconfig: not read (over 1 MiB)",
+            ".rubocop.yml: not read (over 1 MiB)"
+        ])
+    );
+    for id in ["Style/StringLiterals", "Layout/TrailingWhitespace"] {
+        assert_eq!(norm(&report, id)["configured"], Value::Null, "{id}");
+    }
+}
