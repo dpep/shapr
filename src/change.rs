@@ -135,6 +135,8 @@ fn file_change(
     }
     let trees = if diff.binary {
         Err("binary file".to_string())
+    } else if category == Category::Fixture {
+        Err("test data, not classified".to_string())
     } else {
         match frontend::for_path(diff.path()) {
             None => Err(format!("no frontend for {}", diff.path())),
@@ -187,6 +189,9 @@ pub enum Category {
     Code,
     Test,
     Docs,
+    /// Test data: under a `fixtures/`, `__fixtures__/` or `testdata/`
+    /// directory. Not classified; the tests that read it judge it.
+    Fixture,
     Config,
     /// A dependency manifest.
     Manifest,
@@ -201,10 +206,11 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 9] = [
+    pub const ALL: [Category; 10] = [
         Category::Code,
         Category::Test,
         Category::Docs,
+        Category::Fixture,
         Category::Config,
         Category::Manifest,
         Category::Generated,
@@ -226,6 +232,7 @@ impl Category {
             Category::Code => "code",
             Category::Test => "test",
             Category::Docs => "docs",
+            Category::Fixture => "fixture",
             Category::Config => "config",
             Category::Manifest => "manifest",
             Category::Generated => "generated",
@@ -235,9 +242,22 @@ impl Category {
         }
     }
 
+    /// A fixture directory wins over the name rules, but not over a binary,
+    /// a vendored file or a set linguist attribute.
+    pub fn of(path: &str, binary: bool, linguist: Linguist) -> Category {
+        let category = Category::by_name(path, binary, linguist);
+        match category {
+            Category::Binary | Category::Vendored => category,
+            Category::Generated if linguist.generated == Some(true) => category,
+            Category::Docs if linguist.documentation == Some(true) => category,
+            _ if fixture(path) => Category::Fixture,
+            _ => category,
+        }
+    }
+
     /// The first rule that matches. A linguist attribute wins over the
     /// name either way: `-linguist-generated` unmarks a lockfile.
-    pub fn of(path: &str, binary: bool, linguist: Linguist) -> Category {
+    fn by_name(path: &str, binary: bool, linguist: Linguist) -> Category {
         let name = path.rsplit('/').next().unwrap_or(path);
         if binary {
             Category::Binary
@@ -333,6 +353,14 @@ fn docs(path: &str, name: &str) -> bool {
             | "NOTICE"
     );
     in_docs || prose || conventional
+}
+
+/// Test data: under a `fixtures`, `__fixtures__` or `testdata` directory, at
+/// any depth.
+fn fixture(path: &str) -> bool {
+    let dirs = path.rsplit_once('/').map_or("", |(d, _)| d);
+    dirs.split('/')
+        .any(|d| matches!(d, "fixtures" | "__fixtures__" | "testdata"))
 }
 
 /// A test file: under a `spec`, `test`, `tests` or `__tests__` directory, or
@@ -449,7 +477,14 @@ mod tests {
             ("docs/index.html", "docs"),
             ("spec/a_spec.rb", "test"),
             ("lib/a_test.rs", "test"),
-            ("tests/fixtures/x.json", "test"),
+            ("tests/fixtures/x.json", "fixture"),
+            ("spec/fixtures/cart.rb", "fixture"),
+            ("tests/fixtures/repository/case/before/lib/a.rb", "fixture"),
+            ("pkg/testdata/in.go", "fixture"),
+            ("src/__fixtures__/README.md", "fixture"),
+            ("lib/fixtures.rb", "code"),
+            ("spec/fixtures_spec.rb", "test"),
+            ("vendor/gem/spec/fixtures/a.rb", "vendored"),
             ("Gemfile", "manifest"),
             ("acme.gemspec", "manifest"),
             ("package.json", "manifest"),
@@ -485,5 +520,17 @@ mod tests {
             Category::Vendored
         );
         assert_eq!(Category::of("a.rb", true, vendored), Category::Binary);
+        let documentation = Linguist {
+            documentation: Some(true),
+            ..Linguist::default()
+        };
+        assert_eq!(
+            Category::of("spec/fixtures/a.rb", false, documentation),
+            Category::Docs
+        );
+        assert_eq!(
+            Category::of("spec/fixtures/a.rb", false, unset),
+            Category::Fixture
+        );
     }
 }

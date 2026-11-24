@@ -811,12 +811,14 @@ fn a_name_that_is_a_revision_and_a_path_needs_dashes() {
     git(dir.path(), &["branch", "lib", "main"]);
     let (message, code) = refused(dir.path(), &["lib"]);
     assert_eq!(code, 64);
-    assert!(
-        message.contains("ambiguous argument 'lib': both revision and filename"),
-        "{message}"
+    // Both readings, each ready to run.
+    assert_eq!(
+        message,
+        "`lib` is both a revision and a path: `shapr lib --` for the revision, `shapr -- lib` for the path"
     );
+    let (message, _) = refused(dir.path(), &["main", "lib"]);
     assert!(
-        message.contains("Use '--' to separate paths from revisions"),
+        message.contains("`shapr main lib --` for the revision, `shapr main -- lib` for the path"),
         "{message}"
     );
     // `--` decides: after it a path, before it a revision.
@@ -832,13 +834,19 @@ fn a_name_that_is_a_revision_and_a_path_needs_dashes() {
 #[test]
 fn a_name_that_is_neither_says_how_to_name_a_path() {
     let dir = branched();
+    // Not ambiguous, and `--` wouldn't help.
     let (message, code) = refused(dir.path(), &["nope"]);
-    assert_eq!(code, 2);
-    assert!(
-        message.contains("unknown revision or path not in the working tree"),
-        "{message}"
+    assert_eq!(
+        (message.as_str(), code),
+        ("nope: no such revision or path", 2)
     );
-    assert!(message.contains("--"), "{message}");
+    let (message, code) = refused(dir.path(), &["main", "nope"]);
+    assert_eq!(
+        (message.as_str(), code),
+        ("nope: no such revision or path", 2)
+    );
+    let (message, code) = refused(dir.path(), &["--merge-base", "nope"]);
+    assert_eq!((message.as_str(), code), ("nope: no such revision", 2));
     // A revision after a path.
     let (message, code) = refused(dir.path(), &["a.rb", "main"]);
     assert_eq!(code, 64);
@@ -1004,6 +1012,9 @@ fn usage_summarizes_the_log_and_reset_empties_it() {
     let reset = records(&shapr_env(dir.path(), &["-J", "--usage", "--reset"], &env));
     assert_eq!(reset[0]["runs"], 0);
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
+    // An empty log is one line, not a table of blank rows.
+    let text = String::from_utf8(shapr_env(dir.path(), &["--usage"], &env).stdout).unwrap();
+    assert_eq!(text, format!("no runs logged yet at {}\n", log.display()));
     assert_eq!(
         shapr_env(dir.path(), &["--reset"], &env).status.code(),
         Some(64)
@@ -1045,6 +1056,28 @@ fn the_log_defaults_to_xdg_state_and_status_shows_it() {
 }
 
 #[test]
+fn shapr_usage_reads_the_usual_words_for_off_and_on() {
+    let dir = branched();
+    let home = tempfile::tempdir().unwrap();
+    let home_path = home.path().to_str().unwrap();
+    for (value, enabled) in [
+        ("0", false),
+        ("false", false),
+        ("off", false),
+        ("No", false),
+        ("1", true),
+        ("true", true),
+        ("on", true),
+        ("YES", true),
+    ] {
+        // Set explicitly, it wins over CI=true.
+        let env = [("SHAPR_USAGE", value), ("HOME", home_path), ("CI", "true")];
+        let status = report(&shapr_env(dir.path(), &["-j", "--status"], &env));
+        assert_eq!(status["usage"]["enabled"], enabled, "SHAPR_USAGE={value}");
+    }
+}
+
+#[test]
 fn a_log_that_cant_be_written_never_fails_the_run() {
     let dir = branched();
     let out = shapr_env(
@@ -1064,8 +1097,252 @@ fn the_text_summary_counts_kinds_and_leaves_out_what_says_nothing() {
     ]);
     let out = shapr(dir.path(), &["HEAD"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    let last = text.lines().last().unwrap_or_default();
-    assert!(last.starts_with("behavior: 1 hunk (1 logic)"), "{text}");
+    let last = text.lines().next().unwrap_or_default();
+    assert!(last.contains(": behavior: 1 hunk (1 logic)"), "{text}");
     assert!(!last.contains("comments"), "{text}");
     assert!(!last.contains("structure share"), "{text}");
+    assert!(
+        !text.contains("claims:"),
+        "nothing claimed, no claims line: {text}"
+    );
+}
+
+#[test]
+fn the_text_kinds_count_only_hunks_inside_the_verdict() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n"), ("README.md", "hi\n")],
+        &[("a.rb", "def f\n  2\nend\n"), ("README.md", "hello\n")],
+    ]);
+    let out = shapr(dir.path(), &["HEAD"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let last = text.lines().next().unwrap_or_default();
+    assert!(
+        last.contains("behavior: 2 hunks (1 logic); outside the verdict: 1 none;"),
+        "{text}"
+    );
+}
+
+/// A class whose private method PRIVATE is called once, inside it.
+fn meter(private: &str) -> String {
+    format!(
+        "class Meter\n  def level\n    {private} + 1\n  end\n\n  private\n\n  def {private}\n    41\n  end\nend\n"
+    )
+}
+
+#[test]
+fn staged_is_the_index_against_head_or_a_revision() {
+    let dir = repo(&[
+        &[("meter.rb", &meter("sample")), ("lib/b.rb", "B = 1\n")],
+        &[("lib/b.rb", "B = 2\n")],
+    ]);
+    write(
+        dir.path(),
+        &[("meter.rb", &meter("probe")), ("lib/b.rb", "B = 3\n")],
+    );
+    git(dir.path(), &["add", "meter.rb", "lib/b.rb"]);
+    // Unstaged edits aren't shown: the index is the after side.
+    write(dir.path(), &[("lib/b.rb", "B = 4\n")]);
+    let same = |args: &[&str], diff: &[&str]| {
+        let mut all = vec!["-j"];
+        all.extend(args);
+        let out = shapr(dir.path(), &all);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        let ours = report(&out);
+        let piped = report(&shapr_stdin(dir.path(), &["-j"], &git(dir.path(), diff)));
+        // The same lines; a diff on stdin from REV can't search the index for uses.
+        let lines = |r: &Value| -> Vec<Value> {
+            hunks(r)
+                .iter()
+                .map(|h| serde_json::json!([h["file"], h["before"], h["after"]]))
+                .collect()
+        };
+        assert_eq!(lines(&ours), lines(&piped), "{args:?}");
+        assert_eq!(ours["meta"]["input"], "staged", "{args:?}");
+        ours
+    };
+    same(&["--staged"], &["diff", "--cached"]);
+    same(&["--cached"], &["diff", "--cached"]);
+    same(&["--staged", "HEAD~1"], &["diff", "--cached", "HEAD~1"]);
+    let limited = same(
+        &["--staged", "--", "lib"],
+        &["diff", "--cached", "--", "lib"],
+    );
+    assert_eq!(limited["meta"]["paths"], true);
+    let limited = same(&["--staged", "lib"], &["diff", "--cached", "--", "lib"]);
+    assert_eq!(limited["meta"]["paths"], true);
+
+    // Uses are searched in the index: an unstaged call doesn't count.
+    write(
+        dir.path(),
+        &[(
+            "report.rb",
+            "class Report\n  def show\n    Meter.new.sample\n  end\nend\n",
+        )],
+    );
+    let out = report(&shapr(dir.path(), &["-j", "--staged", "--", "meter.rb"]));
+    let parts: Vec<&Value> = hunks(&out)
+        .iter()
+        .flat_map(|h| h["parts"].as_array().unwrap())
+        .collect();
+    assert!(
+        parts
+            .iter()
+            .any(|p| p["kind"] == "rename" && p["structure"] == true),
+        "{out:#}"
+    );
+
+    for args in [
+        &["--staged", "HEAD~1..HEAD"][..],
+        &["--staged", "HEAD~1", "HEAD"],
+        &["--staged", "--merge-base", "main"],
+    ] {
+        let (_, code) = refused(dir.path(), args);
+        assert_eq!(code, 64, "{args:?}");
+    }
+}
+
+#[test]
+fn the_text_summary_names_what_was_compared() {
+    let dir = branched();
+    git(dir.path(), &["add", "lib/b.rb"]);
+    let summary = |args: &[&str]| {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        let last = text.lines().next().unwrap_or_default().to_string();
+        last.split(": ").next().unwrap().to_string()
+    };
+    let feat = git(dir.path(), &["rev-parse", "--short", "feat"]);
+    assert_eq!(summary(&["feat"]), format!("commit {}", feat.trim()));
+    assert_eq!(summary(&["main...feat"]), "main...feat");
+    assert_eq!(summary(&["main..."]), "main...HEAD");
+    assert_eq!(summary(&["main", "feat"]), "main..feat");
+    assert_eq!(summary(&["a.rb"]), "uncommitted changes in a.rb");
+    assert_eq!(summary(&["main..feat", "--", "lib"]), "main..feat in lib");
+    assert_eq!(summary(&["--merge-base", "main"]), "main...working tree");
+    assert_eq!(summary(&["--staged"]), "staged changes");
+    assert_eq!(
+        summary(&["--staged", "main"]),
+        "staged changes against main"
+    );
+    let piped = shapr_stdin(dir.path(), &[], &git(dir.path(), &["diff"]));
+    let text = String::from_utf8(piped.stdout).unwrap();
+    assert!(
+        text.lines().next().unwrap().starts_with("stdin: behavior"),
+        "{text}"
+    );
+}
+
+#[test]
+fn untracked_files_a_working_tree_form_leaves_out_are_counted_and_named() {
+    let dir = branched();
+    write(
+        dir.path(),
+        &[
+            ("lib/new.rb", "N = 1\n"),
+            ("c.rb", "C = 1\n"),
+            ("skip.log", "x\n"),
+            (".gitignore", "*.log\n"),
+        ],
+    );
+    let run = |args: &[&str]| {
+        let mut all = vec!["-j"];
+        all.extend(args);
+        let out = shapr(dir.path(), &all);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        let stderr = String::from_utf8(out.stderr.clone()).unwrap();
+        (report(&out)["meta"]["untracked"].clone(), stderr)
+    };
+    let (count, stderr) = run(&["."]);
+    assert_eq!(count, 3);
+    assert_eq!(
+        stderr,
+        "shapr: 3 untracked files not shown: .gitignore, c.rb, lib/new.rb \
+         (git add -N .gitignore c.rb lib/new.rb to include them)\n"
+    );
+    let (count, stderr) = run(&["--", "lib"]);
+    assert_eq!(count, 1);
+    assert_eq!(
+        stderr,
+        "shapr: 1 untracked file not shown: lib/new.rb (git add -N lib/new.rb to include it)\n"
+    );
+    assert_eq!(run(&["--merge-base", "main"]).0, 3);
+    // More than three: the first three named.
+    write(dir.path(), &[("d.rb", "D = 1\n")]);
+    let (count, stderr) = run(&["."]);
+    assert_eq!(count, 4);
+    assert!(
+        stderr.contains("4 untracked files not shown: .gitignore, c.rb, d.rb, ... (git add -N <path> to include them)"),
+        "{stderr}"
+    );
+    // Forms that don't end in the working tree have none to leave out.
+    for args in [&["feat"][..], &["main..feat"], &["--staged"]] {
+        assert_eq!(run(args), (Value::Null, String::new()), "{args:?}");
+    }
+    // Added with -N, a new file is diffed and no longer untracked.
+    git(dir.path(), &["add", "-N", "lib/new.rb"]);
+    let (files, meta) = ran(dir.path(), &["--", "lib"]);
+    assert_eq!(files, ["lib/b.rb", "lib/new.rb"]);
+    assert_eq!(meta["untracked"], 0);
+}
+
+#[test]
+fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
+    let dir = repo(&[
+        &[
+            ("README.md", "hi\n"),
+            ("Makefile", "x\n"),
+            ("config/x.yml", "a: 1\n"),
+            ("config/y.yml", "b: 1  \n"),
+            ("spec/fixtures/f.rb", "X = 1\n"),
+        ],
+        &[
+            ("README.md", "hello\n"),
+            ("Makefile", "y\n"),
+            ("config/x.yml", "a: 2\n"),
+            ("config/y.yml", "b: 1\n"),
+            ("spec/fixtures/f.rb", "X = 2\n"),
+        ],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    let lines: Vec<String> = hunk_lines(&text)
+        .take(5)
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "Makefile:1 unknown file (outside the verdict)",
+            "README.md:1 docs change (outside the verdict)",
+            "config/x.yml:1 config change",
+            "config/y.yml:1 config change, whitespace only (outside the verdict)",
+            "spec/fixtures/f.rb:1 fixture change (outside the verdict)",
+        ],
+        "{text}"
+    );
+}
+
+#[test]
+fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n"), ("b.rb", "def g(\n")],
+        &[("a.rb", "def f\n  2\nend\n"), ("b.rb", "def h(\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    let lines: Vec<&str> = hunk_lines(&text).take(2).collect();
+    assert_eq!(
+        lines,
+        [
+            "a.rb:2  logic             1.00  [literal_only]",
+            "b.rb:1  logic             0.00  syntax error on both sides; compared line by line",
+        ],
+        "{text}"
+    );
+}
+
+/// The text output's hunk lines: after the summary block and its blank line.
+fn hunk_lines(text: &str) -> std::str::Lines<'_> {
+    text.split_once("\n\n")
+        .map_or("", |(_, hunks)| hunks)
+        .lines()
 }

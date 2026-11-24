@@ -75,7 +75,7 @@ fn hunk_verdict(file: &FileChange, whitespace_only: bool, label: &Label) -> Verd
     let compared = label.residual.evidence.method != Method::None || !label.parts.is_empty();
     match file.category {
         Category::Binary | Category::Generated | Category::Vendored => Verdict::Unknown,
-        Category::Docs => Verdict::None,
+        Category::Docs | Category::Fixture => Verdict::None,
         _ if !compared && whitespace_only => Verdict::None,
         Category::Code | Category::Test | Category::Config | Category::Manifest if compared => {
             Verdict::of(label.verdict())
@@ -108,6 +108,14 @@ pub struct Meta {
     input: Option<Input>,
     /// Whether paths limited the diff; `None` for `norms`.
     paths: Option<bool>,
+    /// How many untracked files the paths hold, which a change ending in
+    /// the working tree leaves out, as `git diff` does; `None` for any
+    /// other change.
+    pub untracked: Option<usize>,
+    /// What was compared, for the text summary (`main...HEAD`,
+    /// `uncommitted changes in lib`); a GitHub change names its `source`.
+    #[serde(skip)]
+    pub subject: Option<String>,
 }
 
 impl Meta {
@@ -120,6 +128,8 @@ impl Meta {
             source,
             input: None,
             paths: None,
+            untracked: None,
+            subject: None,
         }
     }
 
@@ -149,6 +159,8 @@ pub enum Input {
     MergeBaseWorktree,
     /// `shapr PATH...`: `git diff HEAD -- PATH...`.
     Worktree,
+    /// `shapr --staged [REV]`: `git diff --cached [REV]`.
+    Staged,
     GithubPr,
     GithubCommit,
 }
@@ -636,6 +648,10 @@ fn line(out: &mut impl Write, record: &impl Serialize) -> io::Result<()> {
 }
 
 fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
+    summary_text(out, report)?;
+    if !report.hunks.is_empty() {
+        writeln!(out)?;
+    }
     let width = report
         .hunks
         .iter()
@@ -643,49 +659,68 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .max()
         .unwrap_or(0);
     for hunk in &report.hunks {
+        let outside = if hunk.verdict.counted() {
+            ""
+        } else {
+            " (outside the verdict)"
+        };
+        if let Some(plain) = uncompared(hunk) {
+            writeln!(out, "{:width$}  {plain}{outside}", place(hunk))?;
+            continue;
+        }
         // One line per part; the place names the hunk on its first.
         for (i, part) in hunk.parts.iter().enumerate() {
             let facets: Vec<&str> = part.facets.iter().map(|f| f.as_str()).collect();
-            writeln!(
-                out,
-                "{:width$}  {:<17} {:.2}  {}{}{}",
+            let reason = match part.reason.strip_prefix(classify::PLAIN_LOGIC) {
+                Some(rest) => rest.trim_start_matches("; "),
+                None => &part.reason,
+            };
+            let mut detail = vec![reason.to_string()];
+            if !facets.is_empty() {
+                detail.push(format!("[{}]", facets.join(", ")));
+            }
+            if !hunk.verdict.counted() && i == 0 {
+                detail.push(format!("({}: outside the verdict)", hunk.category.as_str()));
+            }
+            detail.retain(|d| !d.is_empty());
+            let line = format!(
+                "{:width$}  {:<17} {:.2}  {}",
                 if i == 0 { place(hunk) } else { String::new() },
                 part.kind.as_str(),
                 part.confidence.get(),
-                part.reason,
-                if facets.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", facets.join(", "))
-                },
-                if !hunk.verdict.counted() && i == 0 {
-                    format!(" ({}: outside the verdict)", hunk.category.as_str())
-                } else {
-                    String::new()
-                },
-            )?;
+                detail.join(" "),
+            );
+            writeln!(out, "{}", line.trim_end())?;
         }
         for line in hunk.style.iter().flat_map(crate::norms::text) {
             writeln!(out, "{:width$}  {line}", "")?;
         }
     }
+    Ok(())
+}
+
+/// The change's verdict and counts, then claims: the text output's first lines.
+fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     let s = &report.summary;
-    for line in crate::norms::trajectory::text(&s.config_trajectory) {
-        writeln!(out, "{line}")?;
-    }
-    claims(out, &s.claims)?;
-    let kinds: Vec<String> = s
-        .kinds
+    // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
+    let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
+    for part in report
+        .hunks
         .iter()
-        .filter(|(_, n)| **n > 0)
-        .map(|(k, n)| format!("{n} {k}"))
-        .collect();
+        .filter(|h| h.verdict.counted())
+        .flat_map(|h| &h.parts)
+    {
+        *kinds.entry(part.kind.as_str()).or_default() += 1;
+    }
+    let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{n} {k}")).collect();
     if let Some(source) = &report.meta.source {
         write!(out, "{}", source.name())?;
         if source.merge {
             write!(out, " (a merge, against its first parent)")?;
         }
         write!(out, ": ")?;
+    } else if let Some(subject) = &report.meta.subject {
+        write!(out, "{subject}: ")?;
     }
     let outside: Vec<String> = [Verdict::None, Verdict::Unknown]
         .iter()
@@ -725,7 +760,12 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         } else {
             String::new()
         },
-    )
+    )?;
+    for line in crate::norms::trajectory::text(&s.config_trajectory) {
+        writeln!(out, "{line}")?;
+    }
+    claims(out, &s.claims)?;
+    Ok(())
 }
 
 /// What the messages claim, and where the code doesn't bear a claim out.
@@ -746,7 +786,8 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         if claims.messages == 1 { "" } else { "s" }
     );
     match claimed.as_slice() {
-        [] => writeln!(out, "claims: none in {of}")?,
+        // Nothing claimed: nothing worth a line.
+        [] => {}
         [one] => writeln!(out, "claims: {one} of {of}")?,
         many => writeln!(out, "claims: {} (of {of})", many.join(", "))?,
     }
@@ -774,6 +815,26 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// A hunk in a file shapr didn't compare, by its category alone: `docs
+/// change`, `unknown file`. `None` for code or tests, whose reason says why.
+fn uncompared(hunk: &HunkRecord) -> Option<String> {
+    let [part] = hunk.parts.as_slice() else {
+        return None;
+    };
+    if hunk.parsed || part.evidence.comparison != Method::None {
+        return None;
+    }
+    Some(match hunk.category {
+        Category::Code | Category::Test => return None,
+        Category::Unknown | Category::Binary => format!("{} file", hunk.category.as_str()),
+        // A counted file outside the verdict changed only in whitespace.
+        category if category.counted() && hunk.verdict == Verdict::None => {
+            format!("{} change, whitespace only", category.as_str())
+        }
+        category => format!("{} change", category.as_str()),
+    })
 }
 
 /// `file:first-last` on the after side; a pure deletion names its before lines.

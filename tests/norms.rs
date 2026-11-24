@@ -99,6 +99,7 @@ fn a_directory_recurses_over_the_files_it_judges() {
         ("vendor/gems/x.rb", "X = \"x\"\n"),
         ("db/schema.rb", "S = \"s\"\n"),
         ("docs/example.rb", "E = \"e\"\n"),
+        ("spec/fixtures/f.rb", "F = \"f\"\n"),
     ]]);
     let files = |report: &Value| -> Vec<String> {
         (report["files"].as_array().unwrap().iter())
@@ -111,7 +112,7 @@ fn a_directory_recurses_over_the_files_it_judges() {
     assert_eq!(files(&all), ["lib/a.rb", "lib/deep/b.rb"]);
     assert_eq!(
         all["summary"]["skipped"],
-        serde_json::json!({"generated": 1, "vendored": 1, "docs": 1, "syntax_error": 0, "unsupported": 0})
+        serde_json::json!({"generated": 1, "vendored": 1, "docs": 1, "fixture": 1, "syntax_error": 0, "unsupported": 0})
     );
     assert_eq!(norms_json(dir.path(), &["."])["norms"], all["norms"]);
 }

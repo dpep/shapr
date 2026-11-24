@@ -115,7 +115,7 @@ A hunk's `verdict` is the first that applies:
 | verdict | when |
 |---|---|
 | `unknown` | The file is `binary`, `generated` or `vendored`. |
-| `none` | The file is `docs`. |
+| `none` | The file is `docs` or `fixture`. |
 | `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
 | `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.comparison` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
 | `behavior` | A `config` or `manifest` file shapr has no parser for: its text changed beyond whitespace, and that text is the setting. |
@@ -413,6 +413,7 @@ still parsed and classified. The first rule that matches wins:
 | `binary` | git reports the file as binary. |
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
 | `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
+| `fixture` | Under a `fixtures`, `__fixtures__` or `testdata` directory, at any depth, unless it is binary, vendored, or `.gitattributes` marks it `linguist-generated` or `linguist-documentation`. It wins over the name rules below and over `generated` by name: `spec/fixtures/Gemfile.lock` and `tests/fixtures/a.rb` are fixtures. Test data: not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; the tests that read it judge it. |
 | `docs` | `.gitattributes` marks it `linguist-documentation`; or it is under a `doc`, `docs` or `documentation` directory; or its extension is prose (`md`, `markdown`, `mdx`, `txt`, `rdoc`, `adoc`, `asciidoc`, `rst`, `org`, `textile`); or its name, extension aside, is `README`, `LICENSE`, `LICENCE`, `COPYING`, `CHANGELOG`, `CHANGES`, `HISTORY`, `NEWS`, `AUTHORS`, `CONTRIBUTORS` or `NOTICE` (any case). |
 | `test` | Under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `*_test.rs`, `*_test.go`, `*_test.py`, `test_*.rb`, `test_*.py`, `*.test.*`, `*.spec.*`, `tests.rs` or `test.rs`. |
 | `manifest` | A dependency manifest, by name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`. |
@@ -435,8 +436,8 @@ Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).
 
 A file's category decides whether its hunks count toward the verdict (see
-[Verdicts](#verdicts)). A `docs` file's `review_lines` is 0: prose isn't
-code to review. Generated and vendored files don't count toward size: their
+[Verdicts](#verdicts)). A `docs` or `fixture` file's `review_lines` is 0:
+prose and test data aren't code to review. Generated and vendored files don't count toward size: their
 `review_lines` is 0, and the summary's line sums, `behavior_lines`, `entropy` and
 `structure_share` leave them out. Their own `added`, `deleted` and other
 line counts stay as the diff has them. Generated-but-reviewed files such as
@@ -517,8 +518,9 @@ can check `schema` before reading the rest.
 | `version` | string | shapr's version. |
 | `command` | string | What produced the records that follow: `classify` (`shapr REV`, a range, paths, or a diff on stdin) or `norms` (`shapr norms`). Check it before reading `summary.verdict`, which a `norms` output doesn't have. |
 | `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local change or stdin. |
-| `input` | string or null | How the change was named (see [Input](#input)): `stdin`, `commit`, `range`, `merge_base_range`, `merge_base_worktree`, `worktree`, `github_pr` or `github_commit`; `null` for `norms`. |
+| `input` | string or null | How the change was named (see [Input](#input)): `stdin`, `commit`, `range`, `merge_base_range`, `merge_base_worktree`, `worktree`, `staged`, `github_pr` or `github_commit`; `null` for `norms`. |
 | `paths` | bool or null | Paths limited the diff (`shapr main..HEAD -- lib`); `null` for `norms`. |
+| `untracked` | int or null | Untracked files git doesn't ignore under the paths (the whole repository without paths), which a change ending in the working tree (`worktree`, `merge_base_worktree`) leaves out, as `git diff` does; stderr names up to three and the `git add -N` that includes them. `null` for any other form, stdin included, and for `norms`. |
 
 ## Input
 
@@ -532,6 +534,7 @@ Each way of naming a change is a git command, and `meta.input` names it:
 | `shapr --merge-base REF REV` | `git diff --merge-base REF REV`, that is `REF...REV` | `merge_base_range` |
 | `shapr --merge-base REF` | `git diff --merge-base REF`: from the merge base of REF and HEAD to the working tree, the branch's committed and uncommitted work | `merge_base_worktree` |
 | `shapr PATH...`, `shapr .` | `git diff HEAD -- PATH...`: uncommitted changes, staged and not | `worktree` |
+| `shapr --staged [REV]`, `--cached` | `git diff --cached [REV]`: the index against HEAD, or against REV; uses are searched in the index | `staged` |
 | no arguments | the unified diff on stdin | `stdin` |
 | a GitHub pull request or commit | see [GitHub input](#github-input) | `github_pr`, `github_commit` |
 
@@ -912,7 +915,7 @@ The hunk's `style`:
 
 | field | type | meaning |
 |---|---|---|
-| `skipped` | string or null | Why the file isn't judged: `generated`, `vendored` or `docs` (by [category](#categories), plus `db/schema.rb` and `vendor`, `third_party` and `node_modules` directories), or `syntax_error`. |
+| `skipped` | string or null | Why the file isn't judged: `generated`, `vendored`, `docs` or `fixture` (by [category](#categories), plus `db/schema.rb` and `vendor`, `third_party` and `node_modules` directories), or `syntax_error`. |
 | `direction` | string | The strongest of its norms' `direction` (`diverging`, then `converging`, `aligned`, `abstain`); `none` when no norm saw new code. One norm aligned beside another that abstains reads `aligned`: each norm's own `direction` says what backs it. |
 | `flagged` | bool | Some norm is `flagged`. |
 | `norms` | array | One per norm that saw new code in the hunk. Below. |
@@ -1044,7 +1047,7 @@ For a pull request per tier:
 `shapr norms -J | jq -r 'select(.record == "step" and .tier == 1) | .edits[].diff' | git apply`.
 
 `summary`: `files` (judged), `skipped` (per reason: `generated`, `vendored`,
-`docs`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
+`docs`, `fixture`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
 style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
 `lines_touched` (over the steps) and `config_unread`: config the files fall
 under that shapr didn't read, one note each (`inherit_gem: NAME`,
@@ -1159,9 +1162,9 @@ and `paths` (as `meta`), `flags` (the long names of the flags given, never their
 values), `format` (`text`, `json`, `ndjson`), `exit`, `duration_ms`, and
 `counts` (`files`, `hunks`, `kinds` and `verdict` from the summary; for
 `norms`, `files` and `steps`). It holds no paths, repositories, revisions,
-code, messages or URLs. `SHAPR_USAGE=0` turns logging off, `1` on, an
-absolute path moves the log; unset, it is on except under `CI=true` and in a
-debug build. Past 5 MB the log keeps its newest half.
+code, messages or URLs. `SHAPR_USAGE=0` (`false`, `off`, `no`) turns logging
+off, `1` (`true`, `on`, `yes`) on, an absolute path moves the log; unset, it is
+on except under `CI=true` and in a debug build. Past 5 MB the log keeps its newest half.
 
 | field | type | meaning |
 |---|---|---|

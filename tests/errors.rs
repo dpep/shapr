@@ -77,10 +77,7 @@ fn outside_a_repository_is_one_line() {
 fn a_range_that_isnt_a_revision_is_one_line() {
     let dir = repo(&[&[("a.rb", METHOD)]]);
     let message = error(&shapr(dir.path(), &["-J", "nope..HEAD"]), 2);
-    assert!(
-        message.starts_with("ambiguous argument 'nope..HEAD': unknown revision"),
-        "{message}"
-    );
+    assert_eq!(message, "nope..HEAD: no such revision");
     // `..` names the parent directory, a path outside the repository.
     let message = error(&shapr(dir.path(), &["-J", ".."]), 2);
     assert!(message.contains("outside repository"), "{message}");

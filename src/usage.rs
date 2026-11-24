@@ -73,8 +73,9 @@ pub fn counts(record: &impl Serialize, keys: &[&str]) {
 }
 
 /// Where the log is, and whether this run writes to it. `SHAPR_USAGE=0`
-/// turns it off, `1` on, and an absolute path moves it; unset, it is on
-/// except in a debug build or under `CI=true`.
+/// (`false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) on, and
+/// an absolute path moves it; unset, it is on except in a debug build or
+/// under `CI=true`.
 pub struct Location {
     pub path: Option<PathBuf>,
     pub enabled: bool,
@@ -83,28 +84,29 @@ pub struct Location {
 pub fn location() -> Location {
     let setting = std::env::var("SHAPR_USAGE").ok().filter(|v| !v.is_empty());
     let default = default_path();
-    match setting.as_deref() {
-        Some("0") => Location {
+    let word = setting.as_deref().map(str::to_ascii_lowercase);
+    match (word.as_deref(), setting.as_deref()) {
+        (Some("0" | "false" | "off" | "no"), _) => Location {
             path: default,
             enabled: false,
         },
-        Some("1") => Location {
+        (Some("1" | "true" | "on" | "yes"), _) => Location {
             enabled: default.is_some(),
             path: default,
         },
         // A relative path would make a log per working directory.
-        Some(path) if Path::new(path).is_absolute() => Location {
+        (_, Some(path)) if Path::new(path).is_absolute() => Location {
             path: Some(PathBuf::from(path)),
             enabled: true,
         },
-        Some(path) => {
+        (_, Some(path)) => {
             crate::verbose!("SHAPR_USAGE={path} isn't absolute: the usage log is off");
             Location {
                 path: default,
                 enabled: false,
             }
         }
-        None => {
+        (_, None) => {
             let ci = std::env::var("CI").is_ok_and(|v| v == "true");
             Location {
                 enabled: default.is_some() && !cfg!(debug_assertions) && !ci,

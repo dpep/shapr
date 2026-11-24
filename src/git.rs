@@ -84,9 +84,10 @@ impl Git {
         cmd
     }
 
-    /// `git diff RANGE -- PATHS`, in a fixed format: prefixes, rename
-    /// detection and three lines of context whatever the user's config says.
-    pub fn diff(&self, range: &str, paths: &[String]) -> Result<String> {
+    /// `git diff [--cached] RANGE -- PATHS`, in a fixed format: prefixes,
+    /// rename detection and three lines of context whatever the user's
+    /// config says.
+    pub fn diff(&self, range: &str, cached: bool, paths: &[String]) -> Result<String> {
         self.verify_range(range)?;
         // Against all its parents a merge diffs as a combined diff, or nothing.
         if let Some(rev) = range.strip_suffix("^!")
@@ -105,9 +106,9 @@ impl Git {
                 "--dst-prefix=b/",
                 "-M",
                 "-U3",
-                range,
-                "--",
             ])
+            .args(cached.then_some("--cached"))
+            .args([range, "--"])
             .args(paths))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
@@ -121,10 +122,26 @@ impl Git {
         })
     }
 
+    /// REV's abbreviated commit id.
+    pub fn short(&self, rev: &str) -> Option<String> {
+        let out = run(self.command().args(["rev-parse", "--short", rev, "--"])).ok()?;
+        Some(String::from_utf8_lossy(&out).trim().to_string())
+    }
+
     /// The best common ancestor of A and B.
     pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {
-        let out = run(self.command().args(["merge-base", a, b, "--"]))?;
-        Ok(String::from_utf8_lossy(&out).trim().to_string())
+        let out = self
+            .command()
+            .args(["merge-base", a, b, "--"])
+            .output()
+            .context("could not run git")?;
+        if !out.status.success() {
+            self.outside_repository(&String::from_utf8_lossy(&out.stderr))?;
+            if let Some(missing) = [a, b].into_iter().find(|r| !self.resolves(r)) {
+                bail!("{missing}: no such revision");
+            }
+        }
+        Ok(String::from_utf8_lossy(&check(out)?).trim().to_string())
     }
 
     /// ARGS, given with no `--`, as git reads them: the leading revisions,
@@ -145,9 +162,24 @@ impl Git {
             let first = first.strip_prefix("fatal: ").unwrap_or(first);
             let first = first.trim_end_matches('.');
             let usage = "shapr [REV...] -- [PATH...]";
-            if first.contains("both revision and filename") {
+            // git names the argument it stopped at: `ambiguous argument 'NAME': ...`.
+            let name = first.split('\'').nth(1).unwrap_or_default();
+            if first.contains("both revision and filename")
+                && let Some(at) = args.iter().position(|a| a == name)
+            {
+                let command = |split: usize| {
+                    let (before, after) = args.split_at(split);
+                    let words: Vec<&str> = std::iter::once("shapr")
+                        .chain(before.iter().map(String::as_str))
+                        .chain(["--"])
+                        .chain(after.iter().map(String::as_str))
+                        .collect();
+                    words.join(" ")
+                };
                 return Ok(Err(format!(
-                    "{first}. Use '--' to separate paths from revisions: {usage}"
+                    "`{name}` is both a revision and a path: `{}` for the revision, `{}` for the path",
+                    command(at + 1),
+                    command(at)
                 )));
             }
             if first.contains("no such path in the working tree") {
@@ -156,7 +188,12 @@ impl Git {
                 )));
             }
             if first.contains("unknown revision or path") {
-                bail!("{first}. Use '--' to separate paths from revisions: {usage}");
+                let what = if name.contains("..") {
+                    "revision"
+                } else {
+                    "revision or path"
+                };
+                bail!("{name}: no such {what}");
             }
             bail!("git: {first}");
         }
@@ -601,6 +638,24 @@ impl Git {
             "--",
             ":/",
         ]))?;
+        Ok(String::from_utf8_lossy(&out)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// The untracked files git doesn't ignore under PATHS (the whole
+    /// repository when empty), as `git diff` reads paths, and named relative
+    /// to where git runs, ready for `git add`.
+    pub fn untracked_in(&self, paths: &[String]) -> Result<Vec<String>> {
+        let mut cmd = self.command();
+        cmd.args(["ls-files", "-z", "--others", "--exclude-standard", "--"]);
+        match paths {
+            [] => cmd.arg(":/"),
+            paths => cmd.args(paths),
+        };
+        let out = run(&mut cmd)?;
         Ok(String::from_utf8_lossy(&out)
             .split('\0')
             .filter(|p| !p.is_empty())

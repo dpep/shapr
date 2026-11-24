@@ -18,6 +18,7 @@ EXAMPLES                          each is a git command: shapr X is git show/dif
   shapr main...                   a branch's commits, from where it left main
   shapr --merge-base main         everything on the branch, committed or not
   shapr .                         uncommitted changes (git diff HEAD -- .)
+  shapr --staged                  staged changes (git diff --cached); --cached is the same
   shapr main..HEAD -- lib         any form, limited to paths
   git diff --staged | shapr       a diff on stdin (needs `git diff` index lines)
   shapr -J main..HEAD             JSON lines: a meta record, each file and hunk, then a summary
@@ -37,7 +38,7 @@ EXAMPLES                          each is a git command: shapr X is git show/dif
 
   Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0. Only
   code, test, config and manifest files count toward the verdict: a docs-only change
-  is `none`, and lockfiles, vendored and binary files and unparsed languages are
+  is `none` (so is test data under fixtures/ or testdata/), and lockfiles, vendored and binary files and unparsed languages are
   `unknown`, counted in summary.verdicts.
 
 GITHUB (experimental: the forms, meta.source and the cache may change before 1.0)
@@ -52,8 +53,9 @@ USAGE LOG
   Each classify or norms run appends one JSON line to $XDG_STATE_HOME/shapr/usage.jsonl
   (else ~/.local/state/shapr/usage.jsonl): the command, input form, flag names, format,
   exit code, duration and counts. Never paths, repositories, revisions, code, messages
-  or URLs. SHAPR_USAGE=0 turns it off, an absolute path moves it; it is off under
-  CI=true. --usage summarizes it, --usage --reset empties it, --status shows where it is.
+  or URLs. SHAPR_USAGE=0 (false, off, no) turns it off, 1 (true, on, yes) on, and an
+  absolute path moves it; CI=true turns it off unless SHAPR_USAGE is set. --usage
+  summarizes it, --usage --reset empties it, --status shows where it is.
 
 EXIT CODES
   0   success, whatever the verdict: the verdict is in the output
@@ -70,7 +72,7 @@ EXIT CODES
     name = "shapr",
     version,
     about = "Classify the shape of a code change: format, comment, restyle, rename, move, extract, inline, or logic.",
-    override_usage = "shapr [OPTIONS] [REV [REV]] [[--] PATH...]\n       shapr [OPTIONS] --merge-base REF [REV] [[--] PATH...]\n       shapr norms [OPTIONS] [PATH]...",
+    override_usage = "shapr [OPTIONS] [REV [REV]] [[--] PATH...]\n       shapr [OPTIONS] --merge-base REF [REV] [[--] PATH...]\n       shapr [OPTIONS] --staged [REV] [[--] PATH...]\n       shapr norms [OPTIONS] [PATH]...",
     after_help = AFTER_HELP
 )]
 struct Cli {
@@ -93,6 +95,11 @@ struct Cli {
     /// (`REF...REV`).
     #[arg(long, value_name = "REF")]
     merge_base: Option<String>,
+
+    /// The staged changes: the index against HEAD, or against REV, like
+    /// `git diff --cached [REV]`.
+    #[arg(long, visible_alias = "cached", conflicts_with = "merge_base")]
+    staged: bool,
 
     /// Run as if shapr was started in DIR, like `git -C`. GIT_DIR,
     /// GIT_WORK_TREE and GIT_INDEX_FILE are ignored, so DIR's repository
@@ -130,12 +137,12 @@ struct Cli {
 
     /// Experimental. Show the GitHub cache: its path, the repositories in it,
     /// and their size; and the usage log's path and size.
-    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "clear_cache"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "staged", "clear_cache"])]
     status: bool,
 
     /// Summarize the usage log: runs by command, input form, flag, kind and
     /// verdict (see USAGE LOG below).
-    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "status", "clear_cache"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "staged", "status", "clear_cache"])]
     usage: bool,
 
     /// With --usage, empty the usage log first.
@@ -144,7 +151,7 @@ struct Cli {
 
     /// Experimental. Remove every cached GitHub repository, then show the
     /// cache.
-    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "staged"])]
     clear_cache: bool,
 
     /// The share a style needs to be a norm of the code around a hunk, from
@@ -329,7 +336,9 @@ fn dispatch() -> ExitCode {
     let paths = local.is_some_and(|(_, paths)| !paths.is_empty());
     crate::usage::input(form, paths);
     let text = match &input {
-        Input::Local { range, paths, .. } => git.diff(range, paths),
+        Input::Local { form, range, paths } => {
+            git.diff(range, *form == report::Input::Staged, paths)
+        }
         Input::GitHub(target) => {
             let cache = match github::Cache::resolve(cli.cache_dir.clone()) {
                 Ok(cache) => cache,
@@ -338,7 +347,7 @@ fn dispatch() -> ExitCode {
             match github::fetch(target, &cache) {
                 Err(error) => return fail(format, &format!("{error:#}"), ERROR),
                 Ok(fetched) => {
-                    let text = fetched.git.diff(&fetched.range, &[]);
+                    let text = fetched.git.diff(&fetched.range, false, &[]);
                     remote = Some(fetched);
                     text
                 }
@@ -393,6 +402,7 @@ fn dispatch() -> ExitCode {
     // its own after side only by blob ids.
     let states = match (stdin, git.after_revision(range.as_deref())) {
         (_, Some(rev)) => vec![git::State::Revision(rev)],
+        (false, None) if form == report::Input::Staged => vec![git::State::Index],
         (false, None) => vec![git::State::Worktree],
         (true, None) => git.stdin_after(&files),
     };
@@ -401,6 +411,11 @@ fn dispatch() -> ExitCode {
             "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
         );
     }
+    // `git diff` never shows untracked files: say so rather than look clean.
+    let untracked = match (local, states.as_slice()) {
+        (Some((_, paths)), [git::State::Worktree]) => git.untracked_in(paths).ok(),
+        _ => None,
+    };
     let before = git.before_revision(range.as_deref());
     let after = match states.first() {
         Some(git::State::Revision(rev)) => Some(rev.as_str()),
@@ -437,12 +452,16 @@ fn dispatch() -> ExitCode {
         _ => &union,
     };
     let labels = classify::classify(&change, outside);
-    let mut report = report::build(
-        &change,
-        &labels,
-        claims,
-        report::Meta::new("classify", source).input(form, paths),
-    );
+    let mut meta = report::Meta::new("classify", source).input(form, paths);
+    meta.subject = subject(&input, cli.merge_base.as_deref(), &git);
+    meta.untracked = untracked.as_ref().map(Vec::len);
+    if let Some(note) = untracked
+        .as_deref()
+        .and_then(|files| untracked_note(files, cli.dir.as_deref()))
+    {
+        eprintln!("shapr: {note}");
+    }
+    let mut report = report::build(&change, &labels, claims, meta);
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
     for ((hunk, style), label) in report
@@ -490,6 +509,7 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
     if let [arg] = cli.args.as_slice()
         && !dashdash
         && cli.merge_base.is_none()
+        && !cli.staged
         && !cli
             .dir
             .as_deref()
@@ -513,7 +533,10 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
         false => git.split(&cli.args).map_err(error)?.map_err(usage)?,
     };
     paths.extend(cli.paths.iter().cloned());
-    let shape = shape(&revisions, cli.merge_base.as_deref(), !paths.is_empty()).map_err(usage)?;
+    let shape = match cli.staged {
+        true => staged(&revisions).map_err(usage)?,
+        false => shape(&revisions, cli.merge_base.as_deref(), !paths.is_empty()).map_err(usage)?,
+    };
     let (form, range) = match shape {
         None => return Ok(Input::Stdin),
         Some(Shape::Commit(rev)) => (
@@ -527,8 +550,86 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
             git.merge_base(&base, "HEAD").map_err(error)?,
         ),
         Some(Shape::Worktree) => (report::Input::Worktree, "HEAD".to_string()),
+        Some(Shape::Staged(rev)) => (report::Input::Staged, rev),
     };
     Ok(Input::Local { form, range, paths })
+}
+
+/// The untracked FILES a working-tree diff left out, and the command that
+/// adds them to it; `None` when there are none. DIR is `-C`'s.
+fn untracked_note(files: &[String], dir: Option<&Path>) -> Option<String> {
+    let git = match dir {
+        Some(dir) => format!("git -C {} add -N", shell_word(&dir.to_string_lossy())),
+        None => "git add -N".to_string(),
+    };
+    let named: Vec<&str> = files.iter().take(3).map(String::as_str).collect();
+    let words: Vec<String> = named.iter().map(|f| shell_word(f)).collect();
+    Some(match files.len() {
+        0 => return None,
+        1 => format!(
+            "1 untracked file not shown: {} ({git} {} to include it)",
+            named[0], words[0]
+        ),
+        n @ 2..=3 => format!(
+            "{n} untracked files not shown: {} ({git} {} to include them)",
+            named.join(", "),
+            words.join(" ")
+        ),
+        n => format!(
+            "{n} untracked files not shown: {}, ... ({git} <path> to include them)",
+            named.join(", ")
+        ),
+    })
+}
+
+/// WORD as one shell word: quoted when it holds anything but plain path
+/// characters.
+fn shell_word(word: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_-./@+:,=".contains(c);
+    if !word.is_empty() && word.chars().all(plain) {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// What INPUT compares, in the words of the text summary; `None` for a
+/// GitHub change, which names its source.
+fn subject(input: &Input, base: Option<&str>, git: &git::Git) -> Option<String> {
+    let Input::Local { form, range, paths } = input else {
+        return matches!(input, Input::Stdin).then(|| "stdin".to_string());
+    };
+    // git's notation with an empty side read as HEAD: `main...` is `main...HEAD`.
+    let sides = |dots: &str| {
+        let (from, to) = range.split_once(dots)?;
+        let side = |s: &str| if s.is_empty() { "HEAD" } else { s }.to_string();
+        Some(format!("{}{dots}{}", side(from), side(to)))
+    };
+    let compared = match form {
+        report::Input::Commit => {
+            let rev = range
+                .strip_suffix("^!")
+                .or_else(|| range.rsplit_once("..").map(|(_, rev)| rev))
+                .unwrap_or(range);
+            format!(
+                "commit {}",
+                git.short(rev).unwrap_or_else(|| rev.to_string())
+            )
+        }
+        report::Input::Range | report::Input::MergeBaseRange => sides("...")
+            .or_else(|| sides(".."))
+            .unwrap_or_else(|| range.clone()),
+        report::Input::MergeBaseWorktree => format!("{}...working tree", base.unwrap_or(range)),
+        report::Input::Worktree => "uncommitted changes".to_string(),
+        report::Input::Staged if range == "HEAD" => "staged changes".to_string(),
+        report::Input::Staged => format!("staged changes against {range}"),
+        report::Input::Stdin | report::Input::GithubPr | report::Input::GithubCommit => {
+            return None;
+        }
+    };
+    Some(match paths.as_slice() {
+        [] => compared,
+        paths => format!("{compared} in {}", paths.join(" ")),
+    })
 }
 
 /// The form revisions take, before git is asked anything.
@@ -543,6 +644,20 @@ enum Shape {
     MergeBaseWorktree(String),
     /// HEAD against the working tree.
     Worktree,
+    /// REV against the index: `git diff --cached REV`.
+    Staged(String),
+}
+
+/// The shape of REVISIONS under `--staged`: one revision at most, as
+/// `git diff --cached` takes.
+fn staged(revisions: &[String]) -> Result<Option<Shape>, String> {
+    match revisions {
+        [] => Ok(Some(Shape::Staged("HEAD".to_string()))),
+        [rev] if !is_range(rev) => Ok(Some(Shape::Staged(rev.clone()))),
+        _ => Err("--staged takes one revision at most, not a range: \
+             shapr --staged [REV] [-- PATH...]"
+            .to_string()),
+    }
 }
 
 /// The shape of REVISIONS under `--merge-base BASE`, with or without PATHS;
@@ -729,6 +844,11 @@ fn usage(format: Format, reset: bool, quiet: bool) -> ExitCode {
     let rendered = match format {
         Format::Json => serde_json::to_string_pretty(&log).map_err(std::io::Error::from),
         Format::Ndjson => serde_json::to_string(&log).map_err(std::io::Error::from),
+        Format::Text if log.runs == 0 => Ok(match &log.path {
+            Some(path) if log.enabled => format!("no runs logged yet at {path}"),
+            Some(path) => format!("no runs logged yet at {path} (the log is off)"),
+            None => "no runs logged: no home directory for the log".to_string(),
+        }),
         Format::Text => {
             let span = match (&log.first, &log.last) {
                 (Some(first), Some(last)) => format!(", {first} to {last}"),
