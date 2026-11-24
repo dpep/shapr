@@ -144,6 +144,13 @@ pub fn run(args: Vec<String>) -> ExitCode {
         },
     };
     for path in &cli.files {
+        if path.is_dir() {
+            let message = format!(
+                "{}: directories aren't supported yet; name the files",
+                path.display()
+            );
+            return crate::cli::fail(format, &message, crate::cli::USAGE);
+        }
         let source = match std::fs::read(path) {
             Ok(source) => source,
             Err(error) => {

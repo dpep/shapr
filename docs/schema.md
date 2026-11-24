@@ -849,7 +849,7 @@ Each norm:
 *Experimental.* `shapr norms FILE...` reports each file's norms with no
 diff, as a `meta` record, then per file a `file` record and its `norm`
 records, then a `summary`. Under `-j` they are one object: `meta`, `files`,
-`norms`, `summary`.
+`norms`, `summary`. A directory isn't read yet: naming one is a usage error (exit 64).
 
 `file`: `file`, `language` (`null` when no language has norms) and
 `skipped` (as in a hunk's `style`, or `unsupported`).

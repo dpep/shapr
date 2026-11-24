@@ -68,3 +68,19 @@ fn text_shows_the_evidence_per_scope() {
         "{out}"
     );
 }
+
+/// A directory isn't read yet: a usage error that says so, not an I/O error.
+#[test]
+fn a_directory_is_a_usage_error_for_now() {
+    let dir = repo(&[&[("lib/a.rb", "A = 'a'\n")]]);
+    let out = shapr(dir.path(), &["norms", "-j", "lib"]);
+    assert_eq!(out.status.code(), Some(64), "{out:?}");
+    let error = report(&out);
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("directories aren't supported yet"),
+        "{error}"
+    );
+}
