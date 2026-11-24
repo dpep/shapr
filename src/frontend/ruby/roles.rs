@@ -245,16 +245,13 @@ impl Roles {
 }
 
 /// What the core reads off a node beside its role: a method, class or
-/// module body bounds its locals; `def self.x` has a receiver; a call's
-/// `arguments` list.
+/// module body bounds its locals; `def self.x` (or `self::x`) has a
+/// receiver; a call's `arguments` list.
 pub(super) fn flags(node: &Node<'_>) -> Flags {
     match node {
         Node::DefNode { .. } => {
-            // Only `def x.name` has one; `def x::name` is left out.
-            let dotted = node.as_def_node().is_some_and(|d| {
-                d.receiver().is_some() && d.operator_loc().is_some_and(|o| o.as_slice() == b".")
-            });
-            match dotted {
+            let singleton = node.as_def_node().is_some_and(|d| d.receiver().is_some());
+            match singleton {
                 true => Flags::SCOPE | Flags::RECEIVER,
                 false => Flags::SCOPE,
             }

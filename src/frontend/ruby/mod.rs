@@ -425,7 +425,9 @@ mod tests {
     #[test]
     fn receivers_argument_lists_and_calls_on_self_are_marked() {
         use crate::tree::Flags;
-        let tree = parse("def self.a(x)\n  go(x)\n  self.go\n  self&.go\n  -self\nend\n");
+        let tree = parse(
+            "def self.a(x)\n  go(x)\n  self.go\n  self&.go\n  -self\nend\ndef self::b; end\ndef c; end\n",
+        );
         let flagged = |flag: Flags| -> Vec<&str> {
             tree.nodes
                 .iter()
@@ -433,7 +435,7 @@ mod tests {
                 .map(|n| n.kind)
                 .collect()
         };
-        assert_eq!(flagged(Flags::RECEIVER), ["def"]);
+        assert_eq!(flagged(Flags::RECEIVER), ["def", "def"]);
         assert_eq!(flagged(Flags::ARGUMENTS), ["arguments"]);
         let calls: Vec<Receiver> = tree
             .nodes

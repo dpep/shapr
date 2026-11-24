@@ -354,14 +354,24 @@ end
 
 #[test]
 fn a_class_method_calling_a_new_instance_method_is_logic() {
-    let before = "class Shelf
+    for receiver in ["self.", "self::"] {
+        let before = SHELF.replace("self.", receiver);
+        let after = SHELF_SHOWN.replace("self.", receiver);
+        let (report, _) = classify(&before, &after);
+        assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+        assert_eq!(report["summary"]["verdict"], "behavior");
+    }
+}
+
+const SHELF: &str = "class Shelf
   def self.label(book)
     title = book.title.strip
     puts title.upcase.center(20)
   end
 end
 ";
-    let after = "class Shelf
+
+const SHELF_SHOWN: &str = "class Shelf
   def self.label(book)
     show(book)
   end
@@ -372,10 +382,6 @@ end
   end
 end
 ";
-    let (report, _) = classify(before, after);
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    assert_eq!(report["summary"]["verdict"], "behavior");
-}
 
 #[test]
 fn inlining_a_method_still_called_elsewhere_is_logic() {
