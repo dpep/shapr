@@ -520,3 +520,35 @@ fn path_patterns_built_to_blow_up_finish() {
         "space"
     );
 }
+
+/// `.editorconfig` numeric ranges match by comparing, so neither the
+/// widest range nor a product of ranges is expanded; a section glob past the
+/// length cap is ignored and named.
+#[test]
+fn editorconfig_ranges_match_without_expanding() {
+    let config = format!(
+        "[v{{-9223372036854775808..9223372036854775807}}.rb]\ntrim_trailing_whitespace = true\n\
+         [{{0..999}}{{0..999}}{{0..999}}.rb]\ninsert_final_newline = true\n\
+         [{}]\nindent_size = 3\n",
+        "a".repeat(2000)
+    );
+    let dir = repo(&[&[
+        (".editorconfig", &config),
+        ("lib/v-12.rb", "def a\n  'x'\nend\n"),
+    ]]);
+    let out = shapr_within(dir.path(), &["norms", "-j", "lib/v-12.rb"], 30);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let report = report(&out);
+    assert_eq!(
+        norm(&report, "Layout/TrailingWhitespace")["configured"],
+        "no_trailing_whitespace"
+    );
+    assert_eq!(
+        norm(&report, "Layout/TrailingEmptyLines")["configured"],
+        Value::Null
+    );
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([".editorconfig: line 5 not read (a section glob over 1024 characters)"])
+    );
+}

@@ -300,10 +300,14 @@ impl Language for Ruby {
     /// `.editorconfig`, then `.rubocop.yml`: where both set a norm, the
     /// Ruby-specific file wins.
     fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> Configured {
-        let mut styles = from_editorconfig(&editorconfig::properties(path, snapshot));
+        let editorconfig = editorconfig::properties(path, snapshot);
+        super::warn_unread(&editorconfig.unread);
+        let mut unread = editorconfig.unread;
+        let mut styles = from_editorconfig(&editorconfig.values);
         let Some(config) = config::find(path, snapshot).map(|p| config::load(&p, snapshot)) else {
             return Configured {
                 styles,
+                unread,
                 ..Configured::default()
             };
         };
@@ -349,7 +353,10 @@ impl Language for Ruby {
             styles,
             off,
             todo,
-            unread: config.unread,
+            unread: {
+                unread.extend(config.unread);
+                unread
+            },
         }
     }
 }
