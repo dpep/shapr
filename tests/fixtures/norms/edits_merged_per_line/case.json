@@ -1,0 +1,31 @@
+{
+  "description": "several deviations on one line, of one norm or several, share one edit that fixes them all, so it applies",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": {
+            "$every": {
+              "deviations": {
+                "$every": {
+                  "edit": "--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -7,1 +7,1 @@\n-    v = { :e => \"t\", :f => 1 }\n+    v = { e: 't', f: 1 }\n"
+                }
+              }
+            },
+            "$some": {
+              "norm": "Style/HashSyntax",
+              "deviations": [
+                {
+                  "line": 7
+                },
+                {
+                  "line": 7
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

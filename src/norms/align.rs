@@ -97,6 +97,10 @@ pub struct Deviation {
     pub style: String,
     pub expected: String,
     pub edit: Option<String>,
+    /// What `edit` replaces, and whether it renames, for merging edits that
+    /// share a line.
+    #[serde(skip)]
+    fix: Option<(Vec<Replace>, bool)>,
 }
 
 /// Text lines for a hunk's style: diverging and converging norms only, as
@@ -275,11 +279,12 @@ fn file_styles(
         hunks
             .iter()
             .map(|hunk| {
-                let norms: Vec<Entry> = language
+                let mut norms: Vec<Entry> = language
                     .norms()
                     .iter()
                     .filter_map(|def| file.entry(def, hunk))
                     .collect();
+                file.merge(&mut norms);
                 HunkStyle {
                     skipped: None,
                     direction: norms
@@ -511,19 +516,23 @@ impl File<'_> {
             Some(expected) => judged
                 .iter()
                 .filter(|o| o.style != *expected)
-                .map(|o| Deviation {
-                    line: o.line,
-                    column: o.column,
-                    style: o.style.clone(),
-                    expected: expected.clone(),
-                    edit: (o.fix.iter())
+                .map(|o| {
+                    let fix = (o.fix.iter())
                         .filter(|_| !unchecked(o))
                         .find(|(style, _)| style == expected)
                         .map(|(_, replaces)| edit::endings(self.source, replaces))
                         .filter(|replaces| self.inside(hunk, replaces))
                         .filter(|replaces| edit::keeps(self.path, self.tree, replaces, def.renames))
-                        .filter(|replaces| !def.shared || self.unshared(replaces))
-                        .and_then(|replaces| edit::unified(self.path, self.source, &replaces)),
+                        .filter(|replaces| !def.shared || self.unshared(replaces));
+                    Deviation {
+                        line: o.line,
+                        column: o.column,
+                        style: o.style.clone(),
+                        expected: expected.clone(),
+                        edit: (fix.as_ref())
+                            .and_then(|replaces| edit::unified(self.path, self.source, replaces)),
+                        fix: fix.map(|replaces| (replaces, def.renames)),
+                    }
                 })
                 .collect(),
             None => Vec::new(),
@@ -546,6 +555,71 @@ impl File<'_> {
             flagged: false,
             deviations,
         })
+    }
+
+    /// Edits sharing a line, of one norm or several, become one edit that
+    /// applies them all, given to each: whole-line diffs of the same line
+    /// don't apply one after another. Edits that overlap, or whose union
+    /// isn't kept, stay apart.
+    fn merge(&self, norms: &mut [Entry]) {
+        let lines = |replaces: &[Replace]| -> BTreeSet<usize> {
+            (replaces.iter())
+                .flat_map(|r| {
+                    let first = self.index.line(r.span.start);
+                    first
+                        ..=self
+                            .index
+                            .line(r.span.end.max(r.span.start + 1) - 1)
+                            .max(first)
+                })
+                .collect()
+        };
+        // The lines each group touches, and its deviations (norm, deviation).
+        type Group = (BTreeSet<usize>, Vec<(usize, usize)>);
+        let mut groups: Vec<Group> = Vec::new();
+        for (n, entry) in norms.iter().enumerate() {
+            for (d, deviation) in entry.deviations.iter().enumerate() {
+                let Some((replaces, _)) = &deviation.fix else {
+                    continue;
+                };
+                let mut group = (lines(replaces), vec![(n, d)]);
+                // Join every group sharing a line, as a rename spans several.
+                while let Some(i) = groups.iter().position(|g| !g.0.is_disjoint(&group.0)) {
+                    let (l, members) = groups.swap_remove(i);
+                    group.0.extend(l);
+                    group.1.extend(members);
+                }
+                groups.push(group);
+            }
+        }
+        for (_, members) in groups.into_iter().filter(|(_, m)| m.len() > 1) {
+            let fixes: Vec<&(Vec<Replace>, bool)> = (members.iter())
+                .filter_map(|&(n, d)| norms[n].deviations[d].fix.as_ref())
+                .collect();
+            let mut all: Vec<Replace> = fixes.iter().flat_map(|(r, _)| r.clone()).collect();
+            all.sort_by_key(|r| (r.span.start, r.span.end));
+            all.dedup();
+            let overlaps = all.windows(2).any(|w| w[0].span.end > w[1].span.start);
+            // Respellings must keep the program; a rename among them need
+            // only parse once applied with them.
+            let respell: Vec<Replace> = (fixes.iter())
+                .filter(|(_, renames)| !renames)
+                .flat_map(|(r, _)| r.clone())
+                .collect();
+            let renames = fixes.iter().any(|(_, renames)| *renames);
+            let kept = !overlaps
+                && edit::keeps(self.path, self.tree, &respell, false)
+                && (!renames || edit::keeps(self.path, self.tree, &all, true));
+            let Some(merged) = kept
+                .then(|| edit::unified(self.path, self.source, &all))
+                .flatten()
+            else {
+                continue;
+            };
+            for (n, d) in members {
+                norms[n].deviations[d].edit = Some(merged.clone());
+            }
+        }
     }
 
     /// Every line of `lines` is one the change deleted somewhere, with the
