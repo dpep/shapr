@@ -1098,7 +1098,7 @@ fn the_text_summary_counts_kinds_and_leaves_out_what_says_nothing() {
     let out = shapr(dir.path(), &["HEAD"]);
     let text = String::from_utf8_lossy(&out.stdout);
     let last = text.lines().next().unwrap_or_default();
-    assert!(last.contains(": behavior: 1 hunk (1 logic)"), "{text}");
+    assert!(last.starts_with("behavior: 1 hunk (1 logic)"), "{text}");
     assert!(!last.contains("comments"), "{text}");
     assert!(!last.contains("structure share"), "{text}");
     assert!(
@@ -1202,7 +1202,7 @@ fn staged_is_the_index_against_head_or_a_revision() {
 }
 
 #[test]
-fn the_text_summary_names_what_was_compared() {
+fn the_text_summary_names_what_shapr_chose_to_compare() {
     let dir = branched();
     git(dir.path(), &["add", "lib/b.rb"]);
     let summary = |args: &[&str]| {
@@ -1212,13 +1212,17 @@ fn the_text_summary_names_what_was_compared() {
         let last = text.lines().next().unwrap_or_default().to_string();
         last.split(": ").next().unwrap().to_string()
     };
-    let feat = git(dir.path(), &["rev-parse", "--short", "feat"]);
-    assert_eq!(summary(&["feat"]), format!("commit {}", feat.trim()));
-    assert_eq!(summary(&["main...feat"]), "main...feat");
-    assert_eq!(summary(&["main..."]), "main...HEAD");
-    assert_eq!(summary(&["main", "feat"]), "main..feat");
+    // Revisions the caller typed aren't echoed back: the line starts with the verdict.
+    for args in [
+        &["feat"][..],
+        &["main...feat"],
+        &["main..."],
+        &["main", "feat"],
+        &["main..feat", "--", "lib"],
+    ] {
+        assert_eq!(summary(args), "behavior", "{args:?}");
+    }
     assert_eq!(summary(&["a.rb"]), "uncommitted changes in a.rb");
-    assert_eq!(summary(&["main..feat", "--", "lib"]), "main..feat in lib");
     assert_eq!(summary(&["--merge-base", "main"]), "main...working tree");
     assert_eq!(summary(&["--staged"]), "staged changes");
     assert_eq!(
