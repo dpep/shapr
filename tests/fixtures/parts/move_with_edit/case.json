@@ -1,0 +1,59 @@
+{
+  "description": "a move with an edit is a move part and a residual; each half carries its side of the edited line",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "move"
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "count": 1,
+                  "start": 4
+                },
+                {
+                  "count": 1,
+                  "start": 7
+                }
+              ]
+            }
+          }
+        ],
+        "review_lines": 1
+      },
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "move",
+            "structure": true
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "after": [
+                {
+                  "count": 1,
+                  "start": 25
+                },
+                {
+                  "count": 1,
+                  "start": 28
+                }
+              ]
+            }
+          }
+        ],
+        "review_lines": 1
+      }
+    ],
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}

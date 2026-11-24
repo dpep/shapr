@@ -1,0 +1,29 @@
+{
+  "description": "a move into another class is a move part that is not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "verdict": "behavior",
+        "review_lines": 1,
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": [
+                "owner"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior",
+      "move_contexts": {
+        "owner": 2
+      }
+    }
+  }
+}

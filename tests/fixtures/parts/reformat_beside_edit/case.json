@@ -1,0 +1,51 @@
+{
+  "description": "a reformat beside an edit is a format part and a residual",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "review_lines": 2,
+        "parts": [
+          {
+            "kind": "format_only",
+            "lines": {
+              "before": [
+                {
+                  "start": 2,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 2,
+                  "count": 1
+                }
+              ]
+            }
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "start": 3,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 3,
+                  "count": 1
+                }
+              ]
+            },
+            "confidence": 1.0
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}

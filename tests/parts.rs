@@ -1,5 +1,6 @@
 //! End to end: a hunk's parts (the structural changes proven in it) and its
-//! residual (the lines no part explains).
+//! residual (the lines no part explains), where the case checks `reason`;
+//! the rest are fixtures under tests/fixtures/parts.
 
 use serde_json::json;
 
@@ -64,37 +65,6 @@ fn a_rename_and_an_edit_in_one_hunk_are_a_rename_part_and_a_residual() {
 }
 
 #[test]
-fn a_rename_and_a_reformat_are_two_structure_parts() {
-    let before = "def area(n)\n  m  =  1\n  n + m\nend\n";
-    let after = "def area(count)\n  m = 1\n  count + m\nend\n";
-    let report = ruby(before, after);
-    let hunk = &hunks(&report)[0];
-    assert_eq!(part_kinds(hunk), ["format_only", "rename"], "{report:#}");
-    assert_eq!(lines(part(hunk, "format_only")), (vec![2], vec![2]));
-    assert_eq!(lines(part(hunk, "rename")), (vec![1, 3], vec![1, 3]));
-    assert_eq!(hunk["kind"], "rename");
-    assert_eq!(hunk["verdict"], "structure");
-    assert_eq!(part(hunk, "rename")["confidence"], 1.0);
-    assert_eq!(hunk["review_lines"], 0);
-    assert_eq!(report["summary"]["verdict"], "structure");
-}
-
-#[test]
-fn a_reformat_beside_an_edit_is_a_format_part_and_a_residual() {
-    let before = "def area\n  x  =  1\n  y = 2\nend\n";
-    let after = "def area\n  x = 1\n  y = 3\nend\n";
-    let report = ruby(before, after);
-    let hunk = &hunks(&report)[0];
-    assert_eq!(part_kinds(hunk), ["format_only", "logic"], "{report:#}");
-    assert_eq!(lines(part(hunk, "format_only")), (vec![2], vec![2]));
-    assert_eq!(lines(part(hunk, "logic")), (vec![3], vec![3]));
-    assert_eq!(hunk["kind"], "logic");
-    assert_eq!(part(hunk, "logic")["confidence"], 1.0);
-    assert_eq!(hunk["review_lines"], 2);
-    assert_eq!(report["summary"]["verdict"], "mixed");
-}
-
-#[test]
 fn a_rename_whose_new_name_new_code_also_defines_is_logic() {
     let before =
         "class Meter\n  def compute\n    1\n  end\n\n  def run\n    compute + 2\n  end\nend\n";
@@ -124,111 +94,4 @@ fn a_rename_whose_new_name_new_code_also_defines_is_logic() {
         "{reasons:?}"
     );
     assert_eq!(report["summary"]["verdict"], "behavior");
-}
-
-/// A method with a few statements, so it is well above the size floor.
-fn method(name: &str, value: &str) -> String {
-    format!("  def {name}(x)\n    y = x * {value}\n    log(y)\n    y + 1\n  end\n")
-}
-
-fn class(name: &str, body: &[&str]) -> String {
-    format!("class {name}\n{}end\n", body.join("\n"))
-}
-
-#[test]
-fn a_move_with_an_edit_is_a_move_part_and_a_residual() {
-    let a = method("first", "2");
-    let filler: Vec<String> = (0..3).map(|i| method(&format!("m{i}"), "5")).collect();
-    let b = method("second", "3");
-    let changed = b.replace("log(y)", "warn(y)");
-    let mut before: Vec<&str> = vec![&b, &a];
-    before.extend(filler.iter().map(String::as_str));
-    let mut after: Vec<&str> = vec![&a];
-    after.extend(filler.iter().map(String::as_str));
-    after.push(&changed);
-    let report = ruby(&class("Shape", &before), &class("Shape", &after));
-    let [from, to] = &hunks(&report)[..] else {
-        panic!("{report:#}")
-    };
-    // Each half carries its side of the edited line.
-    for (hunk, side) in [(from, 0), (to, 1)] {
-        assert_eq!(part_kinds(hunk), ["move", "logic"], "{report:#}");
-        assert_eq!(hunk["kind"], "logic");
-        assert_eq!(hunk["review_lines"], 1);
-        let residual = lines(part(hunk, "logic"));
-        let edited = [residual.0, residual.1][side].clone();
-        assert!(!edited.is_empty(), "{report:#}");
-    }
-    assert_eq!(part(to, "move")["structure"], true);
-    assert_eq!(report["summary"]["verdict"], "mixed");
-}
-
-#[test]
-fn a_move_into_another_class_is_a_move_part_that_is_not_structure() {
-    let a = method("first", "2");
-    let b = method("second", "3");
-    let source = format!(
-        "{}\n{}",
-        class("Left", &[&a, &b]),
-        class("Right", &[&method("z", "1")])
-    );
-    let target = format!(
-        "{}\n{}",
-        class("Left", &[&a]),
-        class("Right", &[&method("z", "1"), &b])
-    );
-    let report = ruby(&source, &target);
-    for hunk in hunks(&report) {
-        let moved = part(hunk, "move");
-        assert_eq!(moved["structure"], false, "{report:#}");
-        assert_eq!(moved["detail"]["context"], json!(["owner"]));
-        assert_eq!(hunk["kind"], "logic");
-        assert_eq!(hunk["verdict"], "behavior");
-        assert_eq!(hunk["review_lines"], 1);
-    }
-    assert_eq!(report["summary"]["verdict"], "behavior");
-    assert_eq!(report["summary"]["move_contexts"]["owner"], 2);
-}
-
-const RENDER: &str = "class Report
-  def render(title)
-    puts title
-    puts \"-\" * 10
-    puts \"=\" * 10
-    puts \"end\"
-  end
-
-  def footer
-    puts 1
-  end
-end
-";
-
-const RENDER_EXTRACTED: &str = "class Report
-  def render(title)
-    puts title
-    rule
-    puts \"end\"
-  end
-
-  def rule
-    puts \"-\" * 10
-    puts \"=\" * 10
-  end
-
-  def footer
-    puts 2
-  end
-end
-";
-
-#[test]
-fn an_extract_beside_an_edit_is_an_extract_part_and_a_residual() {
-    let report = ruby(RENDER, RENDER_EXTRACTED);
-    let hunk = &hunks(&report)[0];
-    assert!(part_kinds(hunk).contains(&"extract"), "{report:#}");
-    assert_eq!(hunk["kind"], "logic");
-    // Only the edited sibling is left over.
-    assert_eq!(lines(part(hunk, "logic")), (vec![10], vec![14]));
-    assert_eq!(report["summary"]["verdict"], "mixed");
 }

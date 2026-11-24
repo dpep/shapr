@@ -1,0 +1,35 @@
+{
+  "description": "an extract beside an edit is an extract part and a residual: only the edited sibling is left over",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "extract"
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "start": 10,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 14,
+                  "count": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}
