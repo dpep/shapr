@@ -3,10 +3,12 @@
 //! types, so adding a language touches nothing outside its frontend.
 
 mod ruby;
+mod rust;
 
 use crate::tree::Tree;
 
 pub use ruby::Ruby;
+pub use rust::Rust;
 
 pub trait Frontend: Sync {
     /// The name reported in output, e.g. `ruby`.
@@ -24,7 +26,7 @@ pub trait Frontend: Sync {
     fn parse(&self, source: Vec<u8>) -> Tree;
 }
 
-static FRONTENDS: &[&dyn Frontend] = &[&Ruby];
+static FRONTENDS: &[&dyn Frontend] = &[&Ruby, &Rust];
 
 /// The frontend for `path`, if any language claims it.
 pub fn for_path(path: &str) -> Option<&'static dyn Frontend> {

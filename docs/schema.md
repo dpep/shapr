@@ -135,6 +135,39 @@ line counts stay as the diff has them. Generated-but-reviewed files such as
 a Rails `db/schema.rb` are not on the list; mark them in `.gitattributes`
 if they should be.
 
+## Languages
+
+`language` is `"ruby"` for `.rb`, `.rake`, `.gemspec`, `.ru`, `Gemfile` and
+`Rakefile` (parsed with prism) and `"rust"` for `.rs` (parsed with
+tree-sitter). Any other file is `null` and its hunks `logic`. The rules above
+are stated in Ruby's terms; for Rust:
+
+- Comments: `//`, `/* */` and doc comments (`///`, `//!`, `/** */`) are
+  comments, so editing one is `comment_only`. Attributes (`#[...]`, `#![...]`,
+  `#[doc = "..."]`) are code, and belong to the item after them.
+- A macro's arguments can't be parsed: each token is compared on its own
+  (`a << b` and `a < < b` differ), and an identifier in them, or a `{name}`
+  in one of their string literals, may mean anything. A rename leaving the
+  old name there, or one whose new name was already there, is `logic`; one
+  renaming it along with a local or a function passes. A macro outside std
+  (`bail!`, `ensure!`) may hide a `return`, so a chunk holding one is risk
+  `jump`, as is `?` or `.await`.
+- Renames: a `field` is a struct field, used from any file. Fields and
+  enum variants of a type deriving anything but `Clone`, `Copy`, `Default`,
+  `Eq`, `Hash`, `Ord`, `PartialEq` or `PartialOrd` (`Debug` prints the names,
+  serde reads them), or carrying another attribute that may read them, aren't
+  renamed.
+- Moves: a unit is a function, struct, enum, union, trait, `impl`, module,
+  constant, static or type alias. Each file is its own module, so a
+  definition moved to another file stays `logic`. Struct fields, enum
+  variants and `macro_rules!` don't move. An `impl` is its methods' owner,
+  told apart from another by its header.
+- Extract and inline: a `self` parameter rides on the call's receiver, and
+  parameter types are allowed. Values are dropped when their block ends, so
+  when code follows the chunk in its block and the chunk binds a local (other
+  than the returned one) or takes arguments, the match is risk `drop`: the
+  value would be dropped at another point.
+
 ## `file` record
 
 | field | type | meaning |
