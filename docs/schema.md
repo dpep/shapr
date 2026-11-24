@@ -511,6 +511,7 @@ can check `schema` before reading the rest.
 | `record` | `"meta"` | |
 | `schema` | int | This schema's version. |
 | `version` | string | shapr's version. |
+| `command` | string | What produced the records that follow: `classify` (`shapr RANGE` or a diff on stdin) or `norms` (`shapr norms`). Check it before reading `summary.verdict`, which a `norms` output doesn't have. |
 | `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local range or stdin. |
 
 ## `file` record
@@ -985,7 +986,7 @@ the change exits 0, whatever the verdict.
 |---|---|
 | 0 | success |
 | 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
-| 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
+| 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `none`.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe

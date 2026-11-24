@@ -589,3 +589,45 @@ fn a_root_commit_against_its_parents_diffs_against_the_working_tree() {
     let plain = report(&shapr(dir.path(), &["-j", "HEAD~1"]));
     assert_eq!(caret["hunks"], plain["hunks"]);
 }
+
+#[test]
+fn every_meta_record_names_its_command() {
+    let dir = repo(&[
+        &[("a.rb", METHOD)],
+        &[("a.rb", &METHOD.replace("hi", "yo"))],
+    ]);
+    let classify = records(&shapr(dir.path(), &["-J", "HEAD~1..HEAD"])).remove(0);
+    assert_eq!(classify["command"], "classify");
+    let norms = records(&shapr(dir.path(), &["-J", "norms", "a.rb"])).remove(0);
+    assert_eq!(norms["command"], "norms");
+    assert_eq!(
+        report(&shapr(dir.path(), &["-j", "norms", "a.rb"]))["meta"],
+        norms
+    );
+}
+
+#[test]
+fn a_github_file_url_is_not_a_change() {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    for url in [
+        "https://github.com/acme/widgets/blob/main/lib/a.rb",
+        "https://github.com/acme/widgets/tree/main/lib",
+        "github.com/acme/widgets/blob/1a2b3c4/a.rb",
+    ] {
+        let out = shapr(dir.path(), &["-J", url]);
+        assert_eq!(out.status.code(), Some(64), "{url}: {out:?}");
+        assert_eq!(
+            report(&out)["error"],
+            "a GitHub file isn't a change: give a pull request or commit, \
+             or run shapr norms on a local checkout",
+            "{url}"
+        );
+    }
+}
+
+#[test]
+fn help_names_the_last_commit_form() {
+    let dir = repo(&[]);
+    let help = String::from_utf8(shapr(dir.path(), &["--help"]).stdout).unwrap();
+    assert!(help.contains("shapr HEAD^!"), "{help}");
+}

@@ -100,16 +100,19 @@ pub struct Meta {
     record: &'static str,
     schema: u32,
     version: &'static str,
+    /// What ran: `classify` or `norms`, whose records differ.
+    command: &'static str,
     /// The GitHub pull request or commit analyzed; `None` for a local run.
     pub source: Option<crate::github::Source>,
 }
 
 impl Meta {
-    pub fn new(source: Option<crate::github::Source>) -> Meta {
+    pub fn new(command: &'static str, source: Option<crate::github::Source>) -> Meta {
         Meta {
             record: "meta",
             schema: SCHEMA,
             version: env!("CARGO_PKG_VERSION"),
+            command,
             source,
         }
     }

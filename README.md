@@ -48,6 +48,7 @@ A config or manifest edit is `behavior`. A README edit or a lockfile beside a re
 shapr main..HEAD             # a branch's commits
 shapr main                   # main against the working tree
 git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
+shapr HEAD^!                 # the last commit alone
 shapr -J main..HEAD          # NDJSON: a meta line, a line per file and hunk, then a summary
 shapr -j main..HEAD          # one pretty JSON object
 shapr -C app main..HEAD      # in another repository, like git -C
@@ -115,14 +116,14 @@ case $? in
   64) echo "shape-gate: usage error" >&2; exit 2 ;;
   *) echo "shape-gate: shapr failed" >&2; exit 2 ;;
 esac
-head -n1 <<<"$out" | jq -e '.record == "meta" and .schema == 1' >/dev/null \
-  || { echo "shape-gate: unexpected schema" >&2; exit 2; }
+head -n1 <<<"$out" | jq -e '.record == "meta" and .schema == 1 and .command == "classify"' >/dev/null \
+  || { echo "shape-gate: unexpected schema or command" >&2; exit 2; }
 verdict=$(tail -n1 <<<"$out" | jq -r .verdict)
 echo "shape: $verdict"
 [ "$verdict" != mixed ]
 ```
 
-- Read the schema version from the first record, `meta.schema`, and stop on one you don't know.
+- Read the schema version and the command from the first record, `meta.schema` and `meta.command`, and stop on one you don't know: a `shapr norms` output has no `verdict`, which `jq` reads as `null`.
 - Gate on verdicts, not on lists of kinds: the summary's `verdict`, a hunk's `verdict`, or a part's `structure`. A kind with `structure: false` (a public API rename) is behavior, and new kinds may appear.
 - `none` (docs only) and `unknown` (lockfiles, unparsed files) are outside the verdict; `summary.verdicts` counts them.
 - The exit code is 0 whatever the verdict, 2 when shapr couldn't run, 64 for a usage error. The policy (failing on `mixed`) is the script's.

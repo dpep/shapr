@@ -15,6 +15,7 @@ const AFTER_HELP: &str = "\
 EXAMPLES
   shapr main..HEAD           classify a branch's commits
   shapr main                 main against the working tree
+  shapr HEAD^!               the last commit alone
   git diff --staged | shapr  classify a diff from stdin (needs `git diff` index lines)
   shapr -J main..HEAD        JSON lines: a meta record, each file and hunk, then a summary
   shapr -C app main..HEAD    run in another repository, like git -C
@@ -214,6 +215,14 @@ pub fn run() -> ExitCode {
         Some(range) if range.starts_with('-') => {
             return fail(format, &format!("`{range}` is not a range"), USAGE);
         }
+        Some(range) if github_file(range) => {
+            return fail(
+                format,
+                "a GitHub file isn't a change: give a pull request or commit, \
+                 or run shapr norms on a local checkout",
+                USAGE,
+            );
+        }
         Some(range) => match github::resolve(range, &git) {
             Err(message) => return fail(format, &message, USAGE),
             Ok(None) => git.diff(range),
@@ -324,7 +333,12 @@ pub fn run() -> ExitCode {
         _ => &union,
     };
     let labels = classify::classify(&change, outside);
-    let mut report = report::build(&change, &labels, claims, report::Meta::new(source));
+    let mut report = report::build(
+        &change,
+        &labels,
+        claims,
+        report::Meta::new("classify", source),
+    );
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     for ((hunk, style), label) in report
         .hunks
@@ -391,6 +405,16 @@ fn messages(
     }
     messages.extend(description);
     Ok(messages)
+}
+
+/// A GitHub page for a file or directory (`/blob/`, `/tree/`), which names
+/// no change.
+fn github_file(arg: &str) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    let Some((_, path)) = lower.split_once("github.com/") else {
+        return false;
+    };
+    matches!(path.split('/').nth(2), Some("blob" | "tree"))
 }
 
 /// `--status` and `--clear-cache`: the cache as it stands afterwards.

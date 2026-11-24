@@ -141,7 +141,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
         Format::Text
     };
     let mut report = Report {
-        meta: crate::report::Meta::new(None),
+        meta: crate::report::Meta::new("norms", None),
         files: Vec::new(),
         norms: Vec::new(),
         summary: Summary {
