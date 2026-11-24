@@ -667,8 +667,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         // One line per part; the place names the hunk on its first.
         for (i, part) in hunk.parts.iter().enumerate() {
             let facets: Vec<&str> = part.facets.iter().map(|f| f.as_str()).collect();
-            // The kind already says it: classify/format.rs's plain logic reason.
-            let reason = match part.reason.strip_prefix(PLAIN_LOGIC) {
+            let reason = match part.reason.strip_prefix(classify::PLAIN_LOGIC) {
                 Some(rest) => rest.trim_start_matches("; "),
                 None => &part.reason,
             };
@@ -806,8 +805,6 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
     }
     Ok(())
 }
-
-const PLAIN_LOGIC: &str = "code differs beyond whitespace and comments";
 
 /// A hunk in a file shapr didn't compare, by its category alone: `docs
 /// change`, `unknown file`. `None` for code or tests, whose reason says why.

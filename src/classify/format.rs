@@ -9,6 +9,10 @@ use crate::tree::{NodeId, Span, Tree};
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 
+/// The reason of a logic residual that only says the code differs; text
+/// output leaves it out, as the kind says as much.
+pub const PLAIN_LOGIC: &str = "code differs beyond whitespace and comments";
+
 pub(super) fn run(change: &Change, _: &Alignments, _: &dyn Outside, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
         let Ok(trees) = &file.trees else { continue };
@@ -27,7 +31,7 @@ pub(super) fn run(change: &Change, _: &Alignments, _: &dyn Outside, labels: &mut
                     "same code and comments; whitespace differs",
                 ),
                 (true, false) => (Kind::CommentOnly, "same code; comments differ"),
-                (false, _) => (Kind::Logic, "code differs beyond whitespace and comments"),
+                (false, _) => (Kind::Logic, PLAIN_LOGIC),
             };
             // Text equality can't see a change in how whitespace parses
             // (`puts -x` vs `puts - x`): structure needs tree evidence.

@@ -14,6 +14,7 @@ mod align;
 mod defaults;
 mod extract;
 mod format;
+pub use format::PLAIN_LOGIC;
 mod hazard;
 mod moves;
 mod rename;
