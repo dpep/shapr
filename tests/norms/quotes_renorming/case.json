@@ -1,10 +1,9 @@
 {
   "about": "the whole file moved to another style",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "converging",
-        "flagged": false,
         "norms": [
           {
             "norm": "Style/StringLiterals",

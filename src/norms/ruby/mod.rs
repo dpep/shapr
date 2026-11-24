@@ -1,6 +1,8 @@
-//! Ruby's norms, observed on a prism parse; RuboCop's cops name them.
+//! Ruby's norms, observed on a prism parse; RuboCop's cops name them. Each
+//! norm is a module with `NORM`, `STYLES` and a `see` the walk calls per node.
 
 mod config;
+mod strings;
 
 use super::{Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind};
 use ruby_prism::{Location, Node, Visit};
@@ -9,12 +11,13 @@ use std::path::Path;
 
 pub struct Ruby;
 
-const STRING_LITERALS: &str = "Style/StringLiterals";
-
 static NORMS: &[NormDef] = &[NormDef {
-    id: STRING_LITERALS,
-    styles: &["single_quotes", "double_quotes"],
+    id: strings::NORM,
+    styles: strings::STYLES,
 }];
+
+/// Per-node observers, in `NORMS` order.
+static OBSERVERS: &[fn(&mut Walker, &Node)] = &[strings::see];
 
 impl Language for Ruby {
     fn name(&self) -> &'static str {
@@ -52,20 +55,20 @@ impl Language for Ruby {
             return BTreeMap::new();
         };
         let mut styles = BTreeMap::new();
-        let style = config.get(STRING_LITERALS, "EnforcedStyle");
+        let style = config.get(strings::NORM, "EnforcedStyle");
         if let Some(s @ ("single_quotes" | "double_quotes")) = style {
-            styles.insert(STRING_LITERALS, s.to_string());
+            styles.insert(strings::NORM, s.to_string());
         }
         styles
     }
 }
 
-struct Walker<'a> {
-    index: &'a LineIndex,
+pub struct Walker<'a> {
+    pub index: &'a LineIndex,
     observations: Vec<Observation>,
     scopes: Vec<Scope>,
     /// Per open branch node: whether it is an interpolation (`#{}`).
-    embedded: Vec<bool>,
+    pub embedded: Vec<bool>,
 }
 
 impl<'pr> Visit<'pr> for Walker<'_> {
@@ -101,60 +104,42 @@ impl Walker<'_> {
             self.scopes.push(Scope {
                 kind,
                 first: self.index.line(loc.start_offset()),
-                last: self.index.line(loc.end_offset().saturating_sub(1)),
+                last: self.last_line(&loc),
             });
         }
-        if let Some(string) = node.as_string_node() {
-            self.string(
-                string.opening_loc(),
-                string.content_loc(),
-                string.closing_loc(),
-            );
+        for observe in OBSERVERS {
+            observe(self, node);
         }
     }
 
-    /// Style/StringLiterals: a quoted string that could be written either
-    /// way with the same value. Strings in an interpolation are another cop's.
-    fn string(&mut self, opening: Option<Location>, content: Location, closing: Option<Location>) {
-        let (Some(opening), Some(closing)) = (opening, closing) else {
-            return;
-        };
-        if self.embedded.iter().any(|&e| e) {
-            return;
-        }
-        let raw = content.as_slice();
-        let (style, other, quote) = match opening.as_slice() {
-            // No escapes, `"` or `#{`, `#$`, `#@` (an interpolation in `"`).
-            b"'" if !raw.iter().any(|b| matches!(b, b'\\' | b'"'))
-                && !raw
-                    .windows(2)
-                    .any(|w| w[0] == b'#' && matches!(w[1], b'{' | b'$' | b'@')) =>
-            {
-                ("single_quotes", "double_quotes", "\"")
-            }
-            b"\"" if !raw.iter().any(|b| matches!(b, b'\\' | b'\'')) => {
-                ("double_quotes", "single_quotes", "'")
-            }
-            _ => return,
-        };
-        let at = opening.start_offset();
-        let line = self.index.line(at);
+    /// The line a location ends on.
+    pub fn last_line(&self, loc: &Location) -> usize {
+        self.index
+            .line(loc.end_offset().saturating_sub(1).max(loc.start_offset()))
+    }
+
+    pub fn push(
+        &mut self,
+        norm: &'static str,
+        style: &str,
+        at: usize,
+        lines: (usize, usize),
+        key: String,
+        fix: Vec<(String, Vec<Replace>)>,
+    ) {
         self.observations.push(Observation {
-            norm: STRING_LITERALS,
+            norm,
             style: style.to_string(),
-            lines: (line, line),
-            line,
+            lines,
+            line: self.index.line(at),
             column: self.index.column(at),
-            key: String::from_utf8_lossy(raw).into_owned(),
-            fix: vec![(
-                other.to_string(),
-                vec![replace(&opening, quote), replace(&closing, quote)],
-            )],
+            key,
+            fix,
         });
     }
 }
 
-fn replace(loc: &Location, text: &str) -> Replace {
+pub fn replace(loc: &Location, text: &str) -> Replace {
     Replace {
         span: loc.start_offset()..loc.end_offset(),
         text: text.to_string(),
@@ -162,29 +147,16 @@ fn replace(loc: &Location, text: &str) -> Replace {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
-    fn styles(src: &str) -> Vec<(String, usize)> {
-        Ruby.analyze(src.as_bytes())
-            .observations
-            .into_iter()
-            .map(|o| (o.style, o.line))
-            .collect()
-    }
-
-    #[test]
-    fn only_strings_that_could_take_either_quote_count() {
-        let src = "a = 'x'\nb = \"y\"\nc = \"it's\"\nd = 'say \"hi\"'\ne = \"#{a} z\"\n\
-                   f = \"tab\\t\"\ng = %q(x)\nh = 'a#b'\ni = \"#{'nested'}\"\nj = ?x\nk = 'a#{b}'\nl = 'a#@b'\n";
-        assert_eq!(
-            styles(src),
-            [
-                ("single_quotes".into(), 1),
-                ("double_quotes".into(), 2),
-                ("single_quotes".into(), 8)
-            ]
-        );
+    /// One norm's observations in `src`, as `style@line` words.
+    pub fn styles(src: &str, norm: &str) -> String {
+        let words: Vec<String> = (Ruby.analyze(src.as_bytes()).observations.iter())
+            .filter(|o| o.norm == norm)
+            .map(|o| format!("{}@{}", o.style, o.line))
+            .collect();
+        words.join(" ")
     }
 
     #[test]

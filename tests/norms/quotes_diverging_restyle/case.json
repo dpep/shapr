@@ -1,10 +1,9 @@
 {
   "about": "a restyle against the file's norm is flagged",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "diverging",
-        "flagged": true,
         "norms": [
           {
             "norm": "Style/StringLiterals",

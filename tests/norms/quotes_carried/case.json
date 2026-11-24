@@ -1,10 +1,9 @@
 {
   "about": "a string carried over unchanged into new code chooses no style",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "none",
-        "flagged": false,
         "norms": []
       }
     ]

@@ -4,7 +4,9 @@
 //!   the repository; `command`, `diff` (default: `shapr -j HEAD~1..HEAD`,
 //!   matching `expect.hunks` against each hunk's `style`) or `norms`
 //!   (`shapr norms -j PATH` on the after side, matching the whole output);
-//!   and `expect`.
+//!   `norm`, a norm id: only that norm's entries are matched (a hunk's
+//!   rollup `direction` and `flagged` span every norm, so a case naming one
+//!   leaves them out); and `expect`.
 //! - `before.rb`, `after.rb`: the file's two states; a missing one is a file
 //!   that doesn't exist on that side.
 //! - `repo/`: other files, the same in both states (`.rubocop.yml`, neighbors).
@@ -105,14 +107,35 @@ fn run_case(case: &Path) -> Vec<String> {
         Ok(report) => report,
         Err(e) => return vec![format!("{e}: {}", String::from_utf8_lossy(&out.stderr))],
     };
+    let only = |entries: &Value| match spec["norm"].as_str() {
+        Some(norm) => Value::Array(
+            (entries.as_array().into_iter().flatten())
+                .filter(|e| e["norm"] == norm)
+                .cloned()
+                .collect(),
+        ),
+        None => entries.clone(),
+    };
     let actual = if norms {
+        let mut report = report;
+        report["norms"] = only(&report["norms"]);
         report
     } else {
         let styles = report["hunks"].as_array().unwrap().iter();
         Value::Object(
             [(
                 "hunks".to_string(),
-                Value::Array(styles.map(|h| h["style"].clone()).collect()),
+                Value::Array(
+                    styles
+                        .map(|h| {
+                            let mut style = h["style"].clone();
+                            if style.is_object() {
+                                style["norms"] = only(&style["norms"]);
+                            }
+                            style
+                        })
+                        .collect(),
+                ),
             )]
             .into_iter()
             .collect(),

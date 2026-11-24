@@ -1,9 +1,9 @@
 {
   "about": "the code's own norm wins over the config, and both are reported",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "aligned",
         "norms": [
           {
             "norm": "Style/StringLiterals",

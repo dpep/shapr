@@ -1,10 +1,9 @@
 {
   "about": "new code follows its method's norm",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "aligned",
-        "flagged": false,
         "norms": [
           {
             "norm": "Style/StringLiterals",

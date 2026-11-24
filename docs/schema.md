@@ -583,7 +583,7 @@ Each norm:
 | `convergence` | string or null | When `converging`: `normalizing` (toward the surrounding norm) or `renorming` (the scope moved to a new one). |
 | `restyle` | bool | The same strings on both sides, in different styles: a respelling, not new code. The planned `restyle` part kind will prove the same per hunk. |
 | `flagged` | bool | `restyle` and `diverging`: a change that respells code away from its norm. |
-| `deviations` | array | New code not in the `expected` style: `line`, `column`, `style`, `expected`, and `edit`, a unified diff that applies the expected style. |
+| `deviations` | array | New code not in the `expected` style: `line`, `column`, `style`, `expected`, and `edit`, a unified diff that applies the expected style, `null` when there is no mechanical fix or it would reach outside the hunk's changed region. |
 
 ## `shapr norms`
 

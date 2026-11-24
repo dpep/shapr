@@ -1,9 +1,9 @@
 {
   "about": "with no inferred norm, .rubocop.yml's EnforcedStyle is expected",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "diverging",
         "norms": [
           {
             "norm": "Style/StringLiterals",

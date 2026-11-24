@@ -1,10 +1,9 @@
 {
   "about": "a divergent method brought to the file's norm",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "converging",
-        "flagged": false,
         "norms": [
           {
             "norm": "Style/StringLiterals",

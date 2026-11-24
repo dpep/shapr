@@ -4,8 +4,8 @@
 //! change converges on that norm or diverges from it.
 
 use super::{
-    Analysis, Counts, Language, NormDef, Observation, ScopeKind, count, edit, for_path, infer,
-    skipped,
+    Analysis, Counts, Language, LineIndex, NormDef, Observation, Replace, ScopeKind, count, edit,
+    for_path, infer, skipped,
 };
 use crate::change::{Change, FileChange};
 use crate::diff::{Hunk, Lines};
@@ -201,6 +201,7 @@ fn file_styles(file: &FileChange, root: Option<&Path>, threshold: f64) -> Option
         neighbors,
         configured,
         threshold,
+        index: LineIndex::new(&trees.after.source),
     };
     Some(
         hunks
@@ -303,6 +304,7 @@ struct File<'a> {
     neighbors: Option<Vec<Observation>>,
     configured: BTreeMap<&'static str, String>,
     threshold: f64,
+    index: LineIndex,
 }
 
 /// The norm a scope's counts back, and where.
@@ -353,23 +355,23 @@ impl File<'_> {
             Convergence::Normalizing
         });
         let restyle = respelled(&removed, &added);
-        let deviations =
-            match &expected {
-                Some(expected) => fresh
-                    .iter()
-                    .filter(|o| o.style != *expected)
-                    .map(|o| Deviation {
-                        line: o.line,
-                        column: o.column,
-                        style: o.style.clone(),
-                        expected: expected.clone(),
-                        edit: o.fix.iter().find(|(style, _)| style == expected).and_then(
-                            |(_, replaces)| edit::unified(self.path, self.source, replaces),
-                        ),
-                    })
-                    .collect(),
-                None => Vec::new(),
-            };
+        let deviations = match &expected {
+            Some(expected) => fresh
+                .iter()
+                .filter(|o| o.style != *expected)
+                .map(|o| Deviation {
+                    line: o.line,
+                    column: o.column,
+                    style: o.style.clone(),
+                    expected: expected.clone(),
+                    edit: (o.fix.iter())
+                        .find(|(style, _)| style == expected)
+                        .filter(|(_, replaces)| self.inside(hunk, replaces))
+                        .and_then(|(_, replaces)| edit::unified(self.path, self.source, replaces)),
+                })
+                .collect(),
+            None => Vec::new(),
+        };
         Some(Entry {
             norm: def.id,
             before: count(def, removed.into_iter()),
@@ -386,6 +388,23 @@ impl File<'_> {
             restyle,
             flagged: restyle && direction == Direction::Diverging,
             deviations,
+        })
+    }
+
+    /// Every replacement lies in the hunk's changed region: a suggested edit
+    /// never reaches code the change didn't touch.
+    fn inside(&self, hunk: &Hunk, replaces: &[Replace]) -> bool {
+        let Some(last) = hunk.after.last() else {
+            return false;
+        };
+        let region = hunk.after.start..=last;
+        replaces.iter().all(|r| {
+            region.contains(&self.index.line(r.span.start))
+                && region.contains(
+                    &self
+                        .index
+                        .line(r.span.end.saturating_sub(1).max(r.span.start)),
+                )
         })
     }
 

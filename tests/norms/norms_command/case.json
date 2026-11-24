@@ -1,5 +1,6 @@
 {
   "about": "shapr norms reports a file's norms with no diff",
+  "norm": "Style/StringLiterals",
   "command": "norms",
   "path": "lib/a.rb",
   "expect": {
@@ -29,13 +30,6 @@
           10
         ]
       }
-    ],
-    "summary": {
-      "record": "summary",
-      "files": 1,
-      "norms": 1,
-      "inferred": 1,
-      "deviations": 1
-    }
+    ]
   }
 }

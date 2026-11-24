@@ -1,10 +1,10 @@
 {
   "about": "a new file is compared with the files beside it",
+  "norm": "Style/StringLiterals",
   "path": "lib/b.rb",
   "expect": {
     "hunks": [
       {
-        "direction": "diverging",
         "norms": [
           {
             "norm": "Style/StringLiterals",

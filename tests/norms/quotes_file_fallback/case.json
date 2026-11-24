@@ -1,9 +1,9 @@
 {
   "about": "a method with no strings of its own falls back to its class's norm",
+  "norm": "Style/StringLiterals",
   "expect": {
     "hunks": [
       {
-        "direction": "diverging",
         "norms": [
           {
             "norm": "Style/StringLiterals",
