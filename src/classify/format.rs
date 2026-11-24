@@ -28,7 +28,10 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 (false, _) => (Kind::Logic, "code differs beyond whitespace and comments"),
             };
             label.kind = kind;
-            label.reason = reason.to_string();
+            label.reason = match broken_sides(trees) {
+                Some(sides) => format!("{reason}; syntax error on {sides}; compared line by line"),
+                None => reason.to_string(),
+            };
             label.confidence = Confidence::new(strength(trees, &site.before, &site.after));
             if let Some(similarity) = compared.similarity {
                 let rounded = Confidence::new(similarity).get();
@@ -38,6 +41,19 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                     .insert("similarity".into(), Value::from(rounded));
             }
         }
+    }
+}
+
+/// Which sides hold a syntax error, for a reason naming the line method.
+fn broken_sides(trees: &Trees) -> Option<&'static str> {
+    match (
+        trees.before.errors.is_empty(),
+        trees.after.errors.is_empty(),
+    ) {
+        (true, true) => None,
+        (false, true) => Some("the before side"),
+        (true, false) => Some("the after side"),
+        (false, false) => Some("both sides"),
     }
 }
 

@@ -154,3 +154,20 @@ fn quiet_writes_no_error_record() {
         assert!(!out.stderr.is_empty(), "{args:?}");
     }
 }
+
+#[test]
+fn a_syntax_error_is_named_in_the_reason() {
+    let before = "def a\n  1\nend\n";
+    let after = "def a\n  2\nend\ndef broken(\n";
+    let dir = repo(&[&[("a.rb", before)], &[("a.rb", after)]]);
+    let out = shapr(dir.path(), &["-j", "HEAD~1..HEAD"], "");
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let hunk = &report["hunks"][0];
+    assert_eq!(hunk["kind"], "logic");
+    assert_eq!(hunk["evidence"]["method"], "line");
+    let reason = hunk["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("syntax error on the after side; compared line by line"),
+        "{reason}"
+    );
+}
