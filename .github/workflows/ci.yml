@@ -40,3 +40,6 @@ jobs:
         run: cargo doc --no-deps --document-private-items --quiet
         env:
           RUSTDOCFLAGS: -D warnings
+
+      - name: corpus script
+        run: python3 -I script/test_corpus.py -q

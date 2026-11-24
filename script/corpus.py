@@ -127,15 +127,41 @@ def code_lines(h):
     return h["code_added"] + h["code_deleted"]
 
 
-def line_kinds(records):
-    """{(file, side, line): kind} over every line a hunk's before/after run covers."""
-    out = {}
-    for h in hunks(records):
-        for side, path in (("-", h["old_file"]), ("+", h["file"])):
-            run = h["before" if side == "-" else "after"]
-            for n in range(run["start"], run["start"] + run["count"]):
-                out[(path, side, n)] = h["kind"]
+def runs(path, side, runs_):
+    return [(path, side, n) for r in runs_ for n in range(r["start"], r["start"] + r["count"])]
+
+
+def parts(h):
+    """A hunk's parts in one shape across schemas: kind, structure, code, lines, facets, detail.
+
+    `kind` is `move_with_changes` for a move into new surroundings, the kind the
+    hunk-level schema gave it. `code` is the part's changed code lines: exact for
+    logic, extract and inline (their `review_lines` is every code line); the
+    rest of the hunk's code lines are shared among its other parts by changed
+    lines. A hunk-level record is one part covering its before/after runs.
+    """
+    if "parts" not in h:
+        lines = runs(h["old_file"], "-", [h["before"]]) + runs(h["file"], "+", [h["after"]])
+        return [{"kind": h["kind"], "structure": h["kind"] in STRUCTURAL, "code": code_lines(h),
+                 "changed": h["added"] + h["deleted"], "lines": lines, "facets": h["facets"], "detail": h["detail"]}]
+    out = []
+    for p in h["parts"]:
+        kind = "move_with_changes" if p["kind"] == "move" and not p["structure"] else p["kind"]
+        lines = runs(h["old_file"], "-", p["lines"]["before"]) + runs(h["file"], "+", p["lines"]["after"])
+        exact = p["kind"] in ("logic", "extract", "inline")
+        out.append({"kind": kind, "structure": p["structure"], "code": p["review_lines"] if exact else None,
+                    "changed": len(lines), "lines": lines, "facets": p["facets"], "detail": p["detail"]})
+    rest = code_lines(h) - sum(p["code"] for p in out if p["code"] is not None)
+    shared = [p for p in out if p["code"] is None]
+    weight = sum(p["changed"] for p in shared)
+    for p in shared:
+        p["code"] = rest * p["changed"] / weight if weight else 0
     return out
+
+
+def line_kinds(records):
+    """{(file, side, line): kind} over the lines each part explains."""
+    return {line: p["kind"] for h in hunks(records) for p in parts(h) for line in p["lines"]}
 
 
 # --- stats ------------------------------------------------------------------------------------
@@ -157,7 +183,7 @@ def quantile(xs, q):
 
 def repo_stats(rows):
     s = {"commits": 0, "errors": 0, "hunks": 0, "kinds": collections.Counter(), "lines": collections.Counter(),
-         "logic_unparsed_hunks": 0, "logic_unparsed_lines": 0, "parsed_lines": collections.Counter(),
+         "logic_unparsed_lines": 0, "parsed_lines": collections.Counter(),
          "changed_lines": collections.Counter(), "discounts": [], "parsed_discounts": []}
     for _sha, records in rows:
         summ = summary(records)
@@ -167,16 +193,16 @@ def repo_stats(rows):
         s["commits"] += 1
         for h in hunks(records):
             s["hunks"] += 1
-            s["kinds"][h["kind"]] += 1
-            if h["generated"]:
-                continue
-            s["lines"][h["kind"]] += code_lines(h)
-            s["changed_lines"][h["kind"]] += h["added"] + h["deleted"]
-            if h["language"] is not None:
-                s["parsed_lines"][h["kind"]] += code_lines(h)
-            if h["kind"] == "logic" and h["language"] is None:
-                s["logic_unparsed_hunks"] += 1
-                s["logic_unparsed_lines"] += code_lines(h)
+            for p in parts(h):
+                s["kinds"][p["kind"]] += 1
+                if h["generated"]:
+                    continue
+                s["lines"][p["kind"]] += p["code"]
+                s["changed_lines"][p["kind"]] += p["changed"]
+                if h["language"] is not None:
+                    s["parsed_lines"][p["kind"]] += p["code"]
+                elif p["kind"] == "logic":
+                    s["logic_unparsed_lines"] += p["code"]
         code = summ["code_added"] + summ["code_deleted"]
         if code:
             s["discounts"].append(1 - summ["review_lines"] / code)
@@ -189,7 +215,7 @@ def repo_stats(rows):
 
 def merge(stats):
     total = {"commits": 0, "errors": 0, "hunks": 0, "kinds": collections.Counter(), "lines": collections.Counter(),
-             "logic_unparsed_hunks": 0, "logic_unparsed_lines": 0, "parsed_lines": collections.Counter(),
+             "logic_unparsed_lines": 0, "parsed_lines": collections.Counter(),
          "changed_lines": collections.Counter(), "discounts": [], "parsed_discounts": []}
     for s in stats:
         for k, v in s.items():
@@ -223,16 +249,17 @@ def report(s):
         "commits": s["commits"],
         "errors": s["errors"],
         "hunks": s["hunks"],
-        "structural_hunk_share": share(s["kinds"]),
-        "code_lines": lines,
+        "parts": sum(s["kinds"].values()),
+        "structural_part_share": share(s["kinds"]),
+        "code_lines": round(lines),
         "structural_line_share": share(s["lines"]),
         "structural_changed_line_share": share(s["changed_lines"]),
-        "parsed_code_lines": sum(s["parsed_lines"].values()),
+        "parsed_code_lines": round(sum(s["parsed_lines"].values())),
         "structural_parsed_line_share": share(s["parsed_lines"]),
         "move_with_changes_line_share": share(s["lines"], {"move_with_changes"}),
         "logic_unparsed_line_share": round(s["logic_unparsed_lines"] / lines, 3) if lines else None,
         "kinds": dict(s["kinds"]),
-        "line_kinds": dict(s["lines"]),
+        "line_kinds": {k: round(v) for k, v in s["lines"].items()},
         "discount": distribution(s["discounts"]),
         "parsed_discount": distribution(s["parsed_discounts"]),
     }
@@ -246,16 +273,16 @@ def cmd_stats(args):
     if args.json:
         print(json.dumps(out, indent=2))
         return 0
-    print(f"{'repo':10} {'commits':>7} {'hunks':>6} {'struct':>6}  {'code ln':>7} {'struct':>6} {'unparsed':>8}  "
+    print(f"{'repo':10} {'commits':>7} {'parts':>6} {'struct':>6}  {'code ln':>7} {'struct':>6} {'unparsed':>8}  "
           f"{'rb/rs ln':>8} {'struct':>6} {'mwc':>5}   discount (rb/rs): mean  >=10%  >=50%")
     for name, r in out.items():
         d = r["parsed_discount"]
-        print(f"{name:10} {r['commits']:7} {r['hunks']:6} {pct(r['structural_hunk_share'] or 0, 1):>6}  {r['code_lines']:7} "
+        print(f"{name:10} {r['commits']:7} {r['parts']:6} {pct(r['structural_part_share'] or 0, 1):>6}  {r['code_lines']:7} "
               f"{pct(r['structural_line_share'] or 0, 1):>6} {pct(r['logic_unparsed_line_share'] or 0, 1):>8}  "
               f"{r['parsed_code_lines']:8} {pct(r['structural_parsed_line_share'] or 0, 1):>6} "
               f"{pct(r['move_with_changes_line_share'] or 0, 1):>5}   {d.get('mean', 0):5.3f} "
               f"{pct(d.get('share_ge_10pct', 0), 1):>6} {pct(d.get('share_ge_50pct', 0), 1):>6}")
-    print("\nkinds (hunks / code lines), all repos:")
+    print("\nkinds (parts / code lines), all repos:")
     for k, n in sorted(out["all"]["kinds"].items(), key=lambda kv: -kv[1]):
         print(f"  {k:18} {n:6} {out['all']['line_kinds'].get(k, 0):8}")
     return 0
@@ -267,7 +294,7 @@ def cmd_stats(args):
 def cmd_diff(args):
     a = load(args.binary, args.repos, args)
     b = load(args.binary_b, args.repos, args)
-    kinds = collections.Counter()  # hunk count delta per kind
+    kinds = collections.Counter()  # part count delta per kind
     lines = collections.Counter()  # (kind_a, kind_b) over lines both builds cover
     uncovered = collections.Counter()  # lines only one build covers: "a" or "b"
     verdicts = collections.Counter()
@@ -279,10 +306,8 @@ def cmd_diff(args):
                 if (sa is None) != (sb is None):
                     verdicts[("error" if sa is None else sa["verdict"], "error" if sb is None else sb["verdict"])] += 1
                 continue
-            for k, n in collections.Counter(h["kind"] for h in hunks(ra)).items():
-                kinds[k] -= n
-            for k, n in collections.Counter(h["kind"] for h in hunks(rb)).items():
-                kinds[k] += n
+            kinds.subtract(p["kind"] for h in hunks(ra) for p in parts(h))
+            kinds.update(p["kind"] for h in hunks(rb) for p in parts(h))
             if sa["verdict"] != sb["verdict"]:
                 key = (sa["verdict"], sb["verdict"])
                 verdicts[key] += 1
@@ -306,7 +331,7 @@ def cmd_diff(args):
             "samples": {" ".join(k): v[: args.samples] for k, v in samples.items()},
         }, indent=2))
     else:
-        print("hunk count delta per kind (B - A):")
+        print("part count delta per kind (B - A):")
         for k, v in sorted(kinds.items(), key=lambda kv: kv[1]):
             if v:
                 print(f"  {k:18} {v:+d}")
@@ -360,11 +385,11 @@ def cmd_sample(args):
     paths = {os.path.basename(os.path.realpath(r)): r for r in args.repos}
     per_repo = args.n // len(data)
     for name, rows in data.items():
-        pool = [(sha, h) for sha, records in rows for h in hunks(records)
-                if h["kind"] == "logic" and not h["generated"] and h["language"] is not None and code_lines(h)]
-        for sha, h in rng.sample(pool, min(per_repo, len(pool))):
+        pool = [(sha, h, p) for sha, records in rows for h in hunks(records) for p in parts(h)
+                if p["kind"] == "logic" and p["code"] and not h["generated"] and h["language"] is not None]
+        for sha, h, p in rng.sample(pool, min(per_repo, len(pool))):
             print(json.dumps({"repo": name, "sha": sha, "file": h["file"], "before": h["before"], "after": h["after"],
-                              "code_lines": code_lines(h), "facets": h["facets"], "near": h["detail"].get("near"),
+                              "code_lines": p["code"], "facets": p["facets"], "near": p["detail"].get("near"),
                               "text": hunk_text(paths[name], sha, h)}))
     return 0
 

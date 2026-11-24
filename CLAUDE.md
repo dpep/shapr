@@ -154,7 +154,7 @@ rollup (`Label::kind`, `confidence`, ...).
 
 `make check` (or `script/check.sh`): `cargo fmt --check`, `cargo clippy
 --all-targets -- -D warnings`, `cargo test`, `cargo doc` with warnings
-denied. CI runs the same on ubuntu. Run it before every commit.
+denied, and `script/test_corpus.py`. CI runs the same on ubuntu. Run it before every commit.
 
 ## Testing
 
@@ -175,18 +175,22 @@ binary hash under `SHAPR_CORPUS_CACHE` (default `~/.cache/shapr/corpus`), so
 copy a build out of `target/` before comparing it with the next one.
 
 ```
-script/corpus.py stats BIN                  hunk and line shares per kind, per-commit review discount
+script/corpus.py stats BIN                  part and code-line shares per kind, per-commit review discount
 script/corpus.py diff OLD_BIN NEW_BIN       kind deltas, verdict changes, relabeled lines, sample commits
-script/corpus.py sample BIN --n 200 --seed 1   seeded logic hunks with their diff text, for hand labeling
+script/corpus.py sample BIN --n 200 --seed 1   seeded residuals with their hunk's diff text, for hand labeling
 ```
 
 Options (`--limit`, `--jobs`, `--json`, `--cache-dir`) go before the
 subcommand. `diff` exits 1 when any label changed: run it against main's build before
 landing a detector or a change to hunk output, and explain every row. It
 compares labels line by line over lines both builds cover, so it survives
-changes to hunk boundaries. Record reads live in one block of the script
-(`summary`, `hunks`, `code_lines`, `line_kinds`); a schema change edits
-those.
+changes to hunk boundaries, and reads hunk-level records (before parts) as
+one part, so an older build diffs against a newer one. A move part that isn't
+structure is reported as `move_with_changes`. Record reads live in one block
+of the script (`summary`, `hunks`, `parts`, `line_kinds`), tested by
+`script/test_corpus.py`; a schema change edits those. The newest-N window
+moves as the repos gain commits: compare builds within one run, not against
+numbers from another day.
 
 ## Landing changes
 

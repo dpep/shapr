@@ -18,3 +18,4 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items --quiet
+python3 -I script/test_corpus.py -q
