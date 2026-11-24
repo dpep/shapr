@@ -200,12 +200,12 @@ Confidence is computed from the evidence, not assigned per kind.
 
 A *unit* is a method, class, module or constant definition of at least 3
 syntax nodes, sitting directly in a file or a class or module body (not in
-a block or conditional). Each file's trees are aligned body by body; a unit
-the alignment leaves out was removed or added. A removed unit pairs with an
+a block or conditional). Each file's trees are aligned body by body, larger
+nodes first; a unit the alignment leaves out was removed or added. A removed unit pairs with an
 added one, in the same file or another, by equal tree (`move`) or, failing
 that, by equal name and kind with `similarity` at least 0.5
-(`move_with_changes`). A unit replaced by one of the same name in the same
-place was edited, not moved.
+(`move_with_changes`). Definitions align by name, so one that keeps its
+place among its siblings was edited, not moved.
 
 A pair stays `logic`, with the reason saying why, when its new place changes
 what it means: a different owner (enclosing class or module), a different

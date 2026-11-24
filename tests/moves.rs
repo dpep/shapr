@@ -306,6 +306,30 @@ fn an_edit_inside_a_namespace_is_not_a_move() {
 }
 
 #[test]
+fn a_method_edited_where_neighbors_swap_around_it_stays_put() {
+    // `middle` is edited in place; `first` and `last` trade places around it.
+    let long = |name: &str, value: &str| {
+        method(name, value).replace("    log(y)\n", &"    log(y)\n".repeat(6))
+    };
+    let (first, middle, last) = (
+        method("first", "2"),
+        long("middle", "3"),
+        method("last", "4"),
+    );
+    let edited = middle.replacen("log(y)", "warn(y)", 1);
+    let report = classify(
+        &[("shape.rb", &class("Shape", &[&first, &middle, &last]))],
+        &[("shape.rb", &class("Shape", &[&last, &edited, &first]))],
+    );
+    let names_middle = hunks(&report).iter().any(|h| {
+        h["detail"]["moves"]
+            .as_array()
+            .is_some_and(|m| m.iter().any(|e| e["name"] == "middle"))
+    });
+    assert!(!names_middle, "{report:#}");
+}
+
+#[test]
 fn a_duplicate_candidate_lowers_confidence() {
     let a = method("first", "2");
     let b = method("second", "3");

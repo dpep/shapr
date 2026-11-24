@@ -2,10 +2,11 @@
 //! reappears in another, in the same file or another.
 //!
 //! Each file's two trees are aligned container by container (the file, then
-//! each class or module body): a longest common subsequence over the
-//! children, keyed by hash, with namespaces keyed by name so their bodies
-//! align in turn. A declaration (`Role::is_declaration`) left out of the
-//! alignment is a *unit*, removed or added. A removed unit pairs with an
+//! each class or module body): a heaviest common subsequence over the
+//! children, declarations keyed by name (so one edited in place still
+//! aligns, and a namespace's body aligns in turn), other statements by hash.
+//! A declaration (`Role::is_declaration`) left out of the alignment is a
+//! *unit*, removed or added. A removed unit pairs with an
 //! added one by equal hash (`move`) or by name and subtree similarity
 //! (`move_with_changes`). A pair is a move only when the code around it means
 //! the same in both places: the same owner, the same visibility section, the
@@ -201,9 +202,12 @@ fn lines(tree: &Tree, node: NodeId) -> RangeInclusive<usize> {
 
 /// How a child lines up with its counterpart on the other side.
 #[derive(PartialEq, Eq)]
-enum Key {
+enum Key<'t> {
     /// A namespace, by its name: its body is aligned in turn.
     Namespace(u64),
+    /// Any other declaration, by its name: aligned with a different hash,
+    /// it was edited in place, not moved.
+    Declaration(Role, &'t str),
     /// A node with no syntax of its own (a statement list): aligned in turn.
     Transparent,
     Code(u64),
@@ -235,42 +239,20 @@ impl Aligner<'_> {
         );
         let weight: Vec<usize> = b.iter().map(|&n| size(tb, n)).collect();
         let matched = lcs(&kb, &ka, &weight);
-        let mut gap_b = vec![0; b.len()];
-        let mut gap_a = vec![0; a.len()];
         let (mut in_b, mut in_a) = (vec![false; b.len()], vec![false; a.len()]);
-        for (g, &(i, j)) in matched.iter().enumerate() {
+        for &(i, j) in &matched {
             in_b[i] = true;
             in_a[j] = true;
-            gap_b.iter_mut().skip(i + 1).for_each(|x| *x = g + 1);
-            gap_a.iter_mut().skip(j + 1).for_each(|x| *x = g + 1);
             let (nb, na) = (b[i], a[j]);
             if tb.node(nb).hash == ta.node(na).hash {
                 self.kept.push((Side::Removed, lines(tb, nb)));
                 self.kept.push((Side::Added, lines(ta, na)));
-            } else if kb[i] != Key::Code(tb.node(nb).hash) {
+            } else if matches!(kb[i], Key::Namespace(_) | Key::Transparent) {
                 self.align(nb, na);
             }
         }
-        // A declaration replaced by one of the same name between the same
-        // anchors was edited in place, not moved.
-        let named = |tree: &Tree, n: NodeId| (tree.node(n).role, tree.node(n).name.clone());
-        let mut edited_b = vec![false; b.len()];
-        let mut edited_a = vec![false; a.len()];
-        for i in (0..b.len()).filter(|&i| !in_b[i]) {
-            let found = (0..a.len()).find(|&j| {
-                !in_a[j]
-                    && !edited_a[j]
-                    && gap_a[j] == gap_b[i]
-                    && tb.node(b[i]).name.is_some()
-                    && named(tb, b[i]) == named(ta, a[j])
-            });
-            if let Some(j) = found {
-                edited_b[i] = true;
-                edited_a[j] = true;
-            }
-        }
         for (i, &n) in b.iter().enumerate() {
-            if !in_b[i] && !edited_b[i] && is_unit(tb, n) {
+            if !in_b[i] && is_unit(tb, n) {
                 self.units.push(Unit {
                     file: self.file,
                     side: Side::Removed,
@@ -279,7 +261,7 @@ impl Aligner<'_> {
             }
         }
         for (j, &n) in a.iter().enumerate() {
-            if !in_a[j] && !edited_a[j] && is_unit(ta, n) {
+            if !in_a[j] && is_unit(ta, n) {
                 self.units.push(Unit {
                     file: self.file,
                     side: Side::Added,
@@ -290,7 +272,7 @@ impl Aligner<'_> {
     }
 }
 
-fn key(tree: &Tree, id: NodeId) -> Key {
+fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     let node = tree.node(id);
     if matches!(
         node.role,
@@ -298,6 +280,11 @@ fn key(tree: &Tree, id: NodeId) -> Key {
     ) && let Some(name) = namespace_name(tree, id)
     {
         return Key::Namespace(name);
+    }
+    if node.role.is_declaration()
+        && let Some(name) = node.name.as_deref()
+    {
+        return Key::Declaration(node.role, name);
     }
     if transparent(tree, id) {
         return Key::Transparent;
