@@ -10,7 +10,7 @@
 //! must equal the chunk once its parameters are renamed to the call's
 //! arguments, and a hunk may change nothing else.
 
-use super::{Confidence, Kind, Label, Labels};
+use super::{Confidence, Kind, Label, Labels, Part};
 use crate::change::{Change, FileChange, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
@@ -329,10 +329,7 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
     }
     // A hunk an earlier pass proved structural (a reformatted sibling) keeps
     // its label and doesn't block the refactoring.
-    touched.retain(|&(h, _)| {
-        let kind = labels[h].kind;
-        kind == Kind::Logic || !kind.is_structure()
-    });
+    touched.retain(|&(h, _)| labels[h].parts.iter().all(|p| !p.structure));
     let ids: Vec<usize> = touched.iter().map(|(h, _)| base + h).collect();
     let mut detail = Map::new();
     detail.insert("method".into(), Value::from(found.method.as_str()));
@@ -342,7 +339,7 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
         Ok(stats) => {
             let all = touched
                 .iter()
-                .all(|&(h, explained)| explained && labels[h].kind == Kind::Logic);
+                .all(|&(h, explained)| explained && labels[h].open());
             if touched.is_empty() || !all {
                 return;
             }
@@ -358,16 +355,25 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
             };
             for &(h, _) in &touched {
                 let label = &mut labels[h];
-                label.kind = found.dir.kind();
-                label.confidence = stats.confidence();
-                label.reason = reason.clone();
-                let values = &mut label.evidence.values;
+                let mut evidence = label.residual.evidence.clone();
+                let values = &mut evidence.values;
                 values.insert("statements".into(), Value::from(stats.statements));
                 values.insert("nodes".into(), Value::from(stats.nodes));
                 values.insert("params".into(), Value::from(stats.params));
                 values.insert("verbatim".into(), Value::from(stats.verbatim()));
                 values.insert("returns".into(), Value::from(stats.returns));
-                label.detail = detail.clone();
+                let part = Part {
+                    kind: found.dir.kind(),
+                    structure: true,
+                    lines: label.changed.clone(),
+                    // Structure, but where refactoring bugs cluster: still read.
+                    review: label.changed.clone(),
+                    confidence: stats.confidence(),
+                    reason: reason.clone(),
+                    evidence,
+                    detail: detail.clone(),
+                };
+                label.claim(part);
             }
         }
         Err(risk) => {
@@ -376,11 +382,12 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
             detail.insert("risk".into(), Value::from(risk.as_str()));
             for &(h, _) in &touched {
                 let label = &mut labels[h];
-                if label.kind != Kind::Logic || !label.detail.is_empty() {
+                if !label.open() || !label.residual.detail.is_empty() {
                     continue;
                 }
-                label.reason = format!("not an {near} of `{}`: {}", found.method, risk.reason());
-                label.detail = detail.clone();
+                let residual = &mut label.residual;
+                residual.reason = format!("not an {near} of `{}`: {}", found.method, risk.reason());
+                residual.detail = detail.clone();
             }
         }
     }

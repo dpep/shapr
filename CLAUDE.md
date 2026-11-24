@@ -57,7 +57,7 @@ src/
   change.rs         assembles a Change: per file, both trees, a Site per hunk, and whether
                     it is generated (lockfiles, minified assets, linguist-generated)
   classify/
-    mod.rs          Kind, Method, Confidence, Label, the pass pipeline
+    mod.rs          Kind, Method, Confidence, Part, Label (parts, residual, rollup), the pass pipeline
     site.rs         hunk → tree mapping: each side's significant span and cover
     format.rs       the format_only / comment_only pass (tree or line method)
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
@@ -133,13 +133,19 @@ frontend's mapping is unit-tested through `Frontend::parse`.
 
 ### The pass pipeline
 
-Every hunk starts as `logic`. `classify::PASSES` run in order over the whole
-`Change`; a pass may relabel only hunks still labeled `logic`. Cross-hunk
-passes (move, extract, inline, rename consistency) see every file's trees and
-every hunk's `Site`: the cover on the before side is what the hunk removed,
-on the after side what it added. Each kind gets its own module under
-`src/classify/`; kind-specific output goes in `Label::evidence.values` and
-`Label::detail`, documented in docs/schema.md.
+Every hunk starts as all residual (`logic`). `classify::PASSES` run in order
+over the whole `Change`; each proves `Part`s (a kind, the changed lines it
+explains, the lines a reviewer still reads, whether it is structure) and adds
+them with `Label::claim`, which keeps only lines no earlier part claimed.
+Whatever no part claims is the residual. A pass proves a part against the
+whole of both trees, residual included, so a part that new code would break
+is never claimed. Cross-hunk passes (move, extract, inline, rename
+consistency) see every file's trees and every hunk's `Site`: the cover on
+the before side is what the hunk removed, on the after side what it added.
+Each kind gets its own module under `src/classify/`; kind-specific output
+goes in the part's `evidence.values` and `detail`, documented in
+docs/schema.md. report.rs knows no kind: it reads parts, the residual and the
+rollup (`Label::kind`, `confidence`, ...).
 
 ## Gate
 

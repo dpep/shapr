@@ -20,7 +20,7 @@
 //! alignment kept unchanged (git may slide a removal across identical lines).
 
 use super::format::{dice, subtree_hashes};
-use super::{Confidence, Kind, Labels};
+use super::{Claim, Confidence, Kind, Labels, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde_json::{Map, Value, json};
@@ -41,7 +41,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
     let mut kept: HashMap<(usize, Side), Vec<RangeInclusive<usize>>> = HashMap::new();
     for (f, file) in change.files.iter().enumerate() {
         let Ok(trees) = &file.trees else { continue };
-        if !trees.clean() || labels[f].iter().all(|l| l.kind != Kind::Logic) {
+        if !trees.clean() || labels[f].iter().all(|l| !l.open()) {
             continue;
         }
         let mut aligner = Aligner {
@@ -80,7 +80,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
     for (f, file) in change.files.iter().enumerate() {
         let Ok(trees) = &file.trees else { continue };
         for (h, hunk) in file.diff.hunks.iter().enumerate() {
-            if labels[f][h].kind != Kind::Logic || !kept.contains_key(&(f, Side::Removed)) {
+            if !labels[f][h].open() || !kept.contains_key(&(f, Side::Removed)) {
                 continue;
             }
             let sides = [
@@ -115,31 +115,32 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             mine.sort_unstable();
             mine.dedup();
             let mine: Vec<&Pair> = mine.iter().map(|&p| &pairs[p]).collect();
-            let label = &mut labels[f][h];
             let exact = mine.iter().all(|p| p.similarity == 1.0);
             let mut context: Vec<Context> = mine.iter().flat_map(|p| p.context.clone()).collect();
             context.sort_unstable();
             context.dedup();
-            label.kind = if exact && context.is_empty() {
+            let kind = if exact && context.is_empty() {
                 Kind::Move
             } else {
                 Kind::MoveWithChanges
             };
-            label.reason = if exact {
+            let mut reason: String = if exact {
                 "declarations moved unchanged".into()
             } else {
                 "declarations moved, and their bodies changed".into()
             };
             if !context.is_empty() {
                 let why: Vec<&str> = context.iter().map(|c| c.reason()).collect();
-                label.reason = format!("{}, but {}", label.reason, why.join("; "));
+                reason = format!("{reason}, but {}", why.join("; "));
             }
-            label.confidence = Confidence::new(
+            let confidence = Confidence::new(
                 mine.iter()
                     .map(|p| p.confidence())
                     .fold(f64::INFINITY, f64::min),
             );
-            let values = &mut label.evidence.values;
+            let label = &mut labels[f][h];
+            let mut evidence = label.residual.evidence.clone();
+            let values = &mut evidence.values;
             values.clear();
             let similarity = mine.iter().map(|p| p.similarity).fold(1.0, f64::min);
             values.insert("similarity".into(), json!(similarity));
@@ -152,13 +153,58 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 .iter()
                 .map(|p| entry(change, &units, &ids, p))
                 .collect();
+            let review = match kind {
+                Kind::Move => Claim::default(),
+                _ => moved_changes(&entries, ids[f] + h),
+            };
             let context: Vec<&str> = context.iter().map(|c| c.as_str()).collect();
-            label.detail = Map::from_iter([
-                ("moves".to_string(), Value::from(entries)),
-                ("context".to_string(), json!(context)),
-            ]);
+            let part = Part {
+                kind,
+                structure: kind.is_structure(),
+                lines: label.changed.clone(),
+                review,
+                confidence,
+                reason,
+                evidence,
+                detail: Map::from_iter([
+                    ("moves".to_string(), Value::from(entries)),
+                    ("context".to_string(), json!(context)),
+                ]),
+            };
+            label.claim(part);
         }
     }
+}
+
+/// The lines inside the hunk's moved units that changed in the move:
+/// before-side lines of the units it removed, after-side lines of the units
+/// it added. A unit moved into a new context adds its first line, where that
+/// context shows.
+fn moved_changes(entries: &[Value], id: usize) -> Claim {
+    let mut out = Claim::default();
+    for entry in entries {
+        let lines = |key: &str| {
+            entry[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .map(|l| l as usize)
+                .collect::<Vec<_>>()
+        };
+        let id = Some(id as u64);
+        let context = entry["context"].as_array().is_some_and(|c| !c.is_empty());
+        let first = |key: &str| entry[key].as_u64().filter(|_| context).map(|l| l as usize);
+        if entry["from_hunk"].as_u64() == id {
+            out.before.extend(lines("changed_before"));
+            out.before.extend(first("from_line"));
+        }
+        if entry["to_hunk"].as_u64() == id {
+            out.after.extend(lines("changed_after"));
+            out.after.extend(first("to_line"));
+        }
+    }
+    out
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

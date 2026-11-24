@@ -2,17 +2,17 @@
 //! whitespace (and, for `comment_only`, comment text).
 
 use super::site::{Side, Significance};
-use super::{Confidence, Kind, LINE_CAP, Labels};
+use super::{Claim, Confidence, Kind, LINE_CAP, Labels, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{NodeId, Span, Tree};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 pub(super) fn run(change: &Change, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
         let Ok(trees) = &file.trees else { continue };
         for (site, label) in trees.sites.iter().zip(labels.iter_mut()) {
-            if label.kind != Kind::Logic {
+            if !label.open() {
                 continue;
             }
             let compared = if trees.clean() {
@@ -36,27 +36,44 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             } else {
                 reason.to_string()
             };
-            label.reason = match broken_sides(trees) {
+            let reason = match broken_sides(trees) {
                 Some(sides) => format!("{reason}; syntax error on {sides}; compared line by line"),
                 None => reason,
             };
+            let residual = &mut label.residual;
             if unproven {
                 // The label is the safe default, not a finding.
-                label.confidence = Confidence::new(0.0);
-                label
+                residual.reason = reason;
+                residual.confidence = Confidence::new(0.0);
+                residual
                     .detail
                     .insert("near".into(), Value::from(kind.as_str()));
                 continue;
             }
-            label.kind = kind;
-            label.confidence = Confidence::new(strength(trees, &site.before, &site.after));
-            if let Some(similarity) = compared.similarity {
-                let rounded = Confidence::new(similarity).get();
-                label
-                    .evidence
-                    .values
-                    .insert("similarity".into(), Value::from(rounded));
+            let confidence = Confidence::new(strength(trees, &site.before, &site.after));
+            if kind == Kind::Logic {
+                residual.reason = reason;
+                residual.confidence = confidence;
+                if let Some(similarity) = compared.similarity {
+                    let rounded = Confidence::new(similarity).get();
+                    residual
+                        .evidence
+                        .values
+                        .insert("similarity".into(), Value::from(rounded));
+                }
+                continue;
             }
+            let part = Part {
+                kind,
+                structure: true,
+                lines: label.changed.clone(),
+                review: Claim::default(),
+                confidence,
+                reason,
+                evidence: residual.evidence.clone(),
+                detail: Map::new(),
+            };
+            label.claim(part);
         }
     }
 }

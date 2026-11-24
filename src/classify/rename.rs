@@ -8,10 +8,10 @@
 //! their confidence is graded down. An opaque name (in a macro's tokens) may
 //! be any of them.
 
-use super::{Confidence, Kind, Labels};
+use super::{Claim, Confidence, Kind, Labels, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Role, Tree, spells};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -153,7 +153,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
         let t = trees(hunk.file);
         let label = &mut labels[hunk.file][hunk.hunk];
         match hunk_pairs(t, hunk, &verdicts) {
-            Err(why) => label.reason = why,
+            Err(why) => label.residual.reason = why,
             Ok(pairs) => {
                 let score = pairs.iter().map(|(_, v)| v.score).fold(1.0, f64::min);
                 let renamed: usize = pairs.iter().map(|(_, v)| v.renamed).sum();
@@ -170,14 +170,22 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                         })
                     })
                     .collect();
-                label.kind = Kind::Rename;
-                label.confidence = Confidence::new(score);
-                label.reason = "only identifiers change, consistently in their scope".into();
-                let values = &mut label.evidence.values;
+                let mut evidence = label.residual.evidence.clone();
+                let values = &mut evidence.values;
                 values.insert("renamed".into(), renamed.into());
                 values.insert("uses".into(), uses.into());
                 values.insert("unseen_uses".into(), unseen.into());
-                label.detail.insert("renames".into(), Value::Array(renames));
+                let part = Part {
+                    kind: Kind::Rename,
+                    structure: true,
+                    lines: label.changed.clone(),
+                    review: Claim::default(),
+                    confidence: Confidence::new(score),
+                    reason: "only identifiers change, consistently in their scope".into(),
+                    evidence,
+                    detail: Map::from_iter([("renames".to_string(), Value::Array(renames))]),
+                };
+                label.claim(part);
             }
         }
     }
@@ -192,7 +200,7 @@ fn aligned(change: &Change, labels: &Labels) -> Vec<Hunk> {
             continue;
         }
         for (hunk, (site, label)) in trees.sites.iter().zip(labels).enumerate() {
-            if label.kind != Kind::Logic {
+            if !label.open() {
                 continue;
             }
             let code = |tree: &Tree, cover: &[NodeId]| -> Vec<NodeId> {

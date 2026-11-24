@@ -6,7 +6,7 @@
 //! changed, on each side: a construct present on one side and not the other
 //! (by kind, name, own text and what it tests) is a change to it.
 
-use super::{Kind, Labels, Method};
+use super::{Labels, Method};
 use crate::change::{Change, Trees};
 use crate::diff::{Hunk, Lines};
 use crate::frontend::{self, Construct, Frontend};
@@ -71,7 +71,7 @@ pub fn run(change: &Change, labels: &mut Labels) {
             _ => None,
         };
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
-            if label.kind != Kind::Logic {
+            if !label.has_residual() {
                 continue;
             }
             let mut facets = BTreeSet::new();
@@ -83,11 +83,11 @@ pub fn run(change: &Change, labels: &mut Labels) {
             }
             if let Some(parsed) = parsed
                 .as_ref()
-                .filter(|_| label.evidence.method == Method::Ast)
+                .filter(|_| label.residual.evidence.method == Method::Ast)
             {
                 parsed.facets(hunk, &mut facets);
             }
-            label.facets = facets.into_iter().collect();
+            label.residual.facets = facets.into_iter().collect();
         }
     }
 }

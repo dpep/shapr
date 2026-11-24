@@ -3,9 +3,8 @@
 
 use crate::change::{Change, FileChange};
 use crate::claims::{Claims, CodeFacts, Finding};
-use crate::classify::{Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method};
+use crate::classify::{Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method};
 use crate::diff::{Hunk, Lines};
-use crate::tree::Tree;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,10 +45,6 @@ impl LineCounts {
     fn changed(&self) -> usize {
         self.added + self.deleted
     }
-
-    fn code(&self) -> usize {
-        self.code_added + self.code_deleted
-    }
 }
 
 #[derive(Serialize)]
@@ -85,6 +80,8 @@ pub struct HunkRecord<'a> {
     lines: LineCounts,
     detail: Map<String, Value>,
     facets: Vec<Facet>,
+    #[serde(skip)]
+    structure: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -148,7 +145,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<
     for (file, labels) in change.files.iter().zip(labels) {
         let mut totals = LineCounts::default();
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
-            let mut lines = count_lines(file, hunk, label, hunks.len());
+            let mut lines = count_lines(file, hunk, label);
             if file.generated {
                 lines.review_lines = 0;
             }
@@ -159,17 +156,18 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<
                 file: file.diff.path(),
                 old_file: file.diff.old_path.as_deref(),
                 language: file.language(),
-                parsed: label.evidence.method == Method::Ast,
+                parsed: label.residual.evidence.method == Method::Ast,
                 generated: file.generated,
                 before: hunk.before,
                 after: hunk.after,
-                kind: label.kind,
-                confidence: label.confidence,
-                reason: label.reason.clone(),
-                evidence: label.evidence.clone(),
+                kind: label.kind(),
+                confidence: label.confidence(),
+                reason: label.reason().to_string(),
+                evidence: label.evidence().clone(),
                 lines,
-                detail: label.detail.clone(),
-                facets: label.facets.clone(),
+                detail: label.detail().clone(),
+                facets: label.facets().to_vec(),
+                structure: label.structure(),
             });
         }
         files.push(FileRecord {
@@ -179,7 +177,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<
             language: file.language(),
             parsed: labels
                 .iter()
-                .all(|l: &Label| l.evidence.method == Method::Ast),
+                .all(|l: &Label| l.residual.evidence.method == Method::Ast),
             generated: file.generated,
             lines_before: file.lines_before,
             hunks: labels.len(),
@@ -194,77 +192,44 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<
     }
 }
 
-fn count_lines(file: &FileChange, hunk: &Hunk, label: &Label, id: usize) -> LineCounts {
+fn count_lines(file: &FileChange, hunk: &Hunk, label: &Label) -> LineCounts {
     let mut counts = LineCounts {
         added: hunk.added.len(),
         deleted: hunk.removed.len(),
         ..LineCounts::default()
     };
-    let Ok(trees) = &file.trees else {
-        // Unparsed, every changed line is taken for code.
+    let trees = file.trees.as_ref().ok();
+    // Unparsed, every changed line is taken for code.
+    let code = |claim: &Claim| -> usize {
+        let Some(trees) = trees else {
+            return claim.before.len() + claim.after.len();
+        };
+        let before = claim.before.iter().filter(|&&l| trees.before.line(l).code);
+        let after = claim.after.iter().filter(|&&l| trees.after.line(l).code);
+        before.count() + after.count()
+    };
+    if let Some(trees) = trees {
+        for &line in &hunk.removed {
+            let facts = trees.before.line(line);
+            counts.code_deleted += usize::from(facts.code);
+            counts.comment_deleted += usize::from(facts.comment);
+        }
+        for &line in &hunk.added {
+            let facts = trees.after.line(line);
+            counts.code_added += usize::from(facts.code);
+            counts.comment_added += usize::from(facts.comment);
+        }
+    } else {
         counts.code_added = counts.added;
         counts.code_deleted = counts.deleted;
-        counts.review_lines = counts.code();
-        return counts;
-    };
-    for &line in &hunk.removed {
-        let facts = trees.before.line(line);
-        counts.code_deleted += usize::from(facts.code);
-        counts.comment_deleted += usize::from(facts.comment);
     }
-    for &line in &hunk.added {
-        let facts = trees.after.line(line);
-        counts.code_added += usize::from(facts.code);
-        counts.comment_added += usize::from(facts.comment);
-    }
-    counts.review_lines = match label.kind {
-        Kind::FormatOnly | Kind::CommentOnly | Kind::Rename | Kind::Move => 0,
-        // Structure, but where refactoring bugs cluster: still read.
-        Kind::Extract | Kind::Inline | Kind::Logic => counts.code(),
-        Kind::MoveWithChanges => {
-            let (before, after) = moved_changes(label, id);
-            let code = |lines: &[usize], side: &Tree, changed: &BTreeSet<usize>| {
-                lines
-                    .iter()
-                    .filter(|l| changed.contains(l) && side.line(**l).code)
-                    .count()
-            };
-            code(&hunk.removed, &trees.before, &before) + code(&hunk.added, &trees.after, &after)
-        }
+    let residual = if label.has_residual() {
+        code(&label.residual.lines)
+    } else {
+        0
     };
+    counts.review_lines = residual + label.parts.iter().map(|p| code(&p.review)).sum::<usize>();
     counts
-}
-
-/// The lines inside the hunk's moved units that changed in the move, from
-/// `detail.moves`: before-side lines of the units it removed, after-side
-/// lines of the units it added. A unit moved into a new context adds its
-/// first line, where that context shows.
-fn moved_changes(label: &Label, id: usize) -> (BTreeSet<usize>, BTreeSet<usize>) {
-    let (mut before, mut after) = (BTreeSet::new(), BTreeSet::new());
-    let moves = label.detail.get("moves").and_then(Value::as_array);
-    for entry in moves.into_iter().flatten() {
-        let lines = |key: &str| {
-            entry[key]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_u64)
-                .map(|l| l as usize)
-                .collect::<Vec<_>>()
-        };
-        let id = Some(id as u64);
-        let context = entry["context"].as_array().is_some_and(|c| !c.is_empty());
-        let first = |key: &str| entry[key].as_u64().filter(|_| context).map(|l| l as usize);
-        if entry["from_hunk"].as_u64() == id {
-            before.extend(lines("changed_before"));
-            before.extend(first("from_line"));
-        }
-        if entry["to_hunk"].as_u64() == id {
-            after.extend(lines("changed_after"));
-            after.extend(first("to_line"));
-        }
-    }
-    (before, after)
 }
 
 fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> Summary {
@@ -292,7 +257,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         if size {
             lines.add(&hunk.lines);
         }
-        if hunk.kind.is_structure() {
+        if hunk.structure {
             structure += 1;
             structure_lines += hunk.lines.changed() * usize::from(size);
         } else {
@@ -319,7 +284,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
     // Only hunks shapr compared are evidence against a claim.
     let compared: Vec<&HunkRecord> = hunks
         .iter()
-        .filter(|h| !h.kind.is_structure() && h.evidence.method != Method::None)
+        .filter(|h| !h.structure && h.evidence.method != Method::None)
         .collect();
     claims.check(&CodeFacts {
         structure: verdict == Verdict::Structure,
