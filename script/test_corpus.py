@@ -89,6 +89,59 @@ class Terminated(unittest.TestCase):
         self.assertFalse(corpus.terminated(b""))
 
 
+class RunOne(unittest.TestCase):
+    def run_one(self, *results):
+        """Runs corpus.run_one against canned subprocess results; returns the cache path and the call count."""
+        import subprocess
+        import tempfile
+        calls = []
+
+        def fake(*_args, **_kwargs):
+            result = results[len(calls)]
+            calls.append(result)
+            if isinstance(result, Exception):
+                raise result
+            return subprocess.CompletedProcess([], result[0], stdout=result[1], stderr=b"boom")
+
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "s.ndjson")
+        with unittest.mock.patch.object(corpus.subprocess, "run", fake):
+            corpus.run_one("shapr", "repo", "s", path, 5)
+        return path, len(calls)
+
+    def test_a_signal_kill_is_retried_and_never_cached(self):
+        path, calls = self.run_one((-9, b""), (-9, b""))
+        self.assertEqual(calls, 2)
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(corpus.complete(path))
+
+    def test_a_signal_kill_retried_into_a_summary_is_cached(self):
+        path, calls = self.run_one((-9, b""), (0, b'{"record":"summary"}\n'))
+        self.assertEqual(calls, 2)
+        self.assertTrue(corpus.complete(path))
+
+    def test_a_crash_and_a_timeout_are_cached_as_errors(self):
+        import subprocess
+        path, _ = self.run_one((101, b""))
+        with open(path) as f:
+            self.assertEqual(json.loads(f.read())["code"], 101)
+        path, _ = self.run_one(subprocess.TimeoutExpired("shapr", 5))
+        with open(path) as f:
+            self.assertEqual(json.loads(f.read())["code"], "timeout")
+
+    def test_an_uncached_commit_loads_as_an_error_for_this_run(self):
+        import tempfile
+        cache = tempfile.mkdtemp()
+        args = argparse.Namespace(cache_dir=cache, limit=1, jobs=1, timeout=5)
+        with unittest.mock.patch.object(corpus, "commits", lambda _repo, _limit: ["s"]), \
+                unittest.mock.patch.object(corpus, "file_hash", lambda _path: "h"), \
+                unittest.mock.patch.object(corpus, "run_one", lambda *_args: None), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rows = corpus.load("shapr", ["repo"], args)
+        [(sha, [record])] = rows["repo"]
+        self.assertEqual((sha, record["record"]), ("s", "error"))
+
+
 class Diff(unittest.TestCase):
     def diff(self, a, b):
         data = {"A": {"r": a}, "B": {"r": b}}

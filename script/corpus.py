@@ -57,15 +57,26 @@ def repo_key(repo):
     return f"{os.path.basename(path)}-{hashlib.sha256(path.encode()).hexdigest()[:8]}"
 
 
-def run_one(binary, repo, sha, path, timeout):
-    try:
-        p = subprocess.run([binary, "-J", "-C", repo, f"{sha}^..{sha}"], capture_output=True, env=GIT_ENV, timeout=timeout)
+def run_one(binary, repo, sha, path, timeout, attempts=2):
+    """Runs shapr on one commit and caches what it printed. A run killed by a
+    signal (SIGKILL from memory pressure, ^C) says nothing about the commit:
+    it is retried, and never cached, so a later run redoes it."""
+    for _ in range(attempts):
+        try:
+            p = subprocess.run([binary, "-J", "-C", repo, f"{sha}^..{sha}"], capture_output=True, env=GIT_ENV, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            out = json.dumps({"record": "error", "error": f"timeout after {timeout}s", "code": "timeout"}).encode() + b"\n"
+            break
         out = p.stdout
-        if not terminated(out):
-            # A crash: record it, so the commit counts as an error rather than rerunning forever.
-            out += json.dumps({"record": "error", "error": p.stderr.decode(errors="replace")[-500:], "code": p.returncode}).encode() + b"\n"
-    except subprocess.TimeoutExpired:
-        out = json.dumps({"record": "error", "error": f"timeout after {timeout}s", "code": "timeout"}).encode() + b"\n"
+        if terminated(out):
+            break
+        if p.returncode < 0:
+            continue
+        # A crash: record it, so the commit counts as an error rather than rerunning forever.
+        out += json.dumps({"record": "error", "error": p.stderr.decode(errors="replace")[-500:], "code": p.returncode}).encode() + b"\n"
+        break
+    else:
+        return
     # Unique per writer: two runs filling the same cache must not share a temp file.
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "wb") as f:
@@ -106,8 +117,12 @@ def load(binary, repos, args):
                 list(ex.map(lambda s: run_one(binary, repo, s, os.path.join(cache, f"{s}.ndjson"), args.timeout), todo))
         rows = []
         for sha in shas:
-            with open(os.path.join(cache, f"{sha}.ndjson")) as f:
-                rows.append((sha, [json.loads(line) for line in f if line.strip()]))
+            try:
+                with open(os.path.join(cache, f"{sha}.ndjson")) as f:
+                    rows.append((sha, [json.loads(line) for line in f if line.strip()]))
+            except FileNotFoundError:
+                # Killed by a signal: an error for this run only.
+                rows.append((sha, [{"record": "error", "error": "killed by a signal", "code": "signal"}]))
         result[name] = rows
     return result
 
