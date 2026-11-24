@@ -51,6 +51,11 @@ pub(crate) struct NormsCli {
     #[arg(long, value_name = "N", default_value_t = 5)]
     top: usize,
 
+    /// Run as if shapr was started in DIR, like `git -C`; PATHs are read
+    /// from there.
+    #[arg(short = 'C', value_name = "DIR")]
+    dir: Option<PathBuf>,
+
     /// Emit one pretty JSON object: files, norms and summary.
     #[arg(short = 'j', long)]
     json: bool,
@@ -162,6 +167,12 @@ pub fn run(args: Vec<String>) -> ExitCode {
     } else {
         Format::Text
     };
+    if let Some(dir) = &cli.dir
+        && std::env::set_current_dir(dir).is_err()
+    {
+        let message = format!("-C {}: not a directory", dir.display());
+        return crate::cli::fail(format, &message, crate::cli::USAGE);
+    }
     let paths = match cli.paths.is_empty() {
         true => vec![PathBuf::from(".")],
         false => cli.paths.clone(),

@@ -652,3 +652,18 @@ fn help_names_the_last_commit_form() {
     let help = String::from_utf8(shapr(dir.path(), &["--help"]).stdout).unwrap();
     assert!(help.contains("shapr HEAD^!"), "{help}");
 }
+
+#[test]
+fn dash_c_may_come_before_or_after_norms() {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    let root = dir.path().to_str().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    for args in [
+        &["-C", root, "-j", "norms", "a.rb"][..],
+        &["-j", "norms", "-C", root, "a.rb"],
+    ] {
+        let out = shapr(elsewhere.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        assert_eq!(report(&out)["summary"]["files"], 1, "{args:?}");
+    }
+}

@@ -142,16 +142,19 @@ pub(crate) fn usage_message(error: &clap::Error) -> String {
 }
 
 pub fn run() -> ExitCode {
-    // A subcommand beside a free RANGE: `norms` is never read as a revision,
-    // and the format flags may come before it.
+    // A subcommand beside free revisions and paths: `norms` is never read as
+    // either, and the global flags (format, -C) may come before it.
     let mut args: Vec<String> = std::env::args().collect();
-    let first = args.iter().skip(1).position(|a| {
-        !matches!(
-            a.as_str(),
-            "-j" | "-J" | "-v" | "-q" | "--json" | "--ndjson" | "--verbose" | "--quiet"
-        )
-    });
-    if let Some(at) = first.map(|i| i + 1).filter(|&i| args[i] == "norms") {
+    let mut at = 1;
+    while let Some(arg) = args.get(at) {
+        match arg.as_str() {
+            "-j" | "-J" | "-v" | "-q" | "--json" | "--ndjson" | "--verbose" | "--quiet" => at += 1,
+            "-C" => at += 2,
+            dir if dir.starts_with("-C") => at += 1,
+            _ => break,
+        }
+    }
+    if args.get(at).is_some_and(|a| a == "norms") {
         args.remove(at);
         args[0] = "shapr norms".to_string();
         return crate::norms::command::run(args);
