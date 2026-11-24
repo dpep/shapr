@@ -1,7 +1,8 @@
 //! Which prism nodes play which [`Role`], and the names prism doesn't record
 //! on the node itself.
 
-use crate::tree::{Jump, NameKind, Receiver, Role, Visibility};
+use crate::frontend::Construct;
+use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Tree, Visibility};
 use ruby_prism::Node;
 use std::collections::HashSet;
 
@@ -174,3 +175,40 @@ impl Roles {
         }
     }
 }
+
+/// Which prism nodes are which [`Construct`], by kind and name.
+pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
+    let node = tree.node(id);
+    let name = node.name.as_deref();
+    Some(match node.kind {
+        // What a conditional tests leads its children, before its bodies.
+        "if" | "unless" | "while" | "until" | "case" | "case_match" | "when" | "in" => {
+            let test = node
+                .children
+                .iter()
+                .map(|&c| tree.node(c))
+                .filter(|c| !c.comment)
+                .take_while(|c| !matches!(c.kind, "statements" | "when" | "in" | "else"))
+                .count();
+            Construct::Branch { test }
+        }
+        "and" | "or" => Construct::Comparison,
+        "call" if matches!(name, Some(n) if COMPARISONS.contains(&n)) => Construct::Comparison,
+        "call"
+            if matches!(name, Some("raise" | "fail"))
+                && node.role == Role::Call(Receiver::Implicit) =>
+        {
+            Construct::Error
+        }
+        "rescue" | "rescue_modifier" | "ensure" => Construct::Error,
+        "integer" | "float" | "rational" | "imaginary" | "string" | "symbol" | "true" | "false"
+        | "nil" | "regular_expression" => Construct::Literal,
+        "parameters" => Construct::Parameters,
+        _ => return None,
+    })
+}
+
+/// Methods that compare or negate.
+const COMPARISONS: &[&str] = &[
+    "==", "!=", "<", ">", "<=", ">=", "<=>", "===", "=~", "!~", "!", "eql?", "equal?",
+];

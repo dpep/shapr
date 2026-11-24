@@ -2,7 +2,8 @@
 //! own text (the name it declares or calls) instead of as a child.
 
 use super::{Walker, span};
-use crate::tree::{Jump, NameKind, Receiver, Role};
+use crate::frontend::Construct;
+use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
 use tree_sitter::Node;
 
@@ -681,4 +682,87 @@ fn pattern_names(p: Node<'_>, src: &[u8], out: &mut HashSet<String>) {
             }
         }
     }
+}
+
+/// Which tree-sitter nodes are which [`Construct`], by kind, name and own
+/// text (a binary operator is its node's own text).
+pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
+    let node = tree.node(id);
+    let name = node.name.as_deref();
+    let own = || -> String { tree.own_text(id).iter().map(|&(_, b)| b as char).collect() };
+    let first_named = |want: &str| {
+        node.children
+            .first()
+            .is_some_and(|&c| tree.node(c).name.as_deref() == Some(want))
+    };
+    Some(match node.kind {
+        "if_expression" | "while_expression" | "match_expression" | "match_arm" => {
+            Construct::Branch { test: 1 }
+        }
+        "binary_expression"
+            if matches!(
+                own().as_str(),
+                "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||"
+            ) =>
+        {
+            Construct::Comparison
+        }
+        "unary_expression" if own() == "!" => Construct::Comparison,
+        "integer_literal" | "float_literal" | "string_literal" | "raw_string_literal"
+        | "char_literal" | "boolean_literal" => Construct::Literal,
+        "try_expression" => Construct::Error,
+        "macro_invocation" if matches!(name, Some(n) if ERROR_MACROS.contains(&n)) => {
+            Construct::Error
+        }
+        "call_expression" if matches!(name, Some(n) if ERROR_METHODS.contains(&n)) => {
+            Construct::Error
+        }
+        "call_expression" | "tuple_struct_pattern" if first_named("Err") => Construct::Error,
+        "parameters" => Construct::Parameters,
+        "function_item" | "mod_item" if test_item(tree, id) => Construct::Test,
+        _ => return None,
+    })
+}
+
+/// Macros that panic or return an error.
+const ERROR_MACROS: &[&str] = &[
+    "panic",
+    "unreachable",
+    "todo",
+    "unimplemented",
+    "bail",
+    "ensure",
+    "anyhow",
+];
+
+/// Methods that unwrap, convert or recover from an error or a missing value.
+const ERROR_METHODS: &[&str] = &[
+    "unwrap",
+    "expect",
+    "unwrap_err",
+    "expect_err",
+    "map_err",
+    "ok_or",
+    "ok_or_else",
+    "unwrap_or",
+    "unwrap_or_else",
+    "unwrap_or_default",
+    "context",
+    "with_context",
+];
+
+/// A `#[test]` (or `#[tokio::test]`, `#[rstest]`) fn, or a `#[cfg(test)]` mod.
+fn test_item(tree: &Tree, id: NodeId) -> bool {
+    tree.node(id)
+        .children
+        .iter()
+        .filter(|&&c| tree.node(c).kind == "attribute_item")
+        .any(|&c| {
+            let text: String = String::from_utf8_lossy(tree.text(&tree.node(c).extent))
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            matches!(text.as_str(), "#[test]" | "#[cfg(test)]" | "#[rstest]")
+                || text.ends_with("::test]")
+        })
 }

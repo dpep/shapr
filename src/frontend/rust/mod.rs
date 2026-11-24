@@ -10,8 +10,8 @@
 
 mod roles;
 
-use super::Frontend;
-use crate::tree::{Semantics, Span, Tree, TreeBuilder};
+use super::{Construct, Frontend};
+use crate::tree::{NodeId, Semantics, Span, Tree, TreeBuilder};
 use roles::{Mode, Plan};
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -49,6 +49,10 @@ impl Frontend for Rust {
             None => builder.error(0..source.len()),
         }
         builder.finish()
+    }
+
+    fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {
+        roles::construct(tree, id)
     }
 }
 

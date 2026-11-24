@@ -428,6 +428,7 @@ fn every_output_field_is_documented() {
         &report["hunks"][0]["before"],
         &report["summary"],
         &report["summary"]["kinds"],
+        &report["summary"]["facets"],
     ];
     for record in records {
         for key in record.as_object().unwrap().keys() {

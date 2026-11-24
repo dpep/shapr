@@ -3,8 +3,8 @@
 mod generated;
 mod roles;
 
-use super::Frontend;
-use crate::tree::{Role, Span, Tree, TreeBuilder};
+use super::{Construct, Frontend};
+use crate::tree::{NodeId, Role, Span, Tree, TreeBuilder};
 use ruby_prism::{Location, Node, Visit};
 
 pub struct Ruby;
@@ -72,6 +72,10 @@ impl Frontend for Ruby {
             builder.error(span(&error.location()));
         }
         builder.finish()
+    }
+
+    fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {
+        roles::construct(tree, id)
     }
 }
 

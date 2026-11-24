@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Change, FileChange};
-use crate::classify::{Confidence, Context, Evidence, Kind, Label, Labels, Method};
+use crate::classify::{Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method};
 use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
@@ -83,6 +83,7 @@ pub struct HunkRecord<'a> {
     #[serde(flatten)]
     lines: LineCounts,
     detail: Map<String, Value>,
+    facets: Vec<Facet>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -126,6 +127,7 @@ pub struct Summary {
     generated_hunks: usize,
     kinds: BTreeMap<&'static str, usize>,
     move_contexts: BTreeMap<&'static str, usize>,
+    facets: BTreeMap<&'static str, usize>,
     files: usize,
     directories: usize,
     subsystems: usize,
@@ -163,6 +165,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
                 evidence: label.evidence.clone(),
                 lines,
                 detail: label.detail.clone(),
+                facets: label.facets.clone(),
             });
         }
         files.push(FileRecord {
@@ -265,6 +268,8 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
         Kind::ALL.iter().map(|k| (k.as_str(), 0)).collect();
     let mut move_contexts: BTreeMap<&'static str, usize> =
         Context::ALL.iter().map(|c| (c.as_str(), 0)).collect();
+    let mut facets: BTreeMap<&'static str, usize> =
+        Facet::ALL.iter().map(|f| (f.as_str(), 0)).collect();
     let mut lines = LineCounts::default();
     let (mut structure, mut behavior, mut structure_lines, mut behavior_lines) = (0, 0, 0, 0);
     for hunk in hunks {
@@ -274,6 +279,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
             if let Some(count) = move_contexts.get_mut(name) {
                 *count += 1;
             }
+        }
+        for facet in &hunk.facets {
+            *facets.entry(facet.as_str()).or_default() += 1;
         }
         // A generated hunk sways the verdict but not the size.
         let size = !hunk.generated;
@@ -313,6 +321,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
         generated_hunks: hunks.iter().filter(|h| h.generated).count(),
         kinds,
         move_contexts,
+        facets,
         files: files.len(),
         directories: dirs.len(),
         subsystems: subsystems.len(),
@@ -389,13 +398,19 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .max()
         .unwrap_or(0);
     for hunk in &report.hunks {
+        let facets: Vec<&str> = hunk.facets.iter().map(|f| f.as_str()).collect();
         writeln!(
             out,
-            "{:width$}  {:<17} {:.2}  {}{}",
+            "{:width$}  {:<17} {:.2}  {}{}{}",
             place(hunk),
             hunk.kind.as_str(),
             hunk.confidence.get(),
             hunk.reason,
+            if facets.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", facets.join(", "))
+            },
             if hunk.generated {
                 " (generated: not counted in size)"
             } else {

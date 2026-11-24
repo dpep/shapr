@@ -6,6 +6,7 @@
 //! relabels hunks still labeled `logic`, and each kind lives in its own
 //! module.
 
+pub mod facets;
 pub mod site;
 
 mod extract;
@@ -13,6 +14,7 @@ mod format;
 mod moves;
 mod rename;
 
+pub use facets::Facet;
 pub use moves::Context;
 
 use crate::change::Change;
@@ -109,6 +111,8 @@ pub struct Label {
     pub evidence: Evidence,
     /// Kind-specific facts about the change itself (e.g. rename pairs).
     pub detail: Map<String, Value>,
+    /// What kind of logic change a `logic` hunk is; empty for other kinds.
+    pub facets: Vec<Facet>,
 }
 
 /// One label per hunk: `labels[file][hunk]`, parallel to `Change::files`.
@@ -124,6 +128,7 @@ pub fn classify(change: &Change) -> Labels {
     for pass in PASSES {
         pass(change, &mut labels);
     }
+    facets::run(change, &mut labels);
     labels
 }
 
@@ -147,6 +152,7 @@ fn defaults(change: &Change) -> Labels {
                     values: Map::new(),
                 },
                 detail: Map::new(),
+                facets: Vec::new(),
             };
             vec![label; file.diff.hunks.len()]
         })

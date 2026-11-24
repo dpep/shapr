@@ -232,6 +232,23 @@ impl Tree {
         &self.source[span.clone()]
     }
 
+    /// The non-whitespace bytes of `id`'s own span outside its children,
+    /// with the line each is on: an operator, a keyword, punctuation.
+    pub fn own_text(&self, id: NodeId) -> Vec<(usize, u8)> {
+        let node = self.node(id);
+        node.span
+            .clone()
+            .filter(|&at| {
+                !self.source[at].is_ascii_whitespace()
+                    && !node
+                        .children
+                        .iter()
+                        .any(|&c| self.node(c).extent.contains(&at))
+            })
+            .map(|at| (self.line_of(at), self.source[at]))
+            .collect()
+    }
+
     /// The deepest node whose extent contains `span`.
     pub fn deepest_containing(&self, span: &Span) -> NodeId {
         let mut at = Self::ROOT;

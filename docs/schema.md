@@ -206,6 +206,7 @@ are stated in Ruby's terms; for Rust:
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
 | `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), plus, for an entry with a `context`, its `from_line` or `to_line` (the unit's first code line, where the new context shows), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. 0 in a `generated` file. |
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. |
+| `facets` | string array | What kind of logic change a `logic` hunk is, in the table's order; empty for every other kind. See [Facets](#facets). |
 
 ## Evidence
 
@@ -246,6 +247,31 @@ A hunk that matches this shape but would change behavior stays `logic` and says 
 | `risk` | string | `"jump"`: the chunk holds `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` or `block_given?`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
 
 shapr sees only the files in the diff: a subclass override or a caller elsewhere of the new or removed method is invisible to it.
+
+## Facets
+
+A `logic` hunk's `facets` say what kind of logic change it is: facts the code
+shows, never what a commit message claims. They don't change `kind` or the
+verdict, and a hunk can carry several or none. Path facets apply to any file;
+the others need both sides parsed cleanly (`evidence.method` `"ast"`).
+
+| facet | meaning | how it is found |
+|---|---|---|
+| `test` | Test code. | The path is under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `test_*.rb`, `*_test.rs`, `tests.rs`; or every changed code line lies inside a Rust `#[test]` (`#[tokio::test]`, `#[rstest]`) fn or `#[cfg(test)]` mod. |
+| `manifest` | A dependency manifest. | By name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, and the manifests beside the other [lockfiles](#generated-files) (`package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`). |
+| `adds_definition` | A method, class or module that didn't exist. | A definition the hunk touches whose name, qualified by its enclosing definitions, the other side of the file doesn't define. A Rust `impl` is named by its header. |
+| `removes_definition` | A method, class or module that no longer exists. | The same, before side. A method renamed and edited both adds and removes. |
+| `signature` | An existing method's interface. | A method on both sides, touched by the hunk, whose parameter list or annotations (Rust: return type, generics, visibility) differ, whitespace aside. |
+| `condition` | What the code branches on. | A conditional (`if`, `unless`, `while`, `until`, `case`, `when`, `in`; Rust `if`, `while`, `match`, a match arm) whose test sits on a changed line, or a comparison or boolean operator (`==`, `<`, `>=`, `&&`, `and`, `!`, …) whose operator does, is on one side and not the other: added, removed, or testing something else. A line added inside a branch's body is not a condition change. |
+| `error_handling` | How errors are raised, propagated or recovered. | An error construct with its own syntax on a changed line is on one side and not the other, compared by kind, name, operator text and the classes it names. Ruby: `raise`/`fail`, `rescue` (clause and modifier), `ensure`. Rust: `?`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`, `bail!`, `ensure!`, `anyhow!`, `Err(…)` built or matched, and `unwrap`, `expect`, `unwrap_err`, `expect_err`, `map_err`, `ok_or`, `ok_or_else`, `unwrap_or`, `unwrap_or_else`, `unwrap_or_default`, `context`, `with_context`. Changing an argument under a `?` is not. |
+| `literal_only` | Only literal values changed: config-like. | The changed regions are equal once every literal (number, string, symbol, boolean, nil, regexp; a string's text inside an interpolation) and comment is masked, and hold the same number of literals. A symbol naming code (`send(:x)`, see `DynamicName` in the rename rules) is not a literal here. |
+
+Code inside a definition the hunk adds or removes doesn't add `condition` or
+`error_handling`: `adds_definition` already says all of it is new.
+
+Facets describe; they don't judge intent. A fix and a feature both change
+conditions. Claims about intent come from messages, kept apart from the code's
+facts.
 
 ## Confidence
 
@@ -334,6 +360,7 @@ enough to match by chance, and when several units could be its other half.
 | `generated_hunks` | int | Hunks with `generated: true`. They count in `hunks`, `kinds` and `verdict`, and nowhere below. |
 | `kinds` | object | Hunk count per kind, every kind present. |
 | `move_contexts` | object | `move_with_changes` hunk count per `context` (see [Moves](#moves)), every context present; a hunk with two contexts counts under both. |
+| `facets` | object | `logic` hunk count per facet (see [Facets](#facets)), every facet present; a hunk with two facets counts under both. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |

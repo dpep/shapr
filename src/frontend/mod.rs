@@ -5,7 +5,7 @@
 mod ruby;
 mod rust;
 
-use crate::tree::Tree;
+use crate::tree::{NodeId, Tree};
 
 pub use ruby::Ruby;
 pub use rust::Rust;
@@ -24,6 +24,29 @@ pub trait Frontend: Sync {
     /// comment the language reads as code (a Ruby magic comment) is emitted
     /// as a leaf with `comment: false`, so changing it is a code change.
     fn parse(&self, source: Vec<u8>) -> Tree;
+
+    /// What `id`, in a tree this frontend parsed, means to a reviewer
+    /// sorting logic changes (see `classify::facets`).
+    fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct>;
+}
+
+/// A language construct that tells one kind of logic change from another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Construct {
+    /// A conditional (`if`, `while`, `case`, a `when`, a match arm): its
+    /// first `test` code children are what it tests.
+    Branch { test: usize },
+    /// An operator comparing or combining truth values (`>`, `==`, `&&`, `!`).
+    Comparison,
+    /// A number, string, symbol, boolean or nil written out.
+    Literal,
+    /// Raises, propagates or rescues an error (`raise`, `rescue`, `?`,
+    /// `unwrap`, `panic!`).
+    Error,
+    /// A definition's parameter list.
+    Parameters,
+    /// An item that only tests run (Rust's `#[test]` fn, `#[cfg(test)]` mod).
+    Test,
 }
 
 static FRONTENDS: &[&dyn Frontend] = &[&Ruby, &Rust];

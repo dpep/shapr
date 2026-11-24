@@ -61,6 +61,8 @@ src/
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
     moves.rs        the move / move_with_changes pass: unaligned declarations paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
+    facets.rs       facets on logic hunks (condition, signature, ...), from Frontend::construct;
+                    runs after the passes and never relabels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
 tests/              end to end against throwaway git repos: cli.rs (input, output,
                     size measures), one file per detector, rust_lang.rs (Rust end to end)
@@ -68,7 +70,9 @@ tests/              end to end against throwaway git repos: cli.rs (input, outpu
 
 ### The language seam
 
-A frontend implements `Frontend` (`language`, `handles`, `parse`) and reports
+A frontend implements `Frontend` (`language`, `handles`, `parse`, and
+`construct`: which nodes are a branch, comparison, literal, error construct,
+parameter list or test item, for facets) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
 language reads as code), `error`. The builder computes everything the core
