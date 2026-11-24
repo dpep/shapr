@@ -49,7 +49,7 @@ src/
   cli.rs            clap, input selection (range or stdin, -C), exit codes, after-help
   log.rs            -v telemetry (the verbose! macro)
   git.rs            the git calls, run in -C's directory or a bare clone: `git diff RANGE`, `git log`
-                    messages, blob reads (worktree fallback), linguist-generated attributes, remotes
+                    messages, blob reads (worktree fallback), linguist attributes, remotes
   github.rs         GitHub input: PR/commit forms, REST metadata (token from env or gh), the cache of
                     bare partial clones the diff runs in (--status, --clear-cache)
   diff.rs           unified diff parser: FileDiff, Hunk (narrowed to its changed region), Lines
@@ -63,8 +63,8 @@ src/
     rust/mod.rs     tree-sitter → TreeBuilder: own text, folded `;`/braces, attributes into their item,
                     macro token trees as leaves, trailing commas ignored
     rust/roles.rs   which tree-sitter nodes play which Role; local bindings; derive-observed members
-  change.rs         assembles a Change: per file, both trees, a Site per hunk, and whether
-                    it is generated (lockfiles, minified assets, linguist-generated)
+  change.rs         assembles a Change: per file, both trees, a Site per hunk, and its
+                    category (code, test, docs, config, manifest, generated, ...)
   classify/
     mod.rs          Kind, Method, Confidence, Part, Label (parts, residual, verdict), the pass pipeline
     align.rs        a hunk's two covers aligned node for node: renamed names, differing code, kept code

@@ -167,30 +167,39 @@ never an `extract`, `inline` or `rename`.
   `deref`, `index`, `add` and the other operators, `from`, `into`, `default`,
   …): an inherent method of one of these names wins over the trait's.
 
-## Generated files
+## Categories
 
-A file is `generated` when a tool writes it and the change that matters is
-reviewed elsewhere:
+Every file has one `category`, a closed vocabulary. It says what kind of
+file it is, apart from whether shapr parses it: a Ruby spec is `test` and
+still parsed and classified. The first rule that matches wins:
 
-- a lockfile, by name in any directory: `Cargo.lock`, `Gemfile.lock`,
-  `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`,
-  `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`,
-  `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`,
-  `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`;
-- a minified asset: `*.min.js`, `*.min.css`;
-- a path `.gitattributes` marks `linguist-generated`. The attribute wins
-  either way: `-linguist-generated` (or `=false`) unmarks a lockfile. It is
-  read as `git check-attr` sees it, from the working tree's
-  `.gitattributes`, not the diffed revisions'.
+| category | rule |
+|---|---|
+| `binary` | git reports the file as binary. |
+| `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
+| `vendored` | `.gitattributes` marks it `linguist-vendored`. |
+| `docs` | `.gitattributes` marks it `linguist-documentation`; or it is under a `doc`, `docs` or `documentation` directory; or its extension is prose (`md`, `markdown`, `mdx`, `txt`, `rdoc`, `adoc`, `asciidoc`, `rst`, `org`, `textile`); or its name, extension aside, is `README`, `LICENSE`, `LICENCE`, `COPYING`, `CHANGELOG`, `CHANGES`, `HISTORY`, `NEWS`, `AUTHORS`, `CONTRIBUTORS` or `NOTICE` (any case). |
+| `test` | Under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `*_test.rs`, `*_test.go`, `*_test.py`, `test_*.rb`, `test_*.py`, `*.test.*`, `*.spec.*`, `tests.rs` or `test.rs`. |
+| `manifest` | A dependency manifest, by name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`. |
+| `config` | Extension `yml`, `yaml`, `toml`, `json`, `jsonc`, `json5`, `ini`, `cfg`, `conf`, `properties`, `env`, `xml` or `plist`; or a dotenv file (`.env`, `.env.*`). |
+| `code` | A language shapr parses (see [Languages](#languages)). |
+| `unknown` | Anything else: source in a language shapr doesn't parse, scripts, build files. |
 
-A generated file's hunks are classified like any other, so a lockfile
-(unparsed) is `logic` and a dependency change sways the verdict to
-`behavior` or `mixed`. They don't count toward size: their `review_lines` is
-0, and the summary's line sums, `behavior_lines`, `entropy` and
+A linguist attribute wins over the name either way: `-linguist-generated`
+(or `=false`) unmarks a lockfile, and `-linguist-documentation` a `README`.
+Attributes are read as `git check-attr` sees them, from the working tree's
+`.gitattributes` (for a GitHub run, the head commit's), not the diffed
+revisions'.
+
+Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
+not a category: it is the residual facet `test` (see [Facets](#facets)).
+
+Generated and vendored files don't count toward size: their `review_lines`
+is 0, and the summary's line sums, `behavior_lines`, `entropy` and
 `structure_share` leave them out. Their own `added`, `deleted` and other
 line counts stay as the diff has them. Generated-but-reviewed files such as
-a Rails `db/schema.rb` are not on the list; mark them in `.gitattributes`
-if they should be.
+a Rails `db/schema.rb` aren't `generated` by name; mark them in
+`.gitattributes` if they should be.
 
 ## Languages
 
@@ -259,10 +268,10 @@ can check `schema` before reading the rest.
 | `old_file` | string or null | Path before the change; `null` for an added file. Differs from `file` on a rename. |
 | `language` | string or null | The frontend that parsed it (`"ruby"` or `"rust"`, see [Languages](#languages)); `null` when none did. |
 | `parsed` | bool | Every hunk in the file was compared as trees (`evidence.method` `"ast"`). |
-| `generated` | bool | A lockfile or generated file. See [Generated files](#generated-files). |
+| `category` | string | What kind of file: `code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary` or `unknown`. See [Categories](#categories). |
 | `lines_before` | int or null | Lines in the file before the change (Kamei's LT); 0 for an added file; `null` when its content couldn't be read. |
 | `hunks` | int | Hunk records that follow for this file. |
-| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the file's hunks, generated or not. |
+| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the file's hunks. |
 
 ## `hunk` record
 
@@ -270,16 +279,15 @@ can check `schema` before reading the rest.
 |---|---|---|
 | `record` | `"hunk"` | |
 | `id` | int | Position in the output, from 0. Kind-specific `detail` refers to other hunks by `id`. |
-| `file`, `old_file`, `language` | | As in the `file` record. |
+| `file`, `old_file`, `language`, `category` | | As in the `file` record. |
 | `parsed` | bool | Compared as trees. `false` when either side has a syntax error (compared as text instead) or the file wasn't parsed at all. |
-| `generated` | bool | The hunk's file is generated: its `review_lines` is 0 and the summary's size sums leave it out. See [Generated files](#generated-files). |
 | `before`, `after` | line run | The changed region on each side. |
 | `kind` | string | The one-word rollup: `logic` unless `verdict` is `structure`, else the most substantial part kind. See [Parts](#parts). |
 | `verdict` | string | `structure` (every part is structure), `behavior` (none is) or `mixed`. |
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `generated` file. |
+| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `generated` or `vendored` file. |
 | `parts` | array | The hunk's parts in the [Parts](#parts) table's order, the residual (`logic`) last. Below. |
 
 Each part:
@@ -341,13 +349,11 @@ shapr sees only the files in the diff: a subclass override or a caller elsewhere
 A residual's `facets` say what kind of logic change it is: facts the code
 shows on the residual's lines, never what a commit message claims. They
 don't change `kind` or the verdict, and a residual can carry several or
-none. Path facets apply to any file; the others need both sides parsed
-cleanly (`evidence.method` `"ast"`).
+none. They need both sides parsed cleanly (`evidence.method` `"ast"`).
 
 | facet | meaning | how it is found |
 |---|---|---|
-| `test` | Test code. | The path is under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `test_*.rb`, `*_test.rs`, `tests.rs`; or every changed code line lies inside a Rust `#[test]` (`#[tokio::test]`, `#[rstest]`) fn or `#[cfg(test)]` mod. |
-| `manifest` | A dependency manifest. | By name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, and the manifests beside the other [lockfiles](#generated-files) (`package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`). |
+| `test` | Test code inside a code file. | Every changed code line lies inside a Rust `#[test]` (`#[tokio::test]`, `#[rstest]`) fn or `#[cfg(test)]` mod. A whole test file is the `test` [category](#categories) instead. |
 | `adds_definition` | A method, class or module that didn't exist. | A definition whose own syntax (the line naming it) is on a residual line, and whose name, qualified by its enclosing definitions, the other side of the file doesn't define. A Rust `impl` is named by its header. |
 | `removes_definition` | A method, class or module that no longer exists. | The same, before side. A method renamed and edited, where the rename isn't proven, both adds and removes. |
 | `signature` | An existing method's interface. | A method on both sides, touched by the residual, whose parameter list or annotations (Rust: return type, generics, visibility) differ, whitespace aside. |
@@ -408,7 +414,7 @@ Each conflict is a count of what the code shows, not a verdict on the author:
 | key | type | meaning |
 |---|---|---|
 | `claim` | string | The claimed category. |
-| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` compared hunks structural (their `verdict` is `behavior` or `mixed`). `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks whose residual lacks the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and every hunk is structure. |
+| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` compared hunks structural (their `verdict` is `behavior` or `mixed`). `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks outside the `test` category whose residual lacks the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and every hunk is structure. |
 | `count` | int | Behavior hunks behind the finding (0 for `no_behavior_hunks`). Hunks in files shapr didn't compare (`evidence.method` `"none"`) aren't counted: their `logic` is unknown, not evidence. |
 
 "Couldn't prove structural" is not "changes behavior": a `refactor` claim with
@@ -505,17 +511,17 @@ enough to match by chance, and when several units could be its other half.
 | `verdict` | string | `"structure"`: every part of every hunk is structure. `"behavior"`: no part is. `"mixed"`: both, in one hunk or across hunks. `"empty"`: no hunks. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
-| `generated_hunks` | int | Hunks with `generated: true`. They count in `hunks`, `kinds` and `verdict`, and nowhere below. |
+| `categories` | object | Hunk count per [category](#categories), every category present. Generated and vendored hunks count in `hunks`, `kinds` and `verdict`, and in no size measure below. |
 | `kinds` | object | Part count per kind, every kind present: `logic` counts residuals. A hunk that is one part counts once. |
 | `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
 | `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
-| `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated. 0 for one file. |
-| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated. |
+| `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated or vendored. 0 for one file. |
+| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated or vendored. |
 | `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings): the behavior change's size, comments and unchanged moved lines excluded. |
-| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts over all changed lines, generated hunks left out; 0 when nothing changed. |
+| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
 
 ## GitHub input

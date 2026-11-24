@@ -123,6 +123,11 @@ def hunks(records):
     return [r for r in records if r.get("record") == "hunk"]
 
 
+def unsized(h):
+    """Left out of size: `generated: true` before categories, a generated or vendored category after."""
+    return h.get("generated", False) or h.get("category") in ("generated", "vendored")
+
+
 def code_lines(h):
     return h["code_added"] + h["code_deleted"]
 
@@ -195,7 +200,7 @@ def repo_stats(rows):
             s["hunks"] += 1
             for p in parts(h):
                 s["kinds"][p["kind"]] += 1
-                if h["generated"]:
+                if unsized(h):
                     continue
                 s["lines"][p["kind"]] += p["code"]
                 s["changed_lines"][p["kind"]] += p["changed"]
@@ -206,7 +211,7 @@ def repo_stats(rows):
         code = summ["code_added"] + summ["code_deleted"]
         if code:
             s["discounts"].append(1 - summ["review_lines"] / code)
-        parsed = [h for h in hunks(records) if h["language"] is not None and not h["generated"]]
+        parsed = [h for h in hunks(records) if h["language"] is not None and not unsized(h)]
         code = sum(code_lines(h) for h in parsed)
         if code:
             s["parsed_discounts"].append(1 - sum(h["review_lines"] for h in parsed) / code)
@@ -386,7 +391,7 @@ def cmd_sample(args):
     per_repo = args.n // len(data)
     for name, rows in data.items():
         pool = [(sha, h, p) for sha, records in rows for h in hunks(records) for p in parts(h)
-                if p["kind"] == "logic" and p["code"] and not h["generated"] and h["language"] is not None]
+                if p["kind"] == "logic" and p["code"] and not unsized(h) and h["language"] is not None]
         for sha, h, p in rng.sample(pool, min(per_repo, len(pool))):
             print(json.dumps({"repo": name, "sha": sha, "file": h["file"], "before": h["before"], "after": h["after"],
                               "code_lines": p["code"], "facets": p["facets"], "near": p["detail"].get("near"),

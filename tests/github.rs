@@ -631,8 +631,8 @@ fn gitattributes_come_from_the_head_commit() {
     let out = f.shapr_in(f.tmp.path(), &["-j", &format!("acme/widgets@{head}")], &[]);
     let r = report(&out);
     assert_eq!(r["hunks"][0]["file"], "lib/schema.rb");
-    assert_eq!(r["hunks"][0]["generated"], true, "{}", stderr(&out));
-    assert_eq!(r["summary"]["generated_hunks"], 1);
+    assert_eq!(r["hunks"][0]["category"], "generated", "{}", stderr(&out));
+    assert_eq!(r["summary"]["categories"]["generated"], 1);
 }
 
 #[test]

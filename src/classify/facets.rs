@@ -1,8 +1,7 @@
 //! `facets`: what kind of change a `logic` hunk makes, as facts the code
 //! shows. A facet never changes a hunk's kind, and a hunk can carry several.
 //!
-//! Path facets (`test`, `manifest`) need no parse. The rest compare the
-//! constructs a frontend reports ([`Construct`]) on the lines the hunk
+//! Facets compare the constructs a frontend reports ([`Construct`]) on the lines the hunk
 //! changed, on each side: a construct present on one side and not the other
 //! (by kind, name, own text and what it tests) is a change to it.
 
@@ -18,10 +17,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Facet {
-    /// In a test file, or every changed code line is inside a test item.
+    /// Every changed code line is inside a test item (a test file is a
+    /// file category instead).
     Test,
-    /// A dependency manifest (`Gemfile`, `*.gemspec`, `Cargo.toml`).
-    Manifest,
     /// A method, class or module that didn't exist before.
     AddsDefinition,
     /// A method, class or module that no longer exists.
@@ -39,9 +37,8 @@ pub enum Facet {
 }
 
 impl Facet {
-    pub const ALL: [Facet; 8] = [
+    pub const ALL: [Facet; 7] = [
         Facet::Test,
-        Facet::Manifest,
         Facet::AddsDefinition,
         Facet::RemovesDefinition,
         Facet::Signature,
@@ -53,7 +50,6 @@ impl Facet {
     pub fn as_str(self) -> &'static str {
         match self {
             Facet::Test => "test",
-            Facet::Manifest => "manifest",
             Facet::AddsDefinition => "adds_definition",
             Facet::RemovesDefinition => "removes_definition",
             Facet::Signature => "signature",
@@ -75,12 +71,6 @@ pub fn run(change: &Change, labels: &mut Labels) {
                 continue;
             }
             let mut facets = BTreeSet::new();
-            if test_path(file.diff.path()) {
-                facets.insert(Facet::Test);
-            }
-            if manifest(file.diff.path()) {
-                facets.insert(Facet::Manifest);
-            }
             if let Some(parsed) = parsed
                 .as_ref()
                 .filter(|_| label.residual.evidence.method == Method::Ast)
@@ -119,40 +109,6 @@ fn residual(hunk: &Hunk, label: &Label) -> Hunk {
         removed: lines.before.iter().copied().collect(),
         added: lines.after.iter().copied().collect(),
     }
-}
-
-/// A test file, by path: under `spec/`, `test/` or `tests/`, or named like one.
-fn test_path(path: &str) -> bool {
-    let (dirs, name) = path.rsplit_once('/').unwrap_or(("", path));
-    dirs.split('/')
-        .any(|d| matches!(d, "spec" | "test" | "tests" | "__tests__"))
-        || ["_spec.rb", "_test.rb", "_test.rs"]
-            .iter()
-            .any(|s| name.ends_with(s))
-        || (name.starts_with("test_") && name.ends_with(".rb"))
-        || matches!(name, "tests.rs" | "test.rs")
-}
-
-/// The manifests whose lockfiles `change` marks generated.
-fn manifest(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.ends_with(".gemspec")
-        || matches!(
-            name,
-            "Gemfile"
-                | "gems.rb"
-                | "Cargo.toml"
-                | "package.json"
-                | "go.mod"
-                | "pyproject.toml"
-                | "Pipfile"
-                | "Podfile"
-                | "composer.json"
-                | "mix.exs"
-                | "pubspec.yaml"
-                | "Package.swift"
-                | "flake.nix"
-        )
 }
 
 /// A parsed file's per-tree facts, computed once for all its hunks.

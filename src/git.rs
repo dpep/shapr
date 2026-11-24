@@ -153,9 +153,9 @@ impl Git {
         Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
     }
 
-    /// Each path's `linguist-generated` attribute, where .gitattributes sets
-    /// or unsets it. Empty outside a repository.
-    pub fn linguist_generated(&self, paths: &[&str]) -> HashMap<String, bool> {
+    /// Each path's linguist attributes, where .gitattributes sets or unsets
+    /// them. Empty outside a repository.
+    pub fn linguist(&self, paths: &[&str]) -> HashMap<String, Linguist> {
         let mut input = Vec::new();
         for path in paths {
             input.extend_from_slice(path.as_bytes());
@@ -171,14 +171,14 @@ impl Git {
             // check-attr reads paths against the cwd; the diff's are from the top.
             cmd.current_dir(toplevel).arg("check-attr");
         }
-        cmd.args(["-z", "--stdin", "linguist-generated"]);
+        cmd.args(["-z", "--stdin"]).args(LINGUIST);
         let out = match run_with_input(&mut cmd, &input) {
             Ok(out) => out,
             Err(error) => {
                 // `check-attr --source` needs git 2.40.
                 if self.bare.is_some() {
                     crate::verbose!(
-                        "can't read .gitattributes from the head commit ({error:#}): generated files by name only"
+                        "can't read .gitattributes from the head commit ({error:#}): categories by name only"
                     );
                 }
                 return HashMap::new();
@@ -187,18 +187,38 @@ impl Git {
         let out = String::from_utf8_lossy(&out);
         let fields: Vec<&str> = out.split('\0').collect();
         let (triples, _) = fields.as_chunks::<3>();
-        triples
-            .iter()
-            .filter_map(|[path, _, value]| {
-                let value = match *value {
-                    "set" | "true" => true,
-                    "unset" | "false" => false,
-                    _ => return None,
-                };
-                Some((path.to_string(), value))
-            })
-            .collect()
+        let mut found: HashMap<String, Linguist> = HashMap::new();
+        for [path, attribute, value] in triples {
+            let value = match *value {
+                "set" | "true" => true,
+                "unset" | "false" => false,
+                _ => continue,
+            };
+            let entry = found.entry(path.to_string()).or_default();
+            match *attribute {
+                "linguist-generated" => entry.generated = Some(value),
+                "linguist-vendored" => entry.vendored = Some(value),
+                "linguist-documentation" => entry.documentation = Some(value),
+                _ => {}
+            }
+        }
+        found
     }
+}
+
+const LINGUIST: [&str; 3] = [
+    "linguist-generated",
+    "linguist-vendored",
+    "linguist-documentation",
+];
+
+/// The linguist attributes .gitattributes sets (`Some(true)`) or unsets
+/// (`Some(false)`) on a path; `None` where it says nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Linguist {
+    pub generated: Option<bool>,
+    pub vendored: Option<bool>,
+    pub documentation: Option<bool>,
 }
 
 pub(crate) fn run(cmd: &mut Command) -> Result<Vec<u8>> {

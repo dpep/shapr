@@ -1,7 +1,7 @@
 //! The output records (the public schema, see docs/schema.md) and their
 //! rendering. Everything shapr writes to stdout goes through here.
 
-use crate::change::{Change, FileChange};
+use crate::change::{Category, Change, FileChange};
 use crate::claims::{Claims, CodeFacts, Finding};
 use crate::classify::{
     Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method, Verdict,
@@ -78,7 +78,7 @@ pub struct FileRecord<'a> {
     old_file: Option<&'a str>,
     language: Option<&'static str>,
     parsed: bool,
-    generated: bool,
+    category: Category,
     lines_before: Option<usize>,
     hunks: usize,
     #[serde(flatten)]
@@ -93,7 +93,7 @@ pub struct HunkRecord<'a> {
     old_file: Option<&'a str>,
     language: Option<&'static str>,
     parsed: bool,
-    generated: bool,
+    category: Category,
     before: Lines,
     after: Lines,
     kind: Kind,
@@ -160,7 +160,7 @@ pub struct Summary {
     pub verdict: Verdict,
     hunks: usize,
     unparsed_hunks: usize,
-    generated_hunks: usize,
+    categories: BTreeMap<&'static str, usize>,
     kinds: BTreeMap<&'static str, usize>,
     move_contexts: BTreeMap<&'static str, usize>,
     facets: BTreeMap<&'static str, usize>,
@@ -183,7 +183,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
             let mut lines = count_lines(file, hunk);
             let mut parts = part_records(file, label);
-            if file.generated {
+            if !sized(file.category) {
                 parts.iter_mut().for_each(|p| p.review_lines = 0);
             }
             lines.review_lines = parts.iter().map(|p| p.review_lines).sum();
@@ -195,7 +195,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 old_file: file.diff.old_path.as_deref(),
                 language: file.language(),
                 parsed: label.residual.evidence.method == Method::Ast,
-                generated: file.generated,
+                category: file.category,
                 before: hunk.before,
                 after: hunk.after,
                 kind: label.kind(),
@@ -213,7 +213,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
             parsed: labels
                 .iter()
                 .all(|l: &Label| l.residual.evidence.method == Method::Ast),
-            generated: file.generated,
+            category: file.category,
             lines_before: file.lines_before,
             hunks: labels.len(),
             lines: totals,
@@ -305,6 +305,8 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
 }
 
 fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> Summary {
+    let mut categories: BTreeMap<&'static str, usize> =
+        Category::ALL.iter().map(|c| (c.as_str(), 0)).collect();
     let mut kinds: BTreeMap<&'static str, usize> =
         Kind::ALL.iter().map(|k| (k.as_str(), 0)).collect();
     let mut move_contexts: BTreeMap<&'static str, usize> =
@@ -314,8 +316,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
     let mut lines = LineCounts::default();
     let (mut structure, mut behavior, mut structure_lines, mut behavior_lines) = (0, 0, 0, 0);
     for hunk in hunks {
-        // A generated hunk sways the verdict but not the size.
-        let size = !hunk.generated;
+        *categories.entry(hunk.category.as_str()).or_default() += 1;
+        // A generated or vendored hunk sways the verdict but not the size.
+        let size = sized(hunk.category);
         if size {
             lines.add(&hunk.lines);
         }
@@ -357,6 +360,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         behavior: compared.len(),
         non_test_behavior: compared
             .iter()
+            .filter(|h| h.category != Category::Test)
             .filter(|h| !h.parts.iter().any(|p| p.facets.contains(&Facet::Test)))
             .count(),
     });
@@ -365,7 +369,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         verdict,
         hunks: hunks.len(),
         unparsed_hunks: hunks.iter().filter(|h| !h.parsed).count(),
-        generated_hunks: hunks.iter().filter(|h| h.generated).count(),
+        categories,
         kinds,
         move_contexts,
         facets,
@@ -375,7 +379,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         entropy: round2(entropy(
             files
                 .iter()
-                .filter(|f| !f.generated)
+                .filter(|f| sized(f.category))
                 .map(|f| f.lines.changed()),
         )),
         lines,
@@ -400,6 +404,12 @@ fn entropy(changed: impl Iterator<Item = usize>) -> f64 {
         .map(|p| -p * p.log2())
         .sum::<f64>()
         .max(0.0)
+}
+
+/// Counts toward size: tool-written and third-party files are reviewed
+/// elsewhere.
+fn sized(category: Category) -> bool {
+    !matches!(category, Category::Generated | Category::Vendored)
 }
 
 fn round2(value: f64) -> f64 {
@@ -462,10 +472,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
                 } else {
                     format!(" [{}]", facets.join(", "))
                 },
-                if hunk.generated && i == 0 {
-                    " (generated: not counted in size)"
+                if !sized(hunk.category) && i == 0 {
+                    format!(" ({}: not counted in size)", hunk.category.as_str())
                 } else {
-                    ""
+                    String::new()
                 },
             )?;
         }
@@ -498,10 +508,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         },
         s.lines.review_lines,
         if s.lines.review_lines == 1 { "" } else { "s" },
-        match s.generated_hunks {
+        match report.hunks.iter().filter(|h| !sized(h.category)).count() {
             0 => String::new(),
-            1 => " (1 generated hunk not counted)".to_string(),
-            n => format!(" ({n} generated hunks not counted)"),
+            1 => " (1 generated or vendored hunk not counted)".to_string(),
+            n => format!(" ({n} generated or vendored hunks not counted)"),
         },
         s.lines.comment_added,
         s.lines.comment_deleted,

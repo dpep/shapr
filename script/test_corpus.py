@@ -64,6 +64,16 @@ class Parts(unittest.TestCase):
         self.assertEqual((fmt["code"], ren["code"]), (4, 2))
 
 
+class Unsized(unittest.TestCase):
+    def test_generated_reads_the_bool_or_the_category(self):
+        h = new_hunk([], run(1, 1), run(1, 1), code=1)
+        self.assertFalse(corpus.unsized(h))
+        self.assertTrue(corpus.unsized({**h, "generated": True}))
+        del h["generated"]
+        self.assertFalse(corpus.unsized({**h, "category": "test"}))
+        self.assertTrue(corpus.unsized({**h, "category": "vendored"}))
+
+
 class LineKinds(unittest.TestCase):
     def test_new_schema_labels_only_the_lines_a_part_explains(self):
         h = new_hunk([part("comment_only", [], [run(2, 1)], 0), part("logic", [run(4, 1)], [], 1)],

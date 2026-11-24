@@ -173,20 +173,10 @@ fn a_new_parameter_changes_the_signature() {
 }
 
 #[test]
-fn a_spec_change_is_test() {
+fn a_test_file_is_a_category_not_a_facet() {
     let before = "RSpec.describe Gate do\n  it { expect(Gate.new.open?(2)).to eq(:open) }\nend\n";
     let after = before.replace("open?(2)", "open?(3)");
-    assert_eq!(
-        one("spec/gate_spec.rb", before, &after),
-        ["test", "literal_only"]
-    );
-}
-
-#[test]
-fn a_gem_bump_is_a_manifest_change() {
-    let before = "source \"https://rubygems.org\"\ngem \"rake\", \"~> 12.0\"\n";
-    let after = before.replace("12.0", "13.0");
-    assert_eq!(one("Gemfile", before, &after), ["manifest", "literal_only"]);
+    assert_eq!(one("spec/gate_spec.rb", before, &after), ["literal_only"]);
 }
 
 #[test]
@@ -250,13 +240,6 @@ fn rust_a_test_item_change_is_test() {
     );
     let after = before.replace("open(2)", "open(3)");
     assert_eq!(one("lib.rs", &before, &after), ["test", "literal_only"]);
-}
-
-#[test]
-fn rust_a_dependency_bump_is_a_manifest_change() {
-    let before = "[package]\nname = \"demo\"\n\n[dependencies]\nserde = \"1.0.100\"\n";
-    let after = before.replace("1.0.100", "1.0.200");
-    assert_eq!(one("Cargo.toml", before, &after), ["manifest"]);
 }
 
 #[test]

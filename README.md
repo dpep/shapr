@@ -22,7 +22,7 @@ Each hunk is a list of parts. A part is one proven change of these kinds, with t
 | `inline` | structure | the reverse of `extract` | all code lines |
 | `logic` | behavior | anything else, such as `x * 2` becoming `x * 3`, or the edited lines of a moved method | all code lines |
 
-A hunk's `kind` is a one-word rollup: `logic` unless every part is structure, else its most substantial part kind in this table's order. Extracts and inlines are structure but still count toward review: refactoring bugs cluster there. Lockfiles and generated files count toward the verdict but not toward review lines.
+A hunk's `kind` is a one-word rollup: `logic` unless every part is structure, else its most substantial part kind in this table's order. Extracts and inlines are structure but still count toward review: refactoring bugs cluster there. Lockfiles, generated and vendored files count toward the verdict but not toward review lines.
 
 ## Usage
 
@@ -59,8 +59,8 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 
 [docs/schema.md](docs/schema.md) describes every field. Highlights:
 
-- per hunk: its `parts`, each with a `kind`, the lines it covers, a graded `confidence` with the `evidence` behind it, and for the `logic` part `facets` saying what kind of logic change it is (`condition`, `signature`, `error_handling`, `literal_only`, `test`, …); the hunk's `verdict` and `kind`; code and comment lines added and deleted, and `review_lines`, the code lines a reviewer still has to read (the last column of [Kinds](#kinds));
-- per file: lines before the change, whether it is `generated` (a lockfile, a minified asset, or `linguist-generated`), and the same line counts;
+- per hunk: its `parts`, each with a `kind`, the lines it covers, a graded `confidence` with the `evidence` behind it, and for the `logic` part `facets` saying what kind of logic change it is (`condition`, `signature`, `error_handling`, `literal_only`, …); the hunk's `verdict` and `kind`; code and comment lines added and deleted, and `review_lines`, the code lines a reviewer still has to read (the last column of [Kinds](#kinds));
+- per file: its `category` (`code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), lines before the change, and the same line counts;
 - a summary: the verdict, counts of parts per kind and facet, `structure_share`, and Kamei's diffusion measures (files, directories, subsystems, entropy);
 - `summary.claims`: what the commit messages and a `--message` description claim (conventional types, purpose words, reverts, issues), with their source; and, experimental, the categories they claim and where the code doesn't bear a claim out. Claims never change a label: shapr reads the code first.
 

@@ -4,8 +4,9 @@
 use crate::classify::site::Site;
 use crate::diff::{FileDiff, Hunk, Lines};
 use crate::frontend;
-use crate::git::{Blobs, Git};
+use crate::git::{Blobs, Git, Linguist};
 use crate::tree::Tree;
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub struct Change {
@@ -14,8 +15,7 @@ pub struct Change {
 
 pub struct FileChange {
     pub diff: FileDiff,
-    /// A lockfile or generated file: its lines don't count toward size.
-    pub generated: bool,
+    pub category: Category,
     /// Line count of the file before the change, when its content was read.
     pub lines_before: Option<usize>,
     /// Why the file couldn't be parsed: no frontend, binary, a blob not found.
@@ -46,7 +46,7 @@ impl FileChange {
 /// Reads and parses every file the diff names.
 pub fn assemble(diffs: Vec<FileDiff>, git: &Git) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
-    let attributes = git.linguist_generated(&paths);
+    let attributes = git.linguist(&paths);
     let mut blobs = Blobs::new(git);
     let files = diffs
         .into_iter()
@@ -73,12 +73,10 @@ pub fn assemble(diffs: Vec<FileDiff>, git: &Git) -> Change {
 fn file_change(
     diff: FileDiff,
     blobs: &mut Blobs,
-    attributes: &HashMap<String, bool>,
+    attributes: &HashMap<String, Linguist>,
 ) -> FileChange {
-    let generated = attributes
-        .get(diff.path())
-        .copied()
-        .unwrap_or_else(|| generated_by_name(diff.path()));
+    let linguist = attributes.get(diff.path()).copied().unwrap_or_default();
+    let category = Category::of(diff.path(), diff.binary, linguist);
     let before = read(blobs, diff.old_blob.as_deref(), diff.old_path.as_deref());
     let lines_before = before.as_ref().ok().map(|b| line_count(b));
     let trees = if diff.binary {
@@ -115,9 +113,83 @@ fn file_change(
     );
     FileChange {
         diff,
-        generated,
+        category,
         lines_before,
         trees,
+    }
+}
+
+/// What kind of file a change touches, one per file. Orthogonal to parsing:
+/// a test file in a parsed language is parsed and classified like code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Category {
+    /// Source in a language shapr parses.
+    Code,
+    Test,
+    Docs,
+    Config,
+    /// A dependency manifest.
+    Manifest,
+    /// Written by a tool: a lockfile, a minified asset, `linguist-generated`.
+    Generated,
+    /// Third-party code: `linguist-vendored`.
+    Vendored,
+    Binary,
+    /// None of the above: source shapr doesn't parse, or anything else.
+    Unknown,
+}
+
+impl Category {
+    pub const ALL: [Category; 9] = [
+        Category::Code,
+        Category::Test,
+        Category::Docs,
+        Category::Config,
+        Category::Manifest,
+        Category::Generated,
+        Category::Vendored,
+        Category::Binary,
+        Category::Unknown,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Category::Code => "code",
+            Category::Test => "test",
+            Category::Docs => "docs",
+            Category::Config => "config",
+            Category::Manifest => "manifest",
+            Category::Generated => "generated",
+            Category::Vendored => "vendored",
+            Category::Binary => "binary",
+            Category::Unknown => "unknown",
+        }
+    }
+
+    /// The first rule that matches. A linguist attribute wins over the
+    /// name either way: `-linguist-generated` unmarks a lockfile.
+    pub fn of(path: &str, binary: bool, linguist: Linguist) -> Category {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if binary {
+            Category::Binary
+        } else if linguist.generated.unwrap_or_else(|| generated(name)) {
+            Category::Generated
+        } else if linguist.vendored == Some(true) {
+            Category::Vendored
+        } else if linguist.documentation.unwrap_or_else(|| docs(path, name)) {
+            Category::Docs
+        } else if test(path, name) {
+            Category::Test
+        } else if manifest(name) {
+            Category::Manifest
+        } else if config(name) {
+            Category::Config
+        } else if frontend::for_path(path).is_some() {
+            Category::Code
+        } else {
+            Category::Unknown
+        }
     }
 }
 
@@ -143,10 +215,108 @@ const LOCKFILES: &[&str] = &[
     "yarn.lock",
 ];
 
-/// A lockfile or minified asset, by its path alone.
-fn generated_by_name(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
+/// A lockfile or minified asset.
+fn generated(name: &str) -> bool {
     LOCKFILES.contains(&name) || name.ends_with(".min.js") || name.ends_with(".min.css")
+}
+
+/// Prose: under a docs directory, a prose extension, or a conventional
+/// top-level text file (`README`, `LICENSE`, ...), as linguist reads them.
+fn docs(path: &str, name: &str) -> bool {
+    let dirs = path.rsplit_once('/').map_or("", |(d, _)| d);
+    let in_docs = dirs.split('/').any(|d| {
+        matches!(
+            d.to_ascii_lowercase().as_str(),
+            "doc" | "docs" | "documentation"
+        )
+    });
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    let prose = matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "markdown"
+            | "mdx"
+            | "txt"
+            | "rdoc"
+            | "adoc"
+            | "asciidoc"
+            | "rst"
+            | "org"
+            | "textile"
+    );
+    let conventional = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "README"
+            | "LICENSE"
+            | "LICENCE"
+            | "COPYING"
+            | "CHANGELOG"
+            | "CHANGES"
+            | "HISTORY"
+            | "NEWS"
+            | "AUTHORS"
+            | "CONTRIBUTORS"
+            | "NOTICE"
+    );
+    in_docs || prose || conventional
+}
+
+/// A test file: under a `spec`, `test`, `tests` or `__tests__` directory, or
+/// named like one.
+fn test(path: &str, name: &str) -> bool {
+    let dirs = path.rsplit_once('/').map_or("", |(d, _)| d);
+    dirs.split('/')
+        .any(|d| matches!(d, "spec" | "test" | "tests" | "__tests__"))
+        || ["_spec.rb", "_test.rb", "_test.rs", "_test.go", "_test.py"]
+            .iter()
+            .any(|s| name.ends_with(s))
+        || (name.starts_with("test_") && (name.ends_with(".rb") || name.ends_with(".py")))
+        || name.contains(".test.")
+        || name.contains(".spec.")
+        || matches!(name, "tests.rs" | "test.rs")
+}
+
+/// The manifests beside the lockfiles.
+fn manifest(name: &str) -> bool {
+    name.ends_with(".gemspec")
+        || matches!(
+            name,
+            "Gemfile"
+                | "gems.rb"
+                | "Cargo.toml"
+                | "package.json"
+                | "go.mod"
+                | "pyproject.toml"
+                | "Pipfile"
+                | "Podfile"
+                | "composer.json"
+                | "mix.exs"
+                | "pubspec.yaml"
+                | "Package.swift"
+                | "flake.nix"
+        )
+}
+
+/// Configuration by extension, or a dotenv file.
+fn config(name: &str) -> bool {
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    name == ".env"
+        || name.starts_with(".env.")
+        || matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "yml"
+                | "yaml"
+                | "toml"
+                | "json"
+                | "jsonc"
+                | "json5"
+                | "ini"
+                | "cfg"
+                | "conf"
+                | "properties"
+                | "env"
+                | "xml"
+                | "plist"
+        )
 }
 
 /// A side's content; a side that doesn't exist is empty.
@@ -169,24 +339,55 @@ fn line_count(source: &[u8]) -> usize {
 mod tests {
     use super::*;
 
+    fn category(path: &str) -> &'static str {
+        Category::of(path, false, Linguist::default()).as_str()
+    }
+
     #[test]
-    fn lockfiles_and_minified_assets_are_generated_by_name() {
-        for path in [
-            "Gemfile.lock",
-            "web/package-lock.json",
-            "go.sum",
-            "assets/app.min.js",
+    fn categories_by_name() {
+        for (path, want) in [
+            ("Gemfile.lock", "generated"),
+            ("web/package-lock.json", "generated"),
+            ("assets/app.min.js", "generated"),
+            ("lib/lock.rb", "code"),
+            ("Cargo.lock.rb", "code"),
+            ("db/schema.rb", "code"),
+            ("README.md", "docs"),
+            ("LICENSE", "docs"),
+            ("docs/index.html", "docs"),
+            ("spec/a_spec.rb", "test"),
+            ("lib/a_test.rs", "test"),
+            ("tests/fixtures/x.json", "test"),
+            ("Gemfile", "manifest"),
+            ("acme.gemspec", "manifest"),
+            ("package.json", "manifest"),
+            ("config/app.yml", "config"),
+            (".rubocop.yml", "config"),
+            ("Cargo.toml.orig", "unknown"),
+            ("app.js", "unknown"),
+            ("Makefile", "unknown"),
         ] {
-            assert!(generated_by_name(path), "{path}");
+            assert_eq!(category(path), want, "{path}");
         }
-        for path in [
-            "Gemfile",
-            "db/schema.rb",
-            "lib/lock.rb",
-            "app.js",
-            "Cargo.lock.rb",
-        ] {
-            assert!(!generated_by_name(path), "{path}");
-        }
+    }
+
+    #[test]
+    fn an_attribute_wins_over_the_name() {
+        let unset = Linguist {
+            generated: Some(false),
+            documentation: Some(false),
+            ..Linguist::default()
+        };
+        assert_eq!(Category::of("yarn.lock", false, unset), Category::Unknown);
+        assert_eq!(Category::of("NOTES.md", false, unset), Category::Unknown);
+        let vendored = Linguist {
+            vendored: Some(true),
+            ..Linguist::default()
+        };
+        assert_eq!(
+            Category::of("lib/a.rb", false, vendored),
+            Category::Vendored
+        );
+        assert_eq!(Category::of("a.rb", true, vendored), Category::Binary);
     }
 }

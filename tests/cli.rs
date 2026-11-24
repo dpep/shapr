@@ -228,9 +228,9 @@ fn a_moved_method_with_an_edit_reviews_only_the_changed_lines() {
 }
 
 #[test]
-fn a_lockfile_drives_the_verdict_but_not_the_size() {
+fn a_lockfile_is_generated_and_not_counted_in_size() {
     let reformatted = METHOD.replace("greet(name)", "greet( name )");
-    let (report, code) = classify(
+    let (report, _) = classify(
         &[
             ("a.rb", METHOD),
             ("Gemfile.lock", "rack (2.0)\nrake (13.0)\n"),
@@ -242,51 +242,99 @@ fn a_lockfile_drives_the_verdict_but_not_the_size() {
     );
     assert_eq!(kinds(&report), ["logic", "format_only"]);
     let lock = &report["hunks"][0];
-    assert_eq!(lock["generated"], true);
+    assert_eq!(lock["category"], "generated");
     assert_eq!(lock["added"], 2);
     assert_eq!(lock["review_lines"], 0);
-    assert_eq!(report["files"][0]["generated"], true);
-    assert_eq!(report["hunks"][1]["generated"], false);
+    assert_eq!(report["files"][0]["category"], "generated");
+    assert_eq!(report["hunks"][1]["category"], "code");
     let summary = &report["summary"];
-    assert_eq!(summary["verdict"], "mixed");
-    assert_eq!(summary["generated_hunks"], 1);
+    assert_eq!(summary["categories"]["generated"], 1);
+    assert_eq!(summary["categories"]["code"], 1);
     assert_eq!(
         (summary["added"].as_u64(), summary["review_lines"].as_u64()),
         (Some(1), Some(0))
     );
     assert_eq!(summary["behavior_lines"], 0);
     assert_eq!(summary["structure_share"], 1.0);
-    assert_eq!(code, 0);
 }
 
-#[test]
-fn gitattributes_mark_generated_files_and_can_unmark_a_lockfile() {
-    let attributes = "gen/** linguist-generated\nyarn.lock -linguist-generated\n";
-    let (report, _) = classify(
-        &[
-            (".gitattributes", attributes),
-            ("gen/api.rb", "X = 1\n"),
-            ("yarn.lock", "a@1\n"),
-        ],
-        &[
-            (".gitattributes", attributes),
-            ("gen/api.rb", "X = 2\n"),
-            ("yarn.lock", "a@2\n"),
-        ],
-    );
-    let generated: Vec<(&str, bool)> = report["files"]
+/// Each file's path and category.
+fn categories(report: &Value) -> Vec<(&str, &str)> {
+    report["files"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|f| {
-            (
-                f["file"].as_str().unwrap(),
-                f["generated"].as_bool().unwrap(),
-            )
-        })
-        .collect();
-    assert_eq!(generated, [("gen/api.rb", true), ("yarn.lock", false)]);
-    assert_eq!(report["summary"]["review_lines"], 2);
+        .map(|f| (f["file"].as_str().unwrap(), f["category"].as_str().unwrap()))
+        .collect()
+}
+
+#[test]
+fn every_file_has_one_category() {
+    let attributes = "gen/** linguist-generated\nyarn.lock -linguist-generated\nthird/** linguist-vendored\nguide.html linguist-documentation\n";
+    let files = |n: &str| -> Vec<(&'static str, String)> {
+        vec![
+            (".gitattributes", attributes.to_string()),
+            ("lib/a.rb", format!("X = {n}\n")),
+            ("spec/a_spec.rb", format!("X = {n}\n")),
+            ("src/widget.test.ts", format!("x({n})\n")),
+            ("README.md", format!("v{n}\n")),
+            ("docs/setup.html", format!("<p>{n}</p>\n")),
+            ("guide.html", format!("<p>{n}</p>\n")),
+            ("config/app.yml", format!("x: {n}\n")),
+            (".env.test", format!("X={n}\n")),
+            ("Gemfile", format!("gem \"a\", \"{n}\"\n")),
+            ("package.json", format!("{{\"v\": {n}}}\n")),
+            ("Gemfile.lock", format!("a ({n})\n")),
+            ("gen/api.rb", format!("X = {n}\n")),
+            ("yarn.lock", format!("a@{n}\n")),
+            ("third/lib.js", format!("x({n})\n")),
+            ("logo.png", format!("\0PNG{n}")),
+            ("run.sh", format!("echo {n}\n")),
+        ]
+    };
+    let (before, after) = (files("1"), files("2"));
+    let borrow = |v: &'static [(&'static str, String)]| -> Vec<(&'static str, &'static str)> {
+        v.iter().map(|(p, c)| (*p, c.as_str())).collect()
+    };
+    let (before, after) = (borrow(before.leak()), borrow(after.leak()));
+    let (report, _) = classify(&before, &after);
+    let mut got = categories(&report);
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            (".env.test", "config"),
+            ("Gemfile", "manifest"),
+            ("Gemfile.lock", "generated"),
+            ("README.md", "docs"),
+            ("config/app.yml", "config"),
+            ("docs/setup.html", "docs"),
+            ("gen/api.rb", "generated"),
+            ("guide.html", "docs"),
+            ("lib/a.rb", "code"),
+            ("logo.png", "binary"),
+            ("package.json", "manifest"),
+            ("run.sh", "unknown"),
+            ("spec/a_spec.rb", "test"),
+            ("src/widget.test.ts", "test"),
+            ("third/lib.js", "vendored"),
+            ("yarn.lock", "unknown"),
+        ]
+    );
+    // Category is orthogonal to parsing: a test file and a Gemfile are parsed.
+    let file = |path: &str| {
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["file"] == path)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(file("spec/a_spec.rb")["language"], "ruby");
+    assert_eq!(file("spec/a_spec.rb")["parsed"], true);
+    assert_eq!(file("Gemfile")["language"], "ruby");
+    assert_eq!(file("run.sh")["language"], Value::Null);
 }
 
 #[test]
@@ -463,6 +511,7 @@ fn every_output_field_is_documented() {
         &report["summary"],
         &report["summary"]["kinds"],
         &report["summary"]["facets"],
+        &report["summary"]["categories"],
     ];
     for record in records {
         for key in record.as_object().unwrap().keys() {
