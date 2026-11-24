@@ -167,7 +167,7 @@ impl Frontend for Rust {
                     .iter()
                     .any(|p| own.starts_with(p))
                     && !matches!(own, "src/main.rs" | "build.rs");
-                return lib && target && !line("publish=false");
+                return lib && target && !unpublished(&toml, dir, files);
             }
             if dir.is_empty() {
                 return false;
@@ -179,6 +179,46 @@ impl Frontend for Rust {
     fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {
         roles::construct(tree, id)
     }
+}
+
+/// Whether a crate's manifest allows no registry: `publish = false` or
+/// `publish = []`, or `publish.workspace = true` under a workspace root
+/// (above `dir`) whose `[workspace.package]` says so.
+fn unpublished(toml: &str, dir: &str, files: &dyn Snapshot) -> bool {
+    let compact = |l: &str| l.split_whitespace().collect::<String>();
+    let none = |toml: &str| {
+        toml.lines()
+            .any(|l| matches!(compact(l).as_str(), "publish=false" | "publish=[]"))
+    };
+    let inherits = toml.lines().any(|l| {
+        matches!(
+            compact(l).as_str(),
+            "publish.workspace=true" | "publish={workspace=true}"
+        )
+    });
+    if !inherits {
+        return none(toml);
+    }
+    // The workspace root: this manifest, or the nearest one above with `[workspace]`.
+    let workspace = |toml: &str| toml.lines().any(|l| compact(l) == "[workspace]");
+    let mut root = workspace(toml).then(|| toml.to_string());
+    let mut at = dir;
+    while root.is_none() && !at.is_empty() {
+        at = crate::norms::snapshot::parent(at);
+        let read = files.read(&crate::norms::join(at, "Cargo.toml"));
+        root = read
+            .map(|t| String::from_utf8_lossy(&t).into_owned())
+            .filter(|t| workspace(t));
+    }
+    let Some(root) = root else { return false };
+    // The `[workspace.package]` table, up to the next header.
+    let table: Vec<&str> = root
+        .lines()
+        .skip_while(|l| compact(l) != "[workspace.package]")
+        .skip(1)
+        .take_while(|l| !l.trim_start().starts_with('['))
+        .collect();
+    none(&table.join("\n"))
 }
 
 fn span(n: &Node<'_>) -> Span {

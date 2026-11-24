@@ -1,0 +1,6 @@
+{
+  "description": "`publish.workspace = true` under a workspace that sets `publish = false`: unpublished, so a pub fn rename has no public API",
+  "expect": {
+    "hunks": [{"verdict": "structure", "parts": [{"kind": "rename", "structure": true, "assumptions": []}]}]
+  }
+}

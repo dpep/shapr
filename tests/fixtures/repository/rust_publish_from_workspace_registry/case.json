@@ -1,0 +1,6 @@
+{
+  "description": "`publish.workspace = true` under a workspace that publishes to a registry: a pub fn rename is public API",
+  "expect": {
+    "hunks": [{"verdict": "behavior", "parts": {"$some": {"kind": "rename", "structure": false, "assumptions": ["public_api"]}}}]
+  }
+}
