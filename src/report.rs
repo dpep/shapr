@@ -66,7 +66,6 @@ impl Verdict {
             classify::Verdict::Structure => Verdict::Structure,
             classify::Verdict::Behavior => Verdict::Behavior,
             classify::Verdict::Mixed => Verdict::Mixed,
-            classify::Verdict::Empty => Verdict::None,
         }
     }
 }
@@ -458,9 +457,12 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
         }
     }
-    let verdict = match Verdict::of(classify::Verdict::of(structure > 0, behavior > 0)) {
-        Verdict::None if hunks.iter().any(|h| h.verdict == Verdict::Unknown) => Verdict::Unknown,
-        verdict => verdict,
+    let verdict = match (structure > 0, behavior > 0) {
+        (true, false) => Verdict::Structure,
+        (false, true) => Verdict::Behavior,
+        (true, true) => Verdict::Mixed,
+        _ if hunks.iter().any(|h| h.verdict == Verdict::Unknown) => Verdict::Unknown,
+        _ => Verdict::None,
     };
     let paths: Vec<&str> = files.iter().map(|f| f.file).collect();
     let dirs: BTreeSet<&str> = paths

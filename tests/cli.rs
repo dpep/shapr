@@ -152,7 +152,7 @@ fn changing_code_is_logic_with_its_evidence() {
     assert_eq!(kinds(&report), ["logic"]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["review_lines"], 2);
-    assert!(lead(hunk)["evidence"]["similarity"].as_f64().unwrap() < 1.0);
+    assert!(lead(hunk)["evidence"]["code_similarity"].as_f64().unwrap() < 1.0);
     assert_eq!(report["summary"]["verdict"], "behavior");
     assert_eq!(report["summary"]["behavior_lines"], 2);
     assert_eq!(code, 0);

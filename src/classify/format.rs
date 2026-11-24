@@ -60,7 +60,7 @@ pub(super) fn run(change: &Change, _: &Alignments, labels: &mut Labels) {
                     residual
                         .evidence
                         .values
-                        .insert("similarity".into(), Value::from(rounded));
+                        .insert("code_similarity".into(), Value::from(rounded));
                 }
                 continue;
             }

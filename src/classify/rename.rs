@@ -200,7 +200,7 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
                 json!({
                     "from": p.from,
                     "to": p.to,
-                    "kind": p.space.scope.as_str(),
+                    "scope": p.space.scope.as_str(),
                     "occurrences": v.renamed,
                 })
             })

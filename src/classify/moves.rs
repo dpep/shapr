@@ -137,7 +137,7 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
             let values = &mut evidence.values;
             values.clear();
             let similarity = mine.iter().map(|p| p.similarity).fold(1.0, f64::min);
-            values.insert("similarity".into(), json!(similarity));
+            values.insert("min_similarity".into(), json!(similarity));
             values.insert("nodes".into(), json!(mine.iter().map(|p| p.nodes).min()));
             values.insert(
                 "candidates".into(),

@@ -233,7 +233,13 @@ impl Label {
     pub fn verdict(&self) -> Verdict {
         let structure = self.parts.iter().any(|p| p.structure());
         let behavior = self.has_residual() || self.parts.iter().any(|p| !p.structure());
-        Verdict::of(structure, behavior)
+        // Without a structure part there is a residual or a part that isn't
+        // structure: behavior.
+        match (structure, behavior) {
+            (true, false) => Verdict::Structure,
+            (true, true) => Verdict::Mixed,
+            (false, _) => Verdict::Behavior,
+        }
     }
 
     /// The one-word rollup: `logic` unless the hunk is all structure, else
@@ -261,28 +267,6 @@ pub enum Verdict {
     /// Behavior only.
     Behavior,
     Mixed,
-    /// Nothing changed.
-    Empty,
-}
-
-impl Verdict {
-    pub fn of(structure: bool, behavior: bool) -> Verdict {
-        match (structure, behavior) {
-            (false, false) => Verdict::Empty,
-            (true, false) => Verdict::Structure,
-            (false, true) => Verdict::Behavior,
-            (true, true) => Verdict::Mixed,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Verdict::Structure => "structure",
-            Verdict::Behavior => "behavior",
-            Verdict::Mixed => "mixed",
-            Verdict::Empty => "empty",
-        }
-    }
 }
 
 /// One label per hunk: `labels[file][hunk]`, parallel to `Change::files`.

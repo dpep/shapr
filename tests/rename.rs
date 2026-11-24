@@ -107,7 +107,7 @@ fn a_local_variable_renamed_in_a_def_is_a_rename() {
     assert_eq!(confidence(hunk), 1.0);
     assert_eq!(
         lead(hunk)["detail"]["renames"],
-        serde_json::json!([{"from": "sum", "to": "subtotal", "kind": "local", "occurrences": 3}])
+        serde_json::json!([{"from": "sum", "to": "subtotal", "scope": "local", "occurrences": 3}])
     );
     assert_eq!(lead(hunk)["evidence"]["renamed"], 3);
     assert_eq!(lead(hunk)["evidence"]["uses"], 3);
@@ -196,7 +196,7 @@ fn a_method_rename_with_every_call_site_is_a_graded_rename() {
     let hunk = &report["hunks"][0];
     assert_eq!(
         lead(hunk)["detail"]["renames"],
-        serde_json::json!([{"from": "greet", "to": "salute", "kind": "method", "occurrences": 3}])
+        serde_json::json!([{"from": "greet", "to": "salute", "scope": "method", "occurrences": 3}])
     );
     assert_eq!(lead(hunk)["evidence"]["unseen_uses"], true);
     // Callers outside the diff can't be seen: (3 + 1) / (3 + 2).
@@ -285,7 +285,7 @@ fn a_class_rename_counts_its_name_once() {
     assert_eq!(kinds(&report), ["rename"]);
     let rename = &lead(&report["hunks"][0])["detail"]["renames"][0];
     assert_eq!(
-        (rename["kind"].as_str(), rename["occurrences"].as_u64()),
+        (rename["scope"].as_str(), rename["occurrences"].as_u64()),
         (Some("constant"), Some(2))
     );
 }

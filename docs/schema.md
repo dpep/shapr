@@ -164,7 +164,7 @@ parsed file of the change.
 |---|---|---|
 | `renames` | array | One object per rename the part makes. |
 | `from`, `to` | string | The old and new name. |
-| `kind` | string | `local`, `field`, `method` or `constant`. |
+| `scope` | string | Where the old name lives, and so where every use had to change: `local`, `field`, `method` or `constant`. |
 | `occurrences` | int | Uses renamed across the change, the definition included; a class or module name counts once. |
 
 `evidence`, beside `comparison`:
@@ -343,7 +343,7 @@ Each part:
 | key | type | when | meaning |
 |---|---|---|---|
 | `comparison` | string | always | `"ast"`: both sides parsed cleanly and their trees were compared. `"line"`: a side has a syntax error, so the region's text was compared, whitespace and comments aside. `"none"`: nothing was compared (no frontend for the file, a binary file, or content that couldn't be read). |
-| `similarity` | number 0–1 | `comparison` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
+| `code_similarity` | number 0–1 | `comparison` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
 
 ## Extract and inline
 
@@ -511,7 +511,7 @@ part.
 
 | key | type | meaning |
 |---|---|---|
-| `similarity` | number 0–1 | The lowest similarity among the hunk's pairs: Dice coefficient over the two units' subtrees. 1 when every body is unchanged. |
+| `min_similarity` | number 0–1 | The lowest similarity among the hunk's pairs: Dice coefficient over the two units' subtrees. 1 when every body is unchanged. |
 | `nodes` | int | Syntax nodes in the smallest unit moved. |
 | `candidates` | int | The most units, among the hunk's pairs, that matched equally well; 1 when every match is unique. |
 

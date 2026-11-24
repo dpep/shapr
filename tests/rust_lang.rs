@@ -89,7 +89,7 @@ fn assert_context_move(report: &Value, context: &str) {
             lead(hunk)["detail"]["context"],
             serde_json::json!([context])
         );
-        assert_eq!(lead(hunk)["evidence"]["similarity"], 1.0);
+        assert_eq!(lead(hunk)["evidence"]["min_similarity"], 1.0);
         // One line per end of a move in this hunk: the definition's first.
         let ends: usize = lead(hunk)["detail"]["moves"]
             .as_array()
@@ -176,7 +176,7 @@ fn a_local_rename_is_a_rename() {
     let rename = &lead(&hunks(&report)[0])["detail"]["renames"][0];
     assert_eq!(rename["from"], "n");
     assert_eq!(rename["to"], "size");
-    assert_eq!(rename["kind"], "local");
+    assert_eq!(rename["scope"], "local");
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn a_function_rename_with_its_call_sites_is_a_rename() {
     let report = change(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "rename"), "{report:#}");
     let rename = &lead(&hunks(&report)[0])["detail"]["renames"][0];
-    assert_eq!(rename["kind"], "method");
+    assert_eq!(rename["scope"], "method");
     assert_eq!(rename["occurrences"], 3);
 }
 

@@ -121,7 +121,7 @@ fn assert_context_move(report: &Value, context: &str) {
             lead(hunk)["detail"]["context"],
             serde_json::json!([context])
         );
-        assert_eq!(lead(hunk)["evidence"]["similarity"], 1.0);
+        assert_eq!(lead(hunk)["evidence"]["min_similarity"], 1.0);
         // One line per end of a move in this hunk: the definition's first.
         let ends: usize = lead(hunk)["detail"]["moves"]
             .as_array()
@@ -149,7 +149,7 @@ fn swapping_two_methods_is_a_move() {
     assert!(kinds(&report).iter().all(|k| *k == "move"), "{report:#}");
     assert_cross_referenced(&report);
     let hunk = &hunks(&report)[0];
-    assert_eq!(lead(hunk)["evidence"]["similarity"], 1.0);
+    assert_eq!(lead(hunk)["evidence"]["min_similarity"], 1.0);
     assert_eq!(lead(hunk)["evidence"]["candidates"], 1);
     assert!(lead(hunk)["confidence"].as_f64().unwrap() > 0.8);
     assert_eq!(hunk["review_lines"], 0);
