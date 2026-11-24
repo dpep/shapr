@@ -811,12 +811,14 @@ fn a_name_that_is_a_revision_and_a_path_needs_dashes() {
     git(dir.path(), &["branch", "lib", "main"]);
     let (message, code) = refused(dir.path(), &["lib"]);
     assert_eq!(code, 64);
-    assert!(
-        message.contains("ambiguous argument 'lib': both revision and filename"),
-        "{message}"
+    // Both readings, each ready to run.
+    assert_eq!(
+        message,
+        "`lib` is both a revision and a path: `shapr lib --` for the revision, `shapr -- lib` for the path"
     );
+    let (message, _) = refused(dir.path(), &["main", "lib"]);
     assert!(
-        message.contains("Use '--' to separate paths from revisions"),
+        message.contains("`shapr main lib --` for the revision, `shapr main -- lib` for the path"),
         "{message}"
     );
     // `--` decides: after it a path, before it a revision.
@@ -832,13 +834,19 @@ fn a_name_that_is_a_revision_and_a_path_needs_dashes() {
 #[test]
 fn a_name_that_is_neither_says_how_to_name_a_path() {
     let dir = branched();
+    // Not ambiguous, and `--` wouldn't help.
     let (message, code) = refused(dir.path(), &["nope"]);
-    assert_eq!(code, 2);
-    assert!(
-        message.contains("unknown revision or path not in the working tree"),
-        "{message}"
+    assert_eq!(
+        (message.as_str(), code),
+        ("nope: no such revision or path", 2)
     );
-    assert!(message.contains("--"), "{message}");
+    let (message, code) = refused(dir.path(), &["main", "nope"]);
+    assert_eq!(
+        (message.as_str(), code),
+        ("nope: no such revision or path", 2)
+    );
+    let (message, code) = refused(dir.path(), &["--merge-base", "nope"]);
+    assert_eq!((message.as_str(), code), ("nope: no such revision", 2));
     // A revision after a path.
     let (message, code) = refused(dir.path(), &["a.rb", "main"]);
     assert_eq!(code, 64);
