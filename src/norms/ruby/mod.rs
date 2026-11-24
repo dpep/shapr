@@ -8,6 +8,7 @@ mod final_newline;
 mod hash_syntax;
 mod indentation;
 mod naming;
+mod operators;
 mod strings;
 mod whitespace;
 mod width;
@@ -70,6 +71,10 @@ static NORMS: &[NormDef] = &[
         id: naming::VARIABLE,
         styles: naming::STYLES,
     },
+    NormDef {
+        id: operators::NORM,
+        styles: operators::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -85,6 +90,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     width::see,
     naming::see,
     naming::see_variables,
+    operators::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -174,6 +180,11 @@ static SETTINGS: &[Setting] = &[
         norm: naming::VARIABLE,
         key: "EnforcedStyle",
         values: NAMING_VALUES,
+    },
+    Setting {
+        norm: operators::NORM,
+        key: "Enabled",
+        values: &[("true", "space")],
     },
 ];
 

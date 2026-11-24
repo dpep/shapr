@@ -30,4 +30,5 @@ First release.
 - Experimental: the `Layout/IndentationWidth` norm, a body's indentation in spaces, configured by RuboCop's `Width` or `.editorconfig`'s `indent_size`.
 - Experimental: the `Naming/MethodName` norm, `snake_case` or `camelCase` method names; a rename is suggested only for a private method whose calls are all in the hunk.
 - Experimental: the `Naming/VariableName` norm, `snake_case` or `camelCase` local variables, with a rename when every mention of the local is in the hunk.
+- Experimental: the `Layout/SpaceAroundOperators` norm, whitespace on both sides of binary operators and assignments; aligned operators count as spaced.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
