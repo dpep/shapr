@@ -34,18 +34,22 @@ pub enum Category {
     Perf,
     Test,
     Docs,
+    /// Formatting and lint fixes: the change should hold only reformatted
+    /// or respelled code.
+    Style,
     Chore,
     Revert,
 }
 
 impl Category {
-    pub const ALL: [Category; 8] = [
+    pub const ALL: [Category; 9] = [
         Category::Fix,
         Category::Feature,
         Category::Refactor,
         Category::Perf,
         Category::Test,
         Category::Docs,
+        Category::Style,
         Category::Chore,
         Category::Revert,
     ];
@@ -58,6 +62,7 @@ impl Category {
             Category::Perf => "perf",
             Category::Test => "test",
             Category::Docs => "docs",
+            Category::Style => "style",
             Category::Chore => "chore",
             Category::Revert => "revert",
         }
@@ -115,6 +120,8 @@ pub struct Conflict {
     pub claim: Category,
     pub finding: Finding,
     pub count: usize,
+    /// The ids of the hunks behind the finding.
+    pub hunks: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -126,6 +133,11 @@ pub enum Finding {
     NonTestBehaviorHunks,
     /// Every hunk is structure.
     NoBehaviorHunks,
+    /// Hunks in code or tests shapr couldn't prove structural, against a
+    /// style claim.
+    LogicHunks,
+    /// No hunk holds a reorder or move part, against a reorder claim.
+    NoReorderParts,
 }
 
 #[derive(Serialize)]
@@ -148,10 +160,21 @@ pub struct Experimental {
 pub struct CodeFacts {
     /// Every hunk is structure (and there is at least one).
     pub structure: bool,
-    /// Hunks whose verdict is behavior or mixed.
-    pub behavior: usize,
-    /// Of those, the ones outside test code.
-    pub non_test_behavior: usize,
+    /// The hunks in the verdict (structure, behavior or mixed): hunks shapr
+    /// couldn't compare are unknown, not evidence.
+    pub hunks: Vec<HunkFacts>,
+}
+
+pub struct HunkFacts {
+    pub id: usize,
+    /// Its verdict is behavior or mixed.
+    pub behavior: bool,
+    /// In test code: a test file, or a residual with the `test` facet.
+    pub test: bool,
+    /// In a code or test file, not config or a manifest.
+    pub code: bool,
+    /// Holds a reorder or move part.
+    pub reorder: bool,
 }
 
 impl Claims {
@@ -159,8 +182,17 @@ impl Claims {
         let mut hints = Vec::new();
         let mut categories: BTreeMap<&'static str, usize> =
             Category::ALL.iter().map(|c| (c.as_str(), 0)).collect();
+        let subjects: BTreeSet<&str> = messages
+            .iter()
+            .filter(|m| m.source == Source::Commit)
+            .map(|m| subject(&m.text))
+            .collect();
         for message in messages {
-            let found = hints_in(message);
+            let mut found = hints_in(message);
+            // A pull request titled after its commit says it once.
+            if message.source != Source::Commit && subjects.contains(subject(&message.text)) {
+                found.retain(|h| h.field == Field::Body);
+            }
             let claimed: BTreeSet<Category> = found.iter().filter_map(|h| h.category).collect();
             for category in claimed {
                 *categories.entry(category.as_str()).or_default() += 1;
@@ -205,43 +237,63 @@ impl Claims {
     }
 
     /// Records each claim the code doesn't bear out. A purpose claim (refactor,
-    /// docs, test) conflicts only when no message also claims a behavior
-    /// change; hunks shapr couldn't compare are unknown, not evidence.
+    /// docs, test, style) conflicts only when no message also claims a behavior
+    /// change.
     pub fn check(&mut self, code: &CodeFacts) {
         let claimed = |c: Category| self.experimental.categories[c.as_str()] > 0;
         let behavior = Category::ALL.iter().any(|&c| c.behavior() && claimed(c));
+        let reorder = self
+            .hints
+            .iter()
+            .any(|h| h.hint == HintKind::Keyword && REORDER.contains(&h.value.as_str()));
+        let ids = |keep: &dyn Fn(&HunkFacts) -> bool| -> Vec<usize> {
+            code.hunks
+                .iter()
+                .filter(|h| keep(h))
+                .map(|h| h.id)
+                .collect()
+        };
         let mut conflicts = Vec::new();
-        let mut conflict = |claim, finding, count| {
+        let mut conflict = |claim, finding, hunks: Vec<usize>| {
             conflicts.push(Conflict {
                 claim,
                 finding,
-                count,
+                count: hunks.len(),
+                hunks,
             })
         };
         if !behavior {
             // A test claim says the tests changed: only code outside them
-            // can contradict a refactor or docs claim beside it.
-            let (finding, count) = match claimed(Category::Test) {
-                true => (Finding::NonTestBehaviorHunks, code.non_test_behavior),
-                false => (Finding::BehaviorHunks, code.behavior),
+            // can contradict a purpose claim beside it.
+            let tests = claimed(Category::Test);
+            let outside = |h: &HunkFacts| !(tests && h.test);
+            let finding = match tests {
+                true => Finding::NonTestBehaviorHunks,
+                false => Finding::BehaviorHunks,
             };
+            let unproven = ids(&|h| h.behavior && outside(h));
             for claim in [Category::Refactor, Category::Docs] {
-                if claimed(claim) && count > 0 {
-                    conflict(claim, finding, count);
+                if claimed(claim) && !unproven.is_empty() {
+                    conflict(claim, finding, unproven.clone());
                 }
             }
-            if claimed(Category::Test) && code.non_test_behavior > 0 {
-                conflict(
-                    Category::Test,
-                    Finding::NonTestBehaviorHunks,
-                    code.non_test_behavior,
-                );
+            // A linter's config and manifest edits come with its fixes.
+            let logic = ids(&|h| h.behavior && h.code && outside(h));
+            if claimed(Category::Style) && !logic.is_empty() {
+                conflict(Category::Style, Finding::LogicHunks, logic);
+            }
+            if reorder && !code.hunks.is_empty() && !code.hunks.iter().any(|h| h.reorder) {
+                conflict(Category::Refactor, Finding::NoReorderParts, ids(&|_| true));
+            }
+            let outside_tests = ids(&|h| h.behavior && !h.test);
+            if tests && !outside_tests.is_empty() {
+                conflict(Category::Test, Finding::NonTestBehaviorHunks, outside_tests);
             }
         }
         if code.structure {
             for claim in Category::ALL.into_iter().filter(|&c| c.behavior()) {
                 if claimed(claim) {
-                    conflict(claim, Finding::NoBehaviorHunks, 0);
+                    conflict(claim, Finding::NoBehaviorHunks, Vec::new());
                 }
             }
         }
@@ -254,7 +306,7 @@ const TYPES: &[(&str, Category)] = &[
     ("fix", Category::Fix),
     ("feat", Category::Feature),
     ("refactor", Category::Refactor),
-    ("style", Category::Refactor),
+    ("style", Category::Style),
     ("perf", Category::Perf),
     ("test", Category::Test),
     ("docs", Category::Docs),
@@ -302,6 +354,11 @@ const KEYWORDS: &[(&str, Category)] = &[
     ("simplify", Category::Refactor),
     ("simplifies", Category::Refactor),
     ("restructure", Category::Refactor),
+    ("reorder", Category::Refactor),
+    ("reordered", Category::Refactor),
+    ("reordering", Category::Refactor),
+    ("alphabetize", Category::Refactor),
+    ("dry", Category::Refactor),
     ("perf", Category::Perf),
     ("performance", Category::Perf),
     ("faster", Category::Perf),
@@ -326,7 +383,11 @@ const KEYWORDS: &[(&str, Category)] = &[
     ("dependencies", Category::Chore),
     ("upgrade", Category::Chore),
     ("release", Category::Chore),
-    ("lint", Category::Chore),
+    ("rubocop", Category::Style),
+    ("autocorrect", Category::Style),
+    ("lint", Category::Style),
+    ("linting", Category::Style),
+    ("reformat", Category::Style),
     ("revert", Category::Revert),
     ("reverts", Category::Revert),
 ];
@@ -343,6 +404,13 @@ const NO_BEHAVIOR_CHANGE: &[&str] = &[
     "pure refactor",
 ];
 
+/// Keywords claiming a reorder, checked against the reorder and move parts.
+const REORDER: &[&str] = &["reorder", "reordered", "reordering", "alphabetize"];
+
+/// Words that fix what a style word in the same subject names ("Fix lint
+/// errors"): they claim style, not a bug fix.
+const STYLE_FIXES: &[&str] = &["fix", "fixes", "fixed", "fixing"];
+
 /// Phrases saying the change is to test code, matched as `NO_BEHAVIOR_CHANGE`.
 const TEST_ONLY: &[&str] = &["test only", "tests only", "spec only", "specs only"];
 
@@ -356,9 +424,13 @@ const NOT_ISSUE_KEYS: &[&str] = &["UTF", "SHA", "ISO", "RFC", "PEP", "MD", "CVE"
 /// the subject. Purpose words count only there (a body says too much in
 /// passing); a body adds reverts, issues, breaking footers and phrases.
 fn hints_in(message: &Message) -> Vec<Hint> {
-    let mut lines = message.text.lines().skip_while(|l| l.trim().is_empty());
-    let subject = lines.next().unwrap_or_default().trim();
-    let body: Vec<&str> = lines.collect();
+    let subject = subject(&message.text);
+    let body: Vec<&str> = message
+        .text
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .skip(1)
+        .collect();
     let body = body.join("\n");
     let mut hints: Vec<Hint> = Vec::new();
     let mut add = |hint: HintKind, value: &str, category: Option<Category>, field: Field| {
@@ -399,10 +471,31 @@ fn hints_in(message: &Message) -> Vec<Hint> {
             }
             words = rest;
         }
-        for word in purpose_words(words) {
+        let words = purpose_words(words);
+        let style = words
+            .iter()
+            .any(|w| KEYWORDS.contains(&(w.as_str(), Category::Style)));
+        for word in words {
             if let Some((_, category)) = KEYWORDS.iter().find(|(k, _)| *k == word) {
-                add(HintKind::Keyword, &word, Some(*category), Field::Subject);
+                let category = match style && STYLE_FIXES.contains(&word.as_str()) {
+                    true => Category::Style,
+                    false => *category,
+                };
+                add(HintKind::Keyword, &word, Some(category), Field::Subject);
             }
+        }
+        // "moves to x.rs, unchanged": the closing clause; elsewhere the word
+        // names data ("skip a large, unchanged repo").
+        if normalize(subject)
+            .trim_end_matches('.')
+            .ends_with(", unchanged")
+        {
+            add(
+                HintKind::NoBehaviorChange,
+                "unchanged",
+                Some(Category::Refactor),
+                Field::Subject,
+            );
         }
     }
     for line in body.lines() {
@@ -452,6 +545,14 @@ fn hints_in(message: &Message) -> Vec<Hint> {
         }
     }
     hints
+}
+
+/// The first non-empty line.
+fn subject(text: &str) -> &str {
+    text.lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default()
+        .trim()
 }
 
 /// `type(scope)!: rest` as (type, breaking, rest), for a known type.
@@ -609,6 +710,49 @@ mod tests {
     fn purpose_words_count_only_in_the_subject() {
         let found = hints("Speed up lookups\n\nThis fixes a bug and adds a test.");
         assert!(found.is_empty(), "{found:?}");
+    }
+
+    fn categories(text: &str) -> Vec<Option<Category>> {
+        hints(text).into_iter().map(|h| h.2).collect()
+    }
+
+    #[test]
+    fn style_words_claim_style_and_their_fix_with_them() {
+        let style = Some(Category::Style);
+        assert_eq!(categories("Fix lint errors"), [style, style]);
+        assert_eq!(categories("Rubocop fixes."), [style, style]);
+        assert_eq!(categories("Apply a reviewed rubocop pass"), [style]);
+        assert_eq!(categories("style: reformat the gate"), [style, style]);
+        // "format" names output formats as often as code layout.
+        assert!(hints("Format dates in the log").is_empty());
+        assert_eq!(categories("Fix the gate"), [Some(Category::Fix)]);
+    }
+
+    #[test]
+    fn reorder_and_dry_claim_refactor_but_sort_does_not() {
+        let refactor = Some(Category::Refactor);
+        assert_eq!(categories("Reorder methods in feature"), [refactor]);
+        assert_eq!(categories("Alphabetize adapters"), [refactor]);
+        assert_eq!(
+            categories("DRY up error tests"),
+            [refactor, Some(Category::Test)]
+        );
+        assert!(hints("Sort fields when printing").is_empty());
+    }
+
+    #[test]
+    fn unchanged_claims_only_as_a_trailing_clause_of_the_subject() {
+        assert_eq!(
+            hints("cli: the sweep goes to cli/refs.rs, unchanged"),
+            [(
+                HintKind::NoBehaviorChange,
+                "unchanged".into(),
+                Some(Category::Refactor)
+            )]
+        );
+        assert!(hints("Skip an unchanged file").is_empty());
+        assert!(hints("Skip the walk on a large, unchanged repo").is_empty());
+        assert!(hints("Speed up\n\nThe suite, unchanged.").is_empty());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Category, Change, FileChange};
-use crate::claims::{Claims, CodeFacts, Finding};
+use crate::claims::{Claims, CodeFacts, Finding, HunkFacts};
 use crate::classify::{
     self, Assumption, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
@@ -539,18 +539,23 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         .collect();
     let total = lines.changed();
     // Only hunks in the verdict are evidence against a claim.
-    let compared: Vec<&HunkRecord> = hunks
-        .iter()
-        .filter(|h| matches!(h.verdict, Verdict::Behavior | Verdict::Mixed))
-        .collect();
     claims.check(&CodeFacts {
         structure: verdict == Verdict::Structure,
-        behavior: compared.len(),
-        non_test_behavior: compared
+        hunks: hunks
             .iter()
-            .filter(|h| h.category != Category::Test)
-            .filter(|h| !h.parts.iter().any(|p| p.facets.contains(&Facet::Test)))
-            .count(),
+            .filter(|h| h.verdict.counted())
+            .map(|h| HunkFacts {
+                id: h.id,
+                behavior: matches!(h.verdict, Verdict::Behavior | Verdict::Mixed),
+                test: h.category == Category::Test
+                    || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
+                code: matches!(h.category, Category::Code | Category::Test),
+                reorder: h
+                    .parts
+                    .iter()
+                    .any(|p| matches!(p.kind, Kind::Reorder | Kind::Move)),
+            })
+            .collect(),
     });
     Summary {
         record: "summary",
@@ -809,11 +814,24 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
                 ),
             ),
             Finding::NoBehaviorHunks => ("conflict", "every hunk is structure".to_string()),
+            Finding::LogicHunks => (
+                "unproven",
+                format!(
+                    "{} hunk{plural} {} logic",
+                    conflict.count,
+                    if conflict.count == 1 { "is" } else { "are" }
+                ),
+            ),
+            Finding::NoReorderParts => (
+                "unproven",
+                format!("no reorder or move in {} hunk{plural}", conflict.count),
+            ),
         };
-        emit(
-            out,
-            &format!("{label}: claims {}; {finding}", conflict.claim.as_str()),
-        )?;
+        let claim = match conflict.finding {
+            Finding::NoReorderParts => "reorder",
+            _ => conflict.claim.as_str(),
+        };
+        emit(out, &format!("{label}: claims {claim}; {finding}"))?;
     }
     Ok(())
 }
