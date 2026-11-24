@@ -7,14 +7,15 @@ mod align;
 pub mod command;
 mod edit;
 mod ruby;
+pub mod snapshot;
 
 pub use align::{HunkStyle, styles, text};
+pub use snapshot::{Revision, Snapshot, Worktree, join};
 
 use crate::change::Category;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::ops::Range;
-use std::path::Path;
 
 /// The share (rule of succession) a style needs to be a norm.
 pub const DEFAULT_THRESHOLD: f64 = 0.8;
@@ -82,9 +83,8 @@ pub trait Language: Sync {
     fn handles(&self, path: &str) -> bool;
     fn norms(&self) -> &'static [NormDef];
     fn analyze(&self, source: &[u8]) -> Analysis;
-    /// Styles the linter config nearest `dir` (searched up to `root`) sets,
-    /// by norm id.
-    fn configured(&self, dir: &Path, root: &Path) -> BTreeMap<&'static str, String>;
+    /// Styles the linter config for the file at `path` sets, by norm id.
+    fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> BTreeMap<&'static str, String>;
 }
 
 static LANGUAGES: &[&dyn Language] = &[&ruby::Ruby];

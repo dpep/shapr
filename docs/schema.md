@@ -566,6 +566,11 @@ style to another, that move is the norm (`renorming`). With no norm inferred,
 the style `.rubocop.yml` configures (the nearest one, with local
 `inherit_from`) is expected instead.
 
+Config and a new file's neighbors are read as of the change's after side:
+from the revision a range ends in (`B` of `A..B`; a GitHub change's head),
+or from the working tree when the change ends there (one revision, or a
+diff on stdin). Nothing above the repository's top is read.
+
 The hunk's `style`:
 
 | field | type | meaning |

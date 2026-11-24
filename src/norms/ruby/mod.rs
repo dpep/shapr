@@ -8,10 +8,11 @@ mod hash_syntax;
 mod indentation;
 mod strings;
 
-use super::{Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind};
+use super::{
+    Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind, Snapshot,
+};
 use ruby_prism::{Location, Node, Visit};
 use std::collections::BTreeMap;
-use std::path::Path;
 
 pub struct Ruby;
 
@@ -160,8 +161,8 @@ impl Language for Ruby {
         }
     }
 
-    fn configured(&self, dir: &Path, root: &Path) -> BTreeMap<&'static str, String> {
-        let Some(config) = config::find(dir, root).map(|p| config::load(&p)) else {
+    fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> BTreeMap<&'static str, String> {
+        let Some(config) = config::find(path, snapshot).map(|p| config::load(&p, snapshot)) else {
             return BTreeMap::new();
         };
         let mut styles = BTreeMap::new();

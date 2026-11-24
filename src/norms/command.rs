@@ -1,6 +1,6 @@
 //! `shapr norms FILE...`: each file's norms at file scope, no diff needed.
 
-use super::{Counts, DEFAULT_THRESHOLD, count, for_path, infer, skipped};
+use super::{Counts, DEFAULT_THRESHOLD, Worktree, count, for_path, infer, skipped};
 use crate::change::Category;
 use crate::git::Linguist;
 use crate::report::Format;
@@ -197,12 +197,14 @@ fn file_norms(path: &Path, source: &[u8], threshold: f64) -> (FileRecord, Vec<No
     let (Some(language), Some(analysis), None) = (language, analysis, reason) else {
         return (file, Vec::new());
     };
-    let dir = std::path::absolute(path)
-        .ok()
-        .and_then(|p| p.parent().map(Path::to_path_buf))
-        .unwrap_or_default();
+    let full = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let dir = full.parent().unwrap_or(Path::new("")).to_path_buf();
     let root = repo_root(&dir);
-    let configured = language.configured(&dir, &root);
+    let relative = full.strip_prefix(&root).unwrap_or(&full);
+    let relative: Vec<String> = (relative.components())
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let configured = language.configured(&relative.join("/"), &Worktree(root));
     let norms = language
         .norms()
         .iter()

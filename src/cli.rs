@@ -248,7 +248,16 @@ pub fn run() -> ExitCode {
         Claims::read(&messages),
         report::Meta::new(source),
     );
-    let styles = crate::norms::styles(&change, git.toplevel().as_deref(), cli.norm_threshold);
+    // Config and neighbors as of the change's after side.
+    let revision = (git.after_revision(cli.range.as_deref()))
+        .map(|rev| crate::norms::Revision { git: &git, rev });
+    let worktree = git.toplevel().map(crate::norms::Worktree);
+    let snapshot: Option<&dyn crate::norms::Snapshot> = match (&revision, &worktree) {
+        (Some(revision), _) => Some(revision),
+        (None, Some(worktree)) => Some(worktree),
+        (None, None) => None,
+    };
+    let styles = crate::norms::styles(&change, snapshot, cli.norm_threshold);
     for (hunk, style) in report.hunks.iter_mut().zip(styles) {
         hunk.style = style;
     }

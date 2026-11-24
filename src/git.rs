@@ -153,6 +153,40 @@ impl Git {
         Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
     }
 
+    /// The revision whose files the change ends in: B of `A..B` or `A...B`
+    /// (HEAD when B is empty), a fetched GitHub change's head; `None` when
+    /// it ends in the working tree (one revision, or a diff on stdin).
+    pub fn after_revision(&self, range: Option<&str>) -> Option<String> {
+        if let Some(bare) = &self.bare {
+            return Some(bare.attributes_from.clone());
+        }
+        let range = range?;
+        let (_, to) = range.split_once("...").or_else(|| range.split_once(".."))?;
+        Some(if to.is_empty() { "HEAD" } else { to }.to_string())
+    }
+
+    /// PATH's contents at REV; `None` when it has no such file.
+    pub fn show(&self, rev: &str, path: &str) -> Option<Vec<u8>> {
+        run(self
+            .command()
+            .args(["cat-file", "blob", &format!("{rev}:{path}")]))
+        .ok()
+    }
+
+    /// The files directly in DIR at REV (`""` for the top), as paths.
+    pub fn ls(&self, rev: &str, dir: &str) -> Vec<String> {
+        let tree = format!("{rev}:{dir}");
+        let Ok(out) = run(self.command().args(["ls-tree", "-z", &tree])) else {
+            return Vec::new();
+        };
+        String::from_utf8_lossy(&out)
+            .split('\0')
+            .filter_map(|entry| entry.split_once('\t'))
+            .filter(|(meta, _)| meta.split(' ').nth(1) == Some("blob"))
+            .map(|(_, name)| crate::norms::join(dir, name))
+            .collect()
+    }
+
     /// Each path's linguist attributes, where .gitattributes sets or unsets
     /// them. Empty outside a repository.
     pub fn linguist(&self, paths: &[&str]) -> HashMap<String, Linguist> {

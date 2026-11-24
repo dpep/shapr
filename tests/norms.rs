@@ -10,6 +10,8 @@
 //! - `before.rb`, `after.rb`: the file's two states; a missing one is a file
 //!   that doesn't exist on that side.
 //! - `repo/`: other files, the same in both states (`.rubocop.yml`, neighbors).
+//! - `worktree/`: files written over the working tree after both commits,
+//!   left uncommitted.
 //!
 //! `expect` is a subset: an object matches when each of its keys matches,
 //! an array when it has the same length and each element matches.
@@ -92,6 +94,9 @@ fn run_case(case: &Path) -> Vec<String> {
         }
         git(root, &["add", "-A"]);
         git(root, &["commit", "-q", "--allow-empty", "-m", side]);
+    }
+    if case.join("worktree").is_dir() {
+        copy_tree(&case.join("worktree"), root);
     }
     let norms = spec["command"] == "norms";
     let args: Vec<&str> = if norms {

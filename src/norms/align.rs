@@ -3,6 +3,7 @@
 //! then class, then file; for a new file, its directory), and whether the
 //! change converges on that norm or diverges from it.
 
+use super::snapshot::{Snapshot, parent};
 use super::{
     Analysis, Counts, Language, LineIndex, NormDef, Observation, Replace, ScopeKind, count, edit,
     for_path, infer, skipped,
@@ -11,7 +12,6 @@ use crate::change::{Change, FileChange};
 use crate::diff::{Hunk, Lines};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 /// Neighbor files read for a new file's directory norm, at most.
 const NEIGHBORS: usize = 20;
@@ -137,13 +137,17 @@ fn scope_name(scope: ScopeKind) -> &'static str {
 }
 
 /// Every hunk's style, in report order; `None` where no language checks
-/// norms or the file wasn't read. `root` is the working tree, for linter
-/// config and a new file's neighbors.
-pub fn styles(change: &Change, root: Option<&Path>, threshold: f64) -> Vec<Option<HunkStyle>> {
+/// norms or the file wasn't read. `snapshot` is the repository the change
+/// ends in, for linter config and a new file's neighbors.
+pub fn styles(
+    change: &Change,
+    snapshot: Option<&dyn Snapshot>,
+    threshold: f64,
+) -> Vec<Option<HunkStyle>> {
     let mut out = Vec::new();
     for file in &change.files {
         let hunks = &file.diff.hunks;
-        match file_styles(file, root, threshold) {
+        match file_styles(file, snapshot, threshold) {
             Some(styles) => out.extend(styles.into_iter().map(Some)),
             None => out.extend(hunks.iter().map(|_| None)),
         }
@@ -160,7 +164,11 @@ fn skipped_style(reason: &'static str) -> HunkStyle {
     }
 }
 
-fn file_styles(file: &FileChange, root: Option<&Path>, threshold: f64) -> Option<Vec<HunkStyle>> {
+fn file_styles(
+    file: &FileChange,
+    snapshot: Option<&dyn Snapshot>,
+    threshold: f64,
+) -> Option<Vec<HunkStyle>> {
     let path = file.diff.path();
     let language = for_path(path)?;
     let trees = file.trees.as_ref().ok()?;
@@ -178,13 +186,12 @@ fn file_styles(file: &FileChange, root: Option<&Path>, threshold: f64) -> Option
                 .collect(),
         );
     }
-    let dir = Path::new(path).parent().unwrap_or(Path::new(""));
-    let configured = root
-        .map(|r| language.configured(&r.join(dir), r))
+    let configured = snapshot
+        .map(|s| language.configured(path, s))
         .unwrap_or_default();
     // A new file has no unchanged code of its own.
-    let neighbors = match (file.diff.old_path.is_none(), root) {
-        (true, Some(root)) => Some(neighbors(language, root, path)),
+    let neighbors = match (file.diff.old_path.is_none(), snapshot) {
+        (true, Some(snapshot)) => Some(neighbors(language, snapshot, path)),
         _ => None,
     };
     let touched: Vec<bool> = after
@@ -228,25 +235,17 @@ fn file_styles(file: &FileChange, root: Option<&Path>, threshold: f64) -> Option
 }
 
 /// Observations in the same directory's other files, unchanged code all.
-fn neighbors(language: &dyn Language, root: &Path, path: &str) -> Vec<Observation> {
-    let full = root.join(path);
-    let Some(dir) = full.parent() else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file() && *p != full)
-        .filter(|p| p.to_str().is_some_and(|s| language.handles(s)))
+fn neighbors(language: &dyn Language, snapshot: &dyn Snapshot, path: &str) -> Vec<Observation> {
+    let mut files: Vec<String> = snapshot
+        .list(parent(path))
+        .into_iter()
+        .filter(|p| p != path && language.handles(p))
         .collect();
-    files.sort();
     files.truncate(NEIGHBORS);
     crate::verbose!("{path}: new file, reading {} neighbor(s)", files.len());
     files
         .iter()
-        .filter_map(|p| std::fs::read(p).ok())
+        .filter_map(|p| snapshot.read(p))
         .map(|source| language.analyze(&source))
         .filter(|a| !a.errors)
         .flat_map(|a| a.observations)

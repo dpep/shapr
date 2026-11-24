@@ -3,8 +3,8 @@
 //! read: top-level cop names, their scalar settings, and `inherit_from`.
 //! Gems (`inherit_gem`) and remote URLs are not followed.
 
+use crate::norms::snapshot::{Snapshot, join, parent, resolve};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 const NAME: &str = ".rubocop.yml";
 
@@ -23,41 +23,40 @@ impl Config {
     }
 }
 
-/// The `.rubocop.yml` nearest `dir`, looking no higher than `root`.
-pub fn find(dir: &Path, root: &Path) -> Option<PathBuf> {
-    let mut dir = Some(dir);
-    while let Some(d) = dir {
-        let candidate = d.join(NAME);
-        if candidate.is_file() {
+/// The `.rubocop.yml` nearest the file at `path`, looking no higher than
+/// the repository's top.
+pub fn find(path: &str, snapshot: &dyn Snapshot) -> Option<String> {
+    let mut dir = parent(path);
+    loop {
+        let candidate = join(dir, NAME);
+        if snapshot.read(&candidate).is_some() {
             return Some(candidate);
         }
-        if d == root {
-            break;
+        if dir.is_empty() {
+            return None;
         }
-        dir = d.parent();
+        dir = parent(dir);
     }
-    None
 }
 
-pub fn load(path: &Path) -> Config {
+pub fn load(path: &str, snapshot: &dyn Snapshot) -> Config {
     let mut config = Config::default();
-    merge(path, &mut config, 0);
+    merge(path, snapshot, &mut config, 0);
     config
 }
 
-fn merge(path: &Path, config: &mut Config, depth: usize) {
+fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize) {
     // Deep enough for any real chain; a cycle stops here.
     if depth > 8 {
         return;
     }
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Some(text) = snapshot.read(path) else {
         return;
     };
-    let (inherits, own) = parse(&text);
-    let base = path.parent().unwrap_or(Path::new("."));
+    let (inherits, own) = parse(&String::from_utf8_lossy(&text));
     for file in inherits {
-        if !file.contains("://") {
-            merge(&base.join(file), config, depth + 1);
+        if let (false, Some(file)) = (file.contains("://"), resolve(parent(path), &file)) {
+            merge(&file, snapshot, config, depth + 1);
         }
     }
     for (cop, settings) in own.0 {
@@ -192,11 +191,11 @@ mod tests {
             "inherit_from: base.yml\nStyle/StringLiterals:\n  EnforcedStyle: double_quotes\n",
         )
         .unwrap();
-        let sub = dir.path().join("lib");
-        std::fs::create_dir(&sub).unwrap();
-        let found = find(&sub, dir.path()).unwrap();
+        let snapshot = crate::norms::snapshot::Worktree(dir.path().to_path_buf());
+        let found = find("lib/a.rb", &snapshot).unwrap();
+        assert_eq!(found, NAME);
         assert_eq!(
-            load(&found).get("Style/StringLiterals", "EnforcedStyle"),
+            load(&found, &snapshot).get("Style/StringLiterals", "EnforcedStyle"),
             Some("double_quotes")
         );
     }
