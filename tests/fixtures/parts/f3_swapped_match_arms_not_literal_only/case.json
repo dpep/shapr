@@ -1,0 +1,6 @@
+{
+  "description": "swapped match arms reorder code; no literal value changed",
+  "expect": {
+    "hunks": [{"kind": "logic", "parts": [{"kind": "logic", "facets": {"$not": {"$some": "literal_only"}}}]}]
+  }
+}

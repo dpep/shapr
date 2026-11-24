@@ -400,8 +400,27 @@ impl<'a> Parsed<'a> {
     }
 
     /// Both regions say the same once literals and comments are masked, and
-    /// hold the same number of literals.
+    /// hold the same number of literals, but not the same code reordered
+    /// (swapped match arms keep every literal).
     fn literal_only(&self, before: &Side, after: &Side) -> bool {
+        let inside = |side: &Side| {
+            let tree = side.tree();
+            let region = side
+                .region
+                .last()
+                .map_or(0..0, |last| tree.line_span(side.region.start, last));
+            let mut hashes: Vec<u64> = tree
+                .nodes
+                .iter()
+                .filter(|n| !n.comment && contains(&region, &n.extent))
+                .map(|n| n.hash)
+                .collect();
+            hashes.sort_unstable();
+            hashes
+        };
+        if inside(before) == inside(after) {
+            return false;
+        }
         let masked = |side: &Side| {
             let tree = side.tree();
             let last = side.region.last()?;
