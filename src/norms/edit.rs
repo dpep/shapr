@@ -56,6 +56,38 @@ pub fn unshared(outside: &dyn Outside, path: &str, source: &[u8], replaces: &[Re
         })
 }
 
+/// A diff header's path as git writes it (`quote_c_style`, with
+/// `core.quotePath` off): in double quotes with C escapes when it holds a
+/// quote, a backslash or a control character, so no name can end the line.
+fn quote(path: &str) -> String {
+    if !path
+        .chars()
+        .any(|c| c == '"' || c == '\\' || c.is_ascii_control())
+    {
+        return path.to_string();
+    }
+    let mut out = String::from('"');
+    for c in path.chars() {
+        match c {
+            '\x07' => out.push_str("\\a"),
+            '\x08' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\x0b' => out.push_str("\\v"),
+            '\x0c' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if c.is_ascii_control() => out.push_str(&format!("\\{:03o}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// Unchanged lines a [`patch`] shows around each change, as `diff -u` does.
 const CONTEXT: usize = 3;
 
@@ -96,7 +128,11 @@ pub fn patch(path: &str, source: &[u8], replaces: &[Replace]) -> Option<String> 
             (first, last, apply(&source[from..to], &shifted))
         })
         .collect();
-    let mut out = format!("--- a/{path}\n+++ b/{path}\n");
+    let mut out = format!(
+        "--- {}\n+++ {}\n",
+        quote(&format!("a/{path}")),
+        quote(&format!("b/{path}"))
+    );
     let line = |out: &mut String, mark: char, text: &[u8]| {
         out.push(mark);
         out.push_str(&String::from_utf8_lossy(text));

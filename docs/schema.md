@@ -1044,7 +1044,7 @@ per tier, and each tier's change classifies as its `expect_kind`.
 | `withheld` | int | Of `unfixed`, those where config doesn't check the cop, with an edit or not. |
 | `adherence_before`, `adherence_after` | number 0–1 or null | The norm's adherence before and after the step, to 2 decimals. |
 | `files`, `lines_touched` | int | Files and lines its edits change. |
-| `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes. |
+| `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes; a path holding a quote, backslash or control character is quoted in its headers as git quotes it (`"a/dir\nname/f.rb"`). |
 
 For a pull request per tier:
 `shapr norms -J | jq -r 'select(.record == "step" and .tier == 1) | .edits[].diff' | git apply`.

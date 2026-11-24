@@ -615,3 +615,27 @@ fn links_out_of_the_repository_are_not_followed() {
     let named = norms_json(&root, &["lib/settings.rb"]);
     assert_eq!(named["files"][0]["skipped"], "unsupported", "{named:#}");
 }
+
+/// A path with a newline or quote is quoted in a plan's diff header as git
+/// quotes it, so it can't forge a second file header, and `git apply`
+/// takes the diff as is.
+#[test]
+fn a_plan_diff_quotes_a_path_as_git_does() {
+    let name = "lib/x\n+++ b/evil.rb\"\\/a.rb";
+    let dir = repo(&[&[("lib/b.rb", &"a = 'a'\n".repeat(12)), (name, "g = \"g\"\n")]]);
+    let plan = norms_json(dir.path(), &["lib"]);
+    let edit = &plan["steps"][0]["edits"][0];
+    assert_eq!(edit["file"], name);
+    let diff = edit["diff"].as_str().unwrap();
+    assert!(
+        diff.starts_with(
+            "--- \"a/lib/x\\n+++ b/evil.rb\\\"\\\\/a.rb\"\n+++ \"b/lib/x\\n+++ b/evil.rb\\\"\\\\/a.rb\"\n@@"
+        ),
+        "{diff}"
+    );
+    let patch = dir.path().join("../plan.diff");
+    std::fs::write(&patch, diff).unwrap();
+    git(dir.path(), &["apply", patch.to_str().unwrap()]);
+    let applied = std::fs::read_to_string(dir.path().join(name)).unwrap();
+    assert_eq!(applied, "g = 'g'\n");
+}
