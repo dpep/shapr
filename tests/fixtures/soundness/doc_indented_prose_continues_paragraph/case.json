@@ -1,0 +1,6 @@
+{
+  "description": "an indented line continuing a paragraph is prose, not an indented code block",
+  "expect": {
+    "hunks": [{"kind": "comment_only"}]
+  }
+}

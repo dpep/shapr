@@ -372,7 +372,9 @@ are stated in Ruby's terms; for Rust:
   comments, so editing one, or turning a `//` comment into a `///` doc, is
   `comment_only`. A doc comment's fenced code is a doctest, which `cargo test`
   compiles and runs: its fence lines (info string included) and the lines
-  between them are code, as is a `/** */` block holding a fence. Attributes
+  between them are code, as is an indented code block (by rustdoc's Markdown:
+  four columns past the text, or past an open list item's, after a blank
+  line), and a `/** */` block holding either. Attributes
   (`#[...]`, `#![...]`, `#[doc = "..."]`) are code, and belong to the item
   after them.
 - A trailing comma (before a closing bracket, or ending a match arm) never

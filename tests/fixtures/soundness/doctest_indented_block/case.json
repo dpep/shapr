@@ -1,0 +1,6 @@
+{
+  "description": "an indented code block in a doc comment is a doctest too: editing it is logic",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

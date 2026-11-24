@@ -219,8 +219,8 @@ fn trailing(parent: &Node<'_>, rest: &[(Option<&str>, Node<'_>)]) -> bool {
 }
 
 /// Doc comments that hold doctest code, by start byte: in a run of `///`
-/// (or `//!`) lines, each fence line and every line inside a fence; a
-/// `/** */` or `/*! */` block holding a fence.
+/// (or `//!`) lines, each line of a fenced or indented code block (fence
+/// lines included); a `/** */` or `/*! */` block holding one.
 fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
     let mut docs = Vec::new();
     let mut stack = vec![root];
@@ -233,43 +233,124 @@ fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
         let kids: Vec<_> = n.children(&mut c).collect();
         stack.extend(kids.into_iter().rev());
     }
-    let fence = |text: &str| {
-        let t = text.trim_start();
-        t.starts_with("```") || t.starts_with("~~~")
-    };
+    let text = |n: &Node<'_>| std::str::from_utf8(&src[span(n)]).unwrap_or_default();
     let mut out = HashSet::new();
-    // (marker, end row) of the previous line doc, and whether a fence is open.
-    let mut run: Option<(&str, usize)> = None;
-    let mut open = false;
+    // Consecutive line docs with one marker, as (marker, nodes).
+    let mut runs: Vec<(&str, Vec<Node<'_>>)> = Vec::new();
     for n in docs {
-        let text = std::str::from_utf8(&src[span(&n)]).unwrap_or_default();
+        let t = text(&n);
         let line_marker = ["///", "//!"]
             .into_iter()
-            .find(|m| text.starts_with(m) && !text.starts_with("////"));
+            .find(|m| t.starts_with(m) && !t.starts_with("////"));
         let Some(marker) = line_marker else {
-            run = None;
-            let block_doc =
-                (text.starts_with("/**") && !text.starts_with("/***") && text != "/**/")
-                    || text.starts_with("/*!");
-            if block_doc && text.lines().any(fence) {
-                out.insert(n.start_byte());
+            let block_doc = (t.starts_with("/**") && !t.starts_with("/***") && t != "/**/")
+                || t.starts_with("/*!");
+            if block_doc {
+                let inner = t[3..].strip_suffix("*/").unwrap_or(&t[3..]);
+                // A ` * ` gutter isn't part of the text.
+                let lines: Vec<&str> = inner
+                    .lines()
+                    .map(|l| match l.trim_start().strip_prefix('*') {
+                        Some(rest) => rest.strip_prefix(' ').unwrap_or(rest),
+                        None => l,
+                    })
+                    .collect();
+                if code_lines(&lines).contains(&true) {
+                    out.insert(n.start_byte());
+                }
             }
+            runs.push(("", Vec::new()));
             continue;
         };
         let row = n.start_position().row;
-        if run != Some((marker, row.wrapping_sub(1))) {
-            open = false;
-        }
-        run = Some((marker, row));
-        let body = &text[marker.len()..];
-        if fence(body) {
-            open = !open;
-            out.insert(n.start_byte());
-        } else if open {
-            out.insert(n.start_byte());
+        match runs.last_mut() {
+            Some((m, nodes))
+                if *m == marker
+                    && nodes
+                        .last()
+                        .is_some_and(|l: &Node<'_>| l.start_position().row + 1 == row) =>
+            {
+                nodes.push(n)
+            }
+            _ => runs.push((marker, vec![n])),
         }
     }
+    for (marker, nodes) in runs {
+        let bodies: Vec<&str> = nodes.iter().map(|n| &text(n)[marker.len()..]).collect();
+        let code = code_lines(&bodies);
+        out.extend(
+            nodes
+                .iter()
+                .zip(code)
+                .filter(|(_, c)| *c)
+                .map(|(n, _)| n.start_byte()),
+        );
+    }
     out
+}
+
+/// Which lines of a doc comment's text are code to rustdoc's Markdown: a
+/// fenced block with its fences, or an indented block (four columns past
+/// the text, or past an open list item's text, after a blank line). The
+/// text is first unindented by its least indentation, as rustdoc does.
+fn code_lines(lines: &[&str]) -> Vec<bool> {
+    let indent = |s: &str| -> usize {
+        let lead = s.chars().take_while(|c| *c == ' ' || *c == '\t');
+        lead.map(|c| if c == '\t' { 4 } else { 1 }).sum()
+    };
+    let blank = |s: &str| s.trim().is_empty();
+    let fence = |t: &str| t.starts_with("```") || t.starts_with("~~~");
+    let least = lines.iter().filter(|l| !blank(l)).map(|l| indent(l)).min();
+    let least = least.unwrap_or(0);
+    let mut out = vec![false; lines.len()];
+    let (mut fenced, mut indented, mut after_blank) = (false, false, true);
+    // The column an open list item's text starts at.
+    let mut item: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if blank(line) {
+            out[i] = fenced;
+            after_blank = true;
+            continue;
+        }
+        let (n, text) = (indent(line) - least, line.trim_start());
+        if after_blank && item.is_some_and(|c| n < c) {
+            item = None;
+        }
+        let base = item.unwrap_or(0);
+        if fenced {
+            out[i] = true;
+            fenced = !fence(text);
+        } else if n >= base + 4 && (indented || after_blank) {
+            out[i] = true;
+            indented = true;
+        } else {
+            indented = false;
+            if fence(text) {
+                out[i] = true;
+                fenced = true;
+            } else if let Some(at) = list_item(text) {
+                item = Some(n + at);
+            }
+        }
+        after_blank = false;
+    }
+    out
+}
+
+/// Where a list item's text starts in `text` (`- a`, `1. a`, `2) a`).
+fn list_item(text: &str) -> Option<usize> {
+    let digits = text.chars().take_while(char::is_ascii_digit).count();
+    let marker = match text.as_bytes().get(digits) {
+        Some(b'-' | b'*' | b'+') if digits == 0 => 1,
+        Some(b'.' | b')') if (1..=9).contains(&digits) => digits + 1,
+        _ => return None,
+    };
+    let spaces = text[marker..].chars().take_while(|c| *c == ' ').count();
+    match spaces {
+        0 => None,
+        1..=4 => Some(marker + spaces),
+        _ => Some(marker + 1),
+    }
 }
 
 fn is_comment(n: &Node<'_>) -> bool {

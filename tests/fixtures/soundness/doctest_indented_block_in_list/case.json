@@ -1,0 +1,6 @@
+{
+  "description": "an indented code block inside a list item (four columns past the item's text) is a doctest: editing it is logic",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

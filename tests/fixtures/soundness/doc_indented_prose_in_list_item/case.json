@@ -1,0 +1,6 @@
+{
+  "description": "a list item's second paragraph is indented to the item's text, not four past it: prose",
+  "expect": {
+    "hunks": [{"kind": "comment_only"}]
+  }
+}
