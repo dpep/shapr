@@ -72,6 +72,12 @@ impl Git {
     /// three lines of context whatever the user's config says.
     pub fn diff(&self, range: &str) -> Result<String> {
         self.verify_range(range)?;
+        // Against all its parents a merge diffs as a combined diff, or nothing.
+        if let Some(rev) = range.strip_suffix("^!")
+            && self.parents(rev)? > 1
+        {
+            bail!("{rev} is {MERGE}");
+        }
         let out = run(self.command().args([
             "diff",
             "--no-color",
@@ -108,6 +114,17 @@ impl Git {
             .filter_map(|entry| entry.trim_start().split_once('\0'))
             .map(|(id, message)| (id.to_string(), message.trim_end().to_string()))
             .collect())
+    }
+
+    /// How many parents commit REV has.
+    fn parents(&self, rev: &str) -> Result<usize> {
+        let out = run(self
+            .command()
+            .args(["rev-list", "--parents", "-n1", rev, "--"]))?;
+        Ok(String::from_utf8_lossy(&out)
+            .split_whitespace()
+            .count()
+            .saturating_sub(1))
     }
 
     /// Fails in one line unless RANGE resolves as revisions in a repository.
@@ -536,6 +553,9 @@ impl Git {
         found
     }
 }
+
+/// Why a merge's combined diff isn't read, and what to run instead.
+pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
 
 const LINGUIST: [&str; 3] = [
     "linguist-generated",

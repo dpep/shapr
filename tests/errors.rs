@@ -178,3 +178,44 @@ fn deeply_nested_code_is_classified_or_not_compared() {
         }
     }
 }
+
+/// A merge commit whose result differs from both parents (an evil merge),
+/// and one that differs from neither in any line git's combined diff shows.
+fn merges() -> tempfile::TempDir {
+    let dir = repo(&[&[("a.rb", "x = 1\n"), ("b.rb", "y = 1\n")]]);
+    git(dir.path(), &["checkout", "-q", "-b", "feat"]);
+    commit(dir.path(), &[("a.rb", "x = 2\n")], "feat");
+    git(dir.path(), &["checkout", "-q", "main"]);
+    commit(dir.path(), &[("a.rb", "x = 3\n")], "main");
+    git(
+        dir.path(),
+        &["merge", "-q", "feat", "-s", "ours", "--no-edit"],
+    );
+    write(dir.path(), &[("a.rb", "x = 4\n")]);
+    git(dir.path(), &["commit", "-q", "-a", "--amend", "--no-edit"]);
+    git(dir.path(), &["checkout", "-q", "-b", "side", "HEAD~1"]);
+    commit(dir.path(), &[("b.rb", "y = 2\n")], "side");
+    git(dir.path(), &["checkout", "-q", "main"]);
+    git(dir.path(), &["merge", "-q", "side", "--no-edit"]);
+    dir
+}
+
+#[test]
+fn a_merge_against_its_parents_is_an_error_naming_one_parent() {
+    let dir = merges();
+    for rev in ["HEAD^!", "HEAD~1^!"] {
+        let message = error(&shapr(dir.path(), &["-J", rev]), 2);
+        assert!(message.contains("R^1..R"), "{rev}: {message}");
+    }
+    // A first-parent diff of the same merge is an ordinary diff.
+    assert_eq!(shapr(dir.path(), &["-J", "HEAD^-1"]).status.code(), Some(0));
+}
+
+#[test]
+fn a_merge_as_a_combined_diff_on_stdin_is_an_error() {
+    let dir = merges();
+    let diff = git(dir.path(), &["diff", "HEAD~1^!"]);
+    assert!(diff.starts_with("diff --cc "), "{diff}");
+    let message = error(&shapr_stdin(dir.path(), &["-J"], &diff), 2);
+    assert!(message.contains("merge"), "{message}");
+}

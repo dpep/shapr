@@ -236,6 +236,13 @@ pub fn run() -> ExitCode {
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
 
+    // A combined diff has no single before side: never read it as an empty change.
+    if text
+        .lines()
+        .any(|l| l.starts_with("diff --cc ") || l.starts_with("diff --combined "))
+    {
+        return fail(format, &format!("the diff is {}", git::MERGE), ERROR);
+    }
     let files = diff::parse(&text);
     if cli.range.is_none() && files.is_empty() {
         // An empty pipe is usually an upstream failure (`git diff nope | shapr`).
