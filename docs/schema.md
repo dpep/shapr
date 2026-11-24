@@ -115,7 +115,7 @@ A hunk's `verdict` is the first that applies:
 | verdict | when |
 |---|---|
 | `unknown` | The file is `binary`, `generated` or `vendored`. |
-| `none` | The file is `docs`. |
+| `none` | The file is `docs` or `fixture`. |
 | `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
 | `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.comparison` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
 | `behavior` | A `config` or `manifest` file shapr has no parser for: its text changed beyond whitespace, and that text is the setting. |
@@ -413,6 +413,7 @@ still parsed and classified. The first rule that matches wins:
 | `binary` | git reports the file as binary. |
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
 | `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
+| `fixture` | Under a `fixtures`, `__fixtures__` or `testdata` directory, at any depth, unless it is binary, vendored, or `.gitattributes` marks it `linguist-generated` or `linguist-documentation`. It wins over the name rules below and over `generated` by name: `spec/fixtures/Gemfile.lock` and `tests/fixtures/a.rb` are fixtures. Test data: not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; the tests that read it judge it. |
 | `docs` | `.gitattributes` marks it `linguist-documentation`; or it is under a `doc`, `docs` or `documentation` directory; or its extension is prose (`md`, `markdown`, `mdx`, `txt`, `rdoc`, `adoc`, `asciidoc`, `rst`, `org`, `textile`); or its name, extension aside, is `README`, `LICENSE`, `LICENCE`, `COPYING`, `CHANGELOG`, `CHANGES`, `HISTORY`, `NEWS`, `AUTHORS`, `CONTRIBUTORS` or `NOTICE` (any case). |
 | `test` | Under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `*_test.rs`, `*_test.go`, `*_test.py`, `test_*.rb`, `test_*.py`, `*.test.*`, `*.spec.*`, `tests.rs` or `test.rs`. |
 | `manifest` | A dependency manifest, by name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`. |
@@ -435,8 +436,8 @@ Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).
 
 A file's category decides whether its hunks count toward the verdict (see
-[Verdicts](#verdicts)). A `docs` file's `review_lines` is 0: prose isn't
-code to review. Generated and vendored files don't count toward size: their
+[Verdicts](#verdicts)). A `docs` or `fixture` file's `review_lines` is 0:
+prose and test data aren't code to review. Generated and vendored files don't count toward size: their
 `review_lines` is 0, and the summary's line sums, `behavior_lines`, `entropy` and
 `structure_share` leave them out. Their own `added`, `deleted` and other
 line counts stay as the diff has them. Generated-but-reviewed files such as
@@ -914,7 +915,7 @@ The hunk's `style`:
 
 | field | type | meaning |
 |---|---|---|
-| `skipped` | string or null | Why the file isn't judged: `generated`, `vendored` or `docs` (by [category](#categories), plus `db/schema.rb` and `vendor`, `third_party` and `node_modules` directories), or `syntax_error`. |
+| `skipped` | string or null | Why the file isn't judged: `generated`, `vendored`, `docs` or `fixture` (by [category](#categories), plus `db/schema.rb` and `vendor`, `third_party` and `node_modules` directories), or `syntax_error`. |
 | `direction` | string | The strongest of its norms' `direction` (`diverging`, then `converging`, `aligned`, `abstain`); `none` when no norm saw new code. One norm aligned beside another that abstains reads `aligned`: each norm's own `direction` says what backs it. |
 | `flagged` | bool | Some norm is `flagged`. |
 | `norms` | array | One per norm that saw new code in the hunk. Below. |
@@ -1046,7 +1047,7 @@ For a pull request per tier:
 `shapr norms -J | jq -r 'select(.record == "step" and .tier == 1) | .edits[].diff' | git apply`.
 
 `summary`: `files` (judged), `skipped` (per reason: `generated`, `vendored`,
-`docs`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
+`docs`, `fixture`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
 style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
 `lines_touched` (over the steps) and `config_unread`: config the files fall
 under that shapr didn't read, one note each (`inherit_gem: NAME`,

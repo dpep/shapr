@@ -231,13 +231,14 @@ pub fn count<'a>(def: &NormDef, observations: impl Iterator<Item = &'a Observati
 }
 
 /// Why a file's style isn't checked: tools write generated files, vendored
-/// code follows its own project, documentation shows code rather than being it.
+/// code follows its own project, documentation shows code rather than being it,
+/// and test data is whatever its tests need.
 /// Beyond the file category: `db/schema.rb` and vendor directories, which
 /// carry no linguist attribute in most repos.
 pub fn skipped(path: &str, category: Category) -> Option<&'static str> {
     if matches!(
         category,
-        Category::Generated | Category::Vendored | Category::Docs
+        Category::Generated | Category::Vendored | Category::Docs | Category::Fixture
     ) {
         return Some(category.as_str());
     }
@@ -373,6 +374,7 @@ mod tests {
         assert_eq!(of("vendor/gems/x/a.rb"), Some("vendored"));
         assert_eq!(of("docs/example.rb"), Some("docs"));
         assert_eq!(of("lib/docs.rb"), None);
+        assert_eq!(of("spec/fixtures/a.rb"), Some("fixture"));
     }
 
     #[test]

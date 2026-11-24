@@ -43,10 +43,11 @@ pub struct Collected {
     pub skipped: BTreeMap<&'static str, usize>,
 }
 
-pub const SKIPS: [&str; 5] = [
+pub const SKIPS: [&str; 6] = [
     "generated",
     "vendored",
     "docs",
+    "fixture",
     "syntax_error",
     "unsupported",
 ];

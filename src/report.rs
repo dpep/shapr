@@ -75,7 +75,7 @@ fn hunk_verdict(file: &FileChange, whitespace_only: bool, label: &Label) -> Verd
     let compared = label.residual.evidence.method != Method::None || !label.parts.is_empty();
     match file.category {
         Category::Binary | Category::Generated | Category::Vendored => Verdict::Unknown,
-        Category::Docs => Verdict::None,
+        Category::Docs | Category::Fixture => Verdict::None,
         _ if !compared && whitespace_only => Verdict::None,
         Category::Code | Category::Test | Category::Config | Category::Manifest if compared => {
             Verdict::of(label.verdict())

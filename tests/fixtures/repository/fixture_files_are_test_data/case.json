@@ -1,0 +1,22 @@
+{
+  "description": "a file under spec/fixtures/ is test data: category fixture, not classified, outside the verdict with no lines to review",
+  "expect": {
+    "files": {
+      "$some": {"file": "spec/fixtures/cart.rb", "category": "fixture", "parsed": false}
+    },
+    "hunks": {
+      "$some": {
+        "file": "spec/fixtures/cart.rb",
+        "category": "fixture",
+        "verdict": "none",
+        "review_lines": 0
+      }
+    },
+    "summary": {
+      "verdict": "behavior",
+      "categories": {"fixture": 1, "code": 1},
+      "verdicts": {"none": 1, "behavior": 1},
+      "review_lines": 2
+    }
+  }
+}
