@@ -187,6 +187,10 @@ impl Flags {
     /// An identifier that names a member as well as the local it reads or
     /// binds (Rust's `S { a }`): renaming it changes the member too.
     pub const MEMBER: Flags = Flags(1 << 5);
+    /// A macro call whose expansion may spell its tokens out as text (Rust's
+    /// `stringify!`, `dbg!`, a message-less `assert!`, any macro outside
+    /// std): renaming a name in it changes that text.
+    pub const SPELLS: Flags = Flags(1 << 6);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0

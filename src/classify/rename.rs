@@ -330,6 +330,14 @@ fn judged<'v>(
         let from = node.name.as_deref().unwrap_or_default();
         return Err(format!("{from} also names a field, which becomes {to}"));
     }
+    let mut ancestors = trees.before.ancestors(diff.before);
+    let spelled = ancestors.any(|a| trees.before.node(a).flags.contains(Flags::SPELLS));
+    if spelled && node.role == Role::Opaque {
+        let from = node.name.as_deref().unwrap_or_default();
+        return Err(format!(
+            "a macro may spell out {from} as text, which changes"
+        ));
+    }
     let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
         // Accepted when it follows a rename made elsewhere in the change;
         // an opaque name may follow a local's, in the same scope.

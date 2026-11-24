@@ -1,0 +1,6 @@
+{
+  "description": "a macro outside std may spell its tokens out (this one stringifies them): a rename through it is logic",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

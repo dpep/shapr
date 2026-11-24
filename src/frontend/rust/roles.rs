@@ -471,6 +471,11 @@ impl Walker<'_> {
                     _ => Role::Hazard(Hazard::Macro),
                 };
                 self.open(&n, attrs, name, role);
+                let mut c = n.walk();
+                let tokens = n.children(&mut c).find(|c| c.kind() == "token_tree");
+                if spells(name.unwrap_or_default(), tokens) {
+                    self.b.flag(Flags::SPELLS);
+                }
                 self.children_with(
                     n,
                     &mut |_, c| {
@@ -719,6 +724,24 @@ fn bindings(f: Node<'_>, src: &[u8]) -> HashSet<String> {
         }
     }
     out
+}
+
+/// Whether macro `name`'s expansion may spell out its `tokens` as text:
+/// `stringify!`, `dbg!` (prints the expression), `assert!` without a message
+/// (panics with the condition), and any macro outside std, unseen.
+pub(super) fn spells(name: &str, tokens: Option<Node<'_>>) -> bool {
+    match name {
+        "stringify" | "dbg" => true,
+        "assert" | "debug_assert" => !tokens.is_some_and(|t| {
+            let mut c = t.walk();
+            let kinds: Vec<&str> = t.children(&mut c).map(|t| t.kind()).collect();
+            kinds
+                .windows(2)
+                .any(|w| w[0] == "," && !matches!(w[1], ")" | "]" | "}"))
+        }),
+        "line" | "column" | "file" | "module_path" => false,
+        name => !PLAIN_MACROS.contains(&name),
+    }
 }
 
 fn pattern_names(p: Node<'_>, src: &[u8], out: &mut HashSet<String>) {

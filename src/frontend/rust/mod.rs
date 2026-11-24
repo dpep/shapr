@@ -554,6 +554,14 @@ impl<'a> Walker<'a> {
             }
             _ => {
                 self.b.open(kind(&n), span(&n), None, Role::Other);
+                // `name!(...)` nested in another macro's tokens.
+                let bang = n.prev_sibling().filter(|b| b.kind() == "!");
+                let name = bang
+                    .and_then(|b| b.prev_sibling())
+                    .filter(|i| i.kind() == "identifier");
+                if name.is_some_and(|i| roles::spells(self.text(&i), Some(n))) {
+                    self.b.flag(Flags::SPELLS);
+                }
                 self.children(n, Mode::Tokens, &[]);
                 self.b.close();
             }

@@ -1,0 +1,6 @@
+{
+  "description": "stringify! spells its tokens out: renaming a local inside it changes the string, so it is logic",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

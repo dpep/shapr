@@ -156,7 +156,10 @@ bounds the locals inside it: a method, class, module, impl or other namespace;
 receiver), `ARGUMENTS` (a call's positional argument list), `PUBLIC` (a
 definition visible outside its package where definitions are private by
 default: Rust's plain `pub`), `MEMBER` (an identifier naming a member
-as well as a local: Rust's `S { a }`; a rename never passes through it) and `DIRECTIVE` (set by the builder for
+as well as a local: Rust's `S { a }`; a rename never passes through it),
+`SPELLS` (a macro call that may spell its tokens out as text: `stringify!`,
+`dbg!`, a message-less `assert!`, a macro outside std; no rename passes into
+it) and `DIRECTIVE` (set by the builder for
 `directive`). The core never reads a node's `kind`
 string or source text to learn what the language means.
 

@@ -1,0 +1,6 @@
+{
+  "description": "a message-less assert! panics with its condition's text: renaming a local inside it changes the message, so it is logic",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

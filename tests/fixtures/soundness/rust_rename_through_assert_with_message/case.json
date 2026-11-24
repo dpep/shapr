@@ -1,0 +1,6 @@
+{
+  "description": "assert! with a message, assert_eq! and println! don't spell their tokens out: a rename through them is a rename",
+  "expect": {
+    "hunks": {"$every": {"kind": "rename"}}
+  }
+}

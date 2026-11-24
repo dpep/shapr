@@ -1,0 +1,6 @@
+{
+  "description": "dbg! prints its expression's text: renaming a local inside it changes the output, so it is logic",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}
