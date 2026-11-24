@@ -1,0 +1,28 @@
+{
+  "description": "a method moved into a new file required at the top of the old one now runs before the class's method_added hook is defined: not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      },
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": false,
+            "detail": {
+              "context": {
+                "$some": "load_order"
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

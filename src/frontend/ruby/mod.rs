@@ -71,6 +71,8 @@ impl Frontend for Ruby {
         let mut builder = TreeBuilder::new(source.clone());
         builder.semantics(Semantics {
             reserved: reserved::RESERVED,
+            definitions_run: true,
+            definition_hooks: &["method_added", "singleton_method_added"],
             spelling: Spelling {
                 sigils: &['@', '$'],
                 suffixes: &['?', '!', '='],

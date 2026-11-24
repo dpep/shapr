@@ -114,6 +114,7 @@ impl Frontend for Rust {
                 quotes: &['"', '\''],
                 ..Spelling::default()
             },
+            ..Semantics::default()
         });
         let mut parser = Parser::new();
         parser

@@ -984,7 +984,7 @@ impl Context {
             Context::Owner => "its owner (class or module) changes",
             Context::Visibility => "its visibility section changes",
             Context::LoadOrder => {
-                "it moves past a statement that names it or that it names at load time"
+                "it moves past a statement that may read it, or that it reads, at load time"
             }
             Context::Directives => "the files' file-level directives differ",
             Context::Position => "it reads its own line or file",
@@ -1178,7 +1178,9 @@ pub(super) fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
 /// `private :x`, a constant read), that declare the same name, or that
 /// declare a name its own load-time code reads. For anything but a method,
 /// whose body runs later, every statement that runs code counts (not a
-/// declaration or a bare `private`): a `require` or a call may read it.
+/// declaration or a bare `private`): a `require` or a call may read it. So
+/// does it for a method where definitions run ([`crate::tree::Semantics::definitions_run`]),
+/// as does a sibling defining a definition hook (`method_added`).
 fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     let Some(parent) = tree.node(node).parent else {
         return Vec::new();
@@ -1229,7 +1231,14 @@ impl<'t> Needs<'t> {
     /// `other`.
     fn by(&self, tree: &Tree, other: NodeId) -> bool {
         let theirs = declared_name(tree, other);
-        (self.runs_now && !inert(tree, other))
+        let semantics = &tree.semantics;
+        let hook =
+            |name: Option<&str>| name.is_some_and(|n| semantics.definition_hooks.contains(&n));
+        // A hook sees the method definitions after it, either way round.
+        let other_method = tree.node(other).role == Role::Definition(NameKind::Method);
+        ((self.runs_now || semantics.definitions_run) && !inert(tree, other))
+            || (hook(theirs) && !self.runs_now)
+            || (hook(self.declared) && other_method)
             || self.declared.is_some_and(|d| {
                 theirs == Some(d) || mentions(tree, other).iter().any(|m| spells(m, d))
             })

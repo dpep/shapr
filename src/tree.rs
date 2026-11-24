@@ -234,6 +234,13 @@ pub struct Semantics {
     /// [`Role::Visibility`] statements, and a definition is public by default
     /// (Ruby).
     pub private_by_default: bool,
+    /// A definition takes effect when its statement runs (Ruby's `def`), so
+    /// code running beside it at load time may observe it, through
+    /// reflection or a hook.
+    pub definitions_run: bool,
+    /// Methods the runtime calls when a method is defined (Ruby's
+    /// `method_added`): defining one changes what the definitions after it do.
+    pub definition_hooks: &'static [&'static str],
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A
