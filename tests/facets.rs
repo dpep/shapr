@@ -1,65 +1,7 @@
 //! End to end: `facets` on logic hunks, what kind of logic change each is.
 
-use serde_json::Value;
-use std::path::Path;
-use std::process::Command;
-
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-/// git and shapr with the caller's repository context removed, so a run
-/// under `git rebase --exec` can't write into the real repository.
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// `shapr -j` on a commit taking `before` to `after`.
-fn classify(before: &[(&str, &str)], after: &[(&str, &str)]) -> Value {
-    let dir = tempfile::tempdir().unwrap();
-    git(dir.path(), &["init", "-q", "-b", "main"]);
-    git(dir.path(), &["config", "user.email", "test@example.com"]);
-    git(dir.path(), &["config", "user.name", "Test"]);
-    for state in [before, after] {
-        for (path, content) in state {
-            let path = dir.path().join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, content).unwrap();
-        }
-        git(dir.path(), &["add", "-A"]);
-        git(dir.path(), &["commit", "-q", "-m", "state"]);
-    }
-    let out = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
-        .args(["-j", "HEAD~1..HEAD"])
-        .output()
-        .unwrap();
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))
-}
+mod common;
+use common::*;
 
 /// Each hunk's facets, for one file changed from `before` to `after`.
 fn facets(path: &str, before: &str, after: &str) -> Vec<Vec<String>> {
