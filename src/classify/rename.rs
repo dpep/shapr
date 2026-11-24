@@ -96,8 +96,10 @@ struct Facts {
     exposed: bool,
     /// A method name the language reaches without a visible call.
     reserved: Option<String>,
-    /// A renamed class or module: its name is a runtime value.
+    /// A renamed class or module, which an autoloader may find by name.
     typed: bool,
+    /// A renamed module whose body is its own file (Rust's `mod n;`).
+    file_module: bool,
     after_gates: BTreeSet<NodeId>,
     /// The renamed nodes on the after side, by file.
     after_nodes: BTreeSet<(usize, NodeId)>,
@@ -174,6 +176,9 @@ pub(super) fn run(
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
             entry.typed |= matches!(role, Role::Definition(NameKind::Class | NameKind::Module));
+            entry.file_module |= role == Role::Definition(NameKind::Module)
+                && t.before.semantics.file_scoped
+                && t.before.code_children(diff.before).count() == 1;
             if role.defines().is_some() {
                 entry.defined = true;
                 entry.definitions.push((hunk.file, diff.before));
@@ -501,11 +506,12 @@ fn holds(
             "{name} is a name the language calls without a visible call"
         ));
     }
-    // `Class#name`, `inspect`, Marshal, `std::any::type_name`: any code,
-    // a dependency's included, can read a type's name, so no search settles it.
-    if facts.typed {
+    if facts.file_module {
+        return Err(format!("{from} names a module whose body is its own file"));
+    }
+    if facts.typed && autoloads(change, facts, outside) {
         return Err(format!(
-            "{from} names a class or module, whose name code reads at runtime"
+            "{from} names a class or module, which an autoloader finds by its file's name"
         ));
     }
     if facts.exposed {
@@ -577,6 +583,29 @@ fn holds(
         assumptions,
         searched,
     })
+}
+
+/// The repository loads classes by their file's names (Zeitwerk, a Rails
+/// application), in a language whose files load by statements: a renamed
+/// class in an unrenamed file isn't found.
+fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
+    let Some(&(home, _)) = facts.definitions.first() else {
+        return false;
+    };
+    let file = &change.files[home];
+    let Ok(trees) = &file.trees else {
+        return false;
+    };
+    if trees.before.semantics.file_scoped {
+        return false;
+    }
+    let zeitwerk = match outside.uses(file.diff.path(), "Zeitwerk") {
+        proof::Search::Done {
+            found, mentioned, ..
+        } => !found.is_empty() || !mentioned.is_empty(),
+        _ => false,
+    };
+    zeitwerk || outside.read("config/application.rb").is_some()
 }
 
 /// For a name code outside the change can reach: fails when a file outside

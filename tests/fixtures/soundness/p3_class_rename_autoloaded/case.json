@@ -1,0 +1,4 @@
+{
+  "description": "a class rename in a Rails application, whose autoloader finds a class by its file's name, left in a file still named for the old class: logic",
+  "expect": {"hunks": {"$every": {"kind": "logic"}}, "summary": {"verdict": "behavior"}}
+}
