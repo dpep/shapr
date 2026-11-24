@@ -585,8 +585,20 @@ fn run_with_input(cmd: &mut Command, input: &[u8]) -> Result<Vec<u8>> {
         .stderr(Stdio::piped())
         .spawn()
         .context("could not run git")?;
-    child.stdin.take().context("git stdin")?.write_all(input)?;
-    check(child.wait_with_output()?)
+    let mut stdin = child.stdin.take().context("git stdin")?;
+    // Write from another thread: git replies as it reads, and a reply that
+    // fills its pipe would block it while we block writing the rest.
+    std::thread::scope(|scope| {
+        let writer = scope.spawn(move || stdin.write_all(input));
+        let output = child.wait_with_output();
+        let written = writer.join().expect("git stdin writer panicked");
+        let output = output?;
+        // A git that failed early closes its stdin: report its error, not the broken pipe.
+        if output.status.success() {
+            written?;
+        }
+        check(output)
+    })
 }
 
 fn check(output: Output) -> Result<Vec<u8>> {

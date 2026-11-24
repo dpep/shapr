@@ -349,3 +349,39 @@ fn a_staged_diff_on_stdin_is_searched_in_the_index() {
     let report = report(&shapr_stdin(dir.path(), &["-j"], &diff));
     assert_eq!(any_part(&report, "rename")["structure"], true, "{report:#}");
 }
+
+#[test]
+fn a_search_over_thousands_of_files_finishes() {
+    // Enough blob ids that git's reply fills its pipe before shapr has
+    // written them all.
+    let files: Vec<(String, String)> = (0..4000)
+        .map(|i| {
+            (
+                format!("lib/f{i}.rb"),
+                format!("class F{i}\n  def m\n    {i}\n  end\nend\n"),
+            )
+        })
+        .collect();
+    let base: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
+    let dir = based_repo(
+        &base,
+        &[("meter.rb", &meter("read", "sample"))],
+        &[("meter.rb", &meter("read", "probe"))],
+    );
+    let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
+        .args(["-j", "HEAD~1..HEAD"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > std::time::Duration::from_secs(60) {
+            child.kill().unwrap();
+            panic!("shapr hung");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
