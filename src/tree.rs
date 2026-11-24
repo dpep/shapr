@@ -31,7 +31,10 @@ pub enum Role {
     /// Calls the method `name`.
     Call(Receiver),
     /// A string or symbol literal whose value (`name`) the language resolves
-    /// to code at runtime, as in `send(:name)`.
+    /// to code at runtime, as in `send(:name)`; or the arguments of such a
+    /// call whose name is computed, with `name` a pattern where `*` stands
+    /// for the computed text (`send("get_#{x}")` is `get_*`, `send(n)` is
+    /// `*`). See [`spells`].
     DynamicName,
     /// Changes the visibility of the definitions after it, or of its arguments.
     Visibility(Visibility),
@@ -163,6 +166,27 @@ pub struct Semantics {
     /// `inherited`), an entry point (`main`). Defining, removing or renaming
     /// one reaches callers beyond the change.
     pub reserved: &'static [&'static str],
+}
+
+/// Whether a [`Role::DynamicName`]'s name can spell `name`: `*` in it
+/// stands for any text computed at runtime.
+pub fn spells(pattern: &str, name: &str) -> bool {
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    let Some((last, middle)) = pieces.split_last() else {
+        return rest.is_empty();
+    };
+    for piece in middle {
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
+    }
+    rest.ends_with(last)
 }
 
 impl Semantics {
@@ -683,6 +707,15 @@ mod tests {
                 comment: false
             }
         );
+    }
+
+    #[test]
+    fn patterns_spell_names() {
+        assert!(spells("*", "anything"));
+        assert!(spells("get_*", "get_a2") && !spells("get_*", "set_a"));
+        assert!(spells("*_old", "x_old") && spells("a*b*c", "abc"));
+        assert!(!spells("a*b*b", "ab") && !spells("name", "names"));
+        assert!(spells("name", "name"));
     }
 
     #[test]

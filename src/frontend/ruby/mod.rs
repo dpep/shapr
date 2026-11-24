@@ -309,6 +309,20 @@ mod tests {
     }
 
     #[test]
+    fn roles_mark_computed_dynamic_names_as_patterns() {
+        let found = roles(
+            "send(n)\npublic_send(\"get_\" + n)\ndefine_method(\"get_#{x}_now\") { 1 }\n\
+             attr_reader :\"a_#{b}\"\nsend(:go, n)\nputs(n)\n",
+        );
+        let dynamic: Vec<&str> = found
+            .iter()
+            .filter(|(r, _)| *r == Role::DynamicName)
+            .filter_map(|(_, n)| n.as_deref())
+            .collect();
+        assert_eq!(dynamic, ["*", "*", "get_*_now", "a_*", "go"]);
+    }
+
+    #[test]
     fn roles_mark_visibility() {
         use crate::tree::Visibility::*;
         let found = roles(

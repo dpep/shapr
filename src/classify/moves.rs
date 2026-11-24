@@ -22,7 +22,7 @@
 use super::format::{dice, subtree_hashes};
 use super::{Confidence, Kind, Labels};
 use crate::change::{Change, Trees};
-use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility};
+use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
@@ -671,7 +671,9 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
         }
         let theirs = declared_name(tree, sibling);
         let depends = (runs_now && !inert(tree, sibling))
-            || declared.is_some_and(|d| theirs == Some(d) || mentions(tree, sibling).contains(&d))
+            || declared.is_some_and(|d| {
+                theirs == Some(d) || mentions(tree, sibling).iter().any(|m| spells(m, d))
+            })
             || theirs.is_some_and(|t| reads.contains(&t))
             || macro_name(tree, sibling).is_some_and(|m| invokes(tree, node, m));
         if depends {

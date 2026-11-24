@@ -970,7 +970,13 @@ fn statement_value(tree: &Tree, stmt: NodeId, v: &str) -> Option<NodeId> {
 /// defined again beside B, so B takes part in dispatch beyond its one call.
 /// New calls to the new method are not collisions.
 fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) -> bool {
-    let named = |tree: &Tree, id: NodeId| tree.node(id).name.as_deref() == Some(method);
+    let named = |tree: &Tree, id: NodeId| {
+        let node = tree.node(id);
+        match node.name.as_deref() {
+            Some(name) if node.role == Role::DynamicName => crate::tree::spells(name, method),
+            name => name == Some(method),
+        }
+    };
     ours.semantics.reserves(method)
         || change
             .files

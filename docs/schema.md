@@ -78,7 +78,15 @@ and every name that differs passes these checks:
   (`send(:old)`, `const_get`, and for a field an `attr_*` of the same name)
   and any plain literal spelling the name (`:old`, `"old"`, `old:`), since
   DSLs such as callbacks and `autoload` name code that way. A leftover
-  `send(:old)` is `logic`: it would now raise.
+  `send(:old)` is `logic`: it would now raise. A dynamic reference whose name
+  is computed counts when its fixed text could spell the name:
+  `define_method("get_#{x}")` could be `get_old`, and `public_send(name)` or
+  `send("get_" + n)` could be anything, so in a change holding one no method,
+  constant or field is renamed.
+- A local isn't renamed in a scope that reads locals by name at runtime
+  (`binding`, `eval`, `local_variables`, a string `instance_eval`; an ERB
+  template's `result(binding)`), and a method isn't renamed when it reads its
+  own name (`__method__`, `__callee__`).
 - A keyword parameter keeps its name (callers pass it), a renamed method
   doesn't call `super` (it would reach the parent's method of the new name),
   and global variables aren't renamed.

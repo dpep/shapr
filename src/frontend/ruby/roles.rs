@@ -4,7 +4,7 @@
 use crate::frontend::Construct;
 use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Tree, Visibility};
 use ruby_prism::Node;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Calls whose string or symbol arguments name code resolved at runtime.
 const DYNAMIC: &[&str] = &[
@@ -24,11 +24,31 @@ const DYNAMIC: &[&str] = &[
     "attr_accessor",
 ];
 
-/// Remembers which literals are arguments to a dynamic call; prism visits a
+/// Dynamic calls whose first argument is the name they reach.
+const SENDERS: &[&str] = &[
+    "send",
+    "public_send",
+    "__send__",
+    "try",
+    "method",
+    "public_method",
+    "instance_method",
+    "define_method",
+    "respond_to?",
+    "instance_variable_get",
+    "instance_variable_set",
+    "const_get",
+];
+
+/// Remembers which literals are arguments to a dynamic call, and the
+/// argument lists of dynamic calls whose name is computed; prism visits a
 /// call before its arguments.
 #[derive(Default)]
 pub(super) struct Roles {
     dynamic_args: HashSet<usize>,
+    /// Argument lists, by start offset, with the pattern their computed
+    /// name matches.
+    computed: HashMap<usize, Vec<u8>>,
 }
 
 impl Roles {
@@ -116,6 +136,12 @@ impl Roles {
                 return (Role::Reference(Constant), name);
             }
             Node::CallNode { .. } => return (self.call(node), None),
+            Node::ArgumentsNode { .. } => {
+                return match self.computed.remove(&node.location().start_offset()) {
+                    Some(pattern) => (Role::DynamicName, Some(pattern)),
+                    None => (Role::Other, None),
+                };
+            }
             Node::AliasMethodNode { .. } => {
                 if let Some(alias) = node.as_alias_method_node() {
                     self.dynamic_args
@@ -169,11 +195,25 @@ impl Roles {
         }
         .filter(|_| receiver == Receiver::Implicit);
         let dynamic = visibility.is_some() || DYNAMIC.iter().any(|d| d.as_bytes() == name);
-        if dynamic {
-            for arg in call.arguments().iter().flat_map(|a| a.arguments().iter()) {
+        if dynamic && let Some(args) = call.arguments() {
+            let mut computed = Vec::new();
+            for (i, arg) in args.arguments().iter().enumerate() {
                 if arg.as_symbol_node().is_some() || arg.as_string_node().is_some() {
                     self.dynamic_args.insert(arg.location().start_offset());
+                } else if let Some(pattern) = interpolated(&arg) {
+                    computed.push(pattern);
+                } else if i == 0 && SENDERS.iter().any(|s| s.as_bytes() == name) {
+                    computed.push(b"*".to_vec());
                 }
+            }
+            let pattern = match &computed[..] {
+                [] => None,
+                [one] => Some(one.clone()),
+                _ => Some(b"*".to_vec()),
+            };
+            if let Some(pattern) = pattern {
+                self.computed
+                    .insert(args.location().start_offset(), pattern);
             }
         }
         if let Some(v) = visibility {
@@ -203,6 +243,25 @@ impl Roles {
             _ => Role::Call(receiver),
         }
     }
+}
+
+/// An interpolated string or symbol as a name pattern: its fixed text, `*`
+/// for each interpolation (`"get_#{x}"` is `get_*`).
+fn interpolated(node: &Node<'_>) -> Option<Vec<u8>> {
+    let parts = match node {
+        Node::InterpolatedStringNode { .. } => node.as_interpolated_string_node()?.parts(),
+        Node::InterpolatedSymbolNode { .. } => node.as_interpolated_symbol_node()?.parts(),
+        _ => return None,
+    };
+    let mut pattern = Vec::new();
+    for part in parts.iter() {
+        match part.as_string_node() {
+            Some(text) => pattern.extend_from_slice(text.unescaped()),
+            None if pattern.last() != Some(&b'*') => pattern.push(b'*'),
+            None => {}
+        }
+    }
+    Some(pattern)
 }
 
 /// Which prism nodes are which [`Construct`], by kind and name.

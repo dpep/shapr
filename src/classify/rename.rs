@@ -10,7 +10,7 @@
 
 use super::{Confidence, Kind, Labels};
 use crate::change::{Change, Trees};
-use crate::tree::{NameKind, NodeId, Role, Tree};
+use crate::tree::{Jump, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -92,6 +92,8 @@ struct Facts {
     renamed: usize,
     defined: bool,
     calls_super: bool,
+    /// A renamed method reads its own frame (`__method__`).
+    reads_frame: bool,
     /// A method name the language reaches without a visible call.
     reserved: Option<String>,
     after_gates: BTreeSet<NodeId>,
@@ -133,8 +135,9 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
             entry.defined |= role.defines().is_some();
-            entry.calls_super |=
-                role == Role::Definition(NameKind::Method) && calls_super(&t.before, diff.before);
+            let method = role == Role::Definition(NameKind::Method);
+            entry.calls_super |= method && holds(&t.before, diff.before, Jump::Super);
+            entry.reads_frame |= method && holds(&t.before, diff.before, Jump::Frame);
             entry.after_gates.insert(gate(&t.after, diff.after));
         }
     }
@@ -403,8 +406,22 @@ fn judge(
     if facts.calls_super {
         return Err(format!("its super call now reaches the parent's {to}"));
     }
+    if facts.reads_frame {
+        return Err(format!(
+            "it reads its own name (`__method__`), which becomes {to}"
+        ));
+    }
     let scope = pair.space.scope;
     let (before, after) = roots(change, pair, facts);
+    let binding = |&(t, root): &(&Tree, NodeId)| {
+        t.descendants(root)
+            .any(|d| t.node(d).role == Role::Jump(Jump::Binding))
+    };
+    if scope == Scope::Local && before.iter().chain(&after).any(binding) {
+        return Err(format!(
+            "its scope reads locals by name at runtime, {from} among them"
+        ));
+    }
     if after
         .iter()
         .any(|&(t, root)| conflicts(t, root, scope, from))
@@ -485,8 +502,8 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
             return scope != Scope::Local && literal_names(tree, id, &bare(name));
         };
         match n.role {
-            Role::DynamicName if scope == Scope::Field => bare(found) == bare(name),
-            Role::DynamicName => scope != Scope::Local && found == name,
+            Role::DynamicName if scope == Scope::Field => spells(&bare(found), &bare(name)),
+            Role::DynamicName => scope != Scope::Local && spells(found, name),
             Role::Opaque => found == name,
             Role::Call(crate::tree::Receiver::Implicit) if scope == Scope::Local => found == name,
             role => found == name && Scope::of(role) == Some(scope),
@@ -534,10 +551,10 @@ fn gate(tree: &Tree, id: NodeId) -> NodeId {
     Tree::ROOT
 }
 
-fn calls_super(tree: &Tree, def: NodeId) -> bool {
-    tree.descendants(def).any(|id| {
-        tree.node(id).role == Role::Jump(crate::tree::Jump::Super) && gate(tree, id) == def
-    })
+/// Whether method `def`'s own body (not a nested definition's) holds `jump`.
+fn holds(tree: &Tree, def: NodeId, jump: Jump) -> bool {
+    tree.descendants(def)
+        .any(|id| tree.node(id).role == Role::Jump(jump) && gate(tree, id) == def)
 }
 
 #[cfg(test)]

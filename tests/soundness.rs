@@ -367,3 +367,50 @@ fn a_method_renamed_to_or_from_a_protocol_name_is_logic() {
         assert_eq!(kinds(&rust(before, after)), ["logic"], "{after}");
     }
 }
+
+// Renames: names reached at runtime.
+
+#[test]
+fn a_local_read_by_name_at_runtime_is_not_renamed() {
+    for body in [
+        "  eval('x + 1')\n",
+        "  binding.local_variable_get(:x)\n",
+        "  ERB.new('<%= x %>').result(binding)\n",
+    ] {
+        let report = ruby(
+            &format!("def f(x)\n{body}end\n"),
+            &format!("def f(y)\n{body}end\n"),
+        );
+        assert_eq!(kinds(&report), ["logic"], "{body}");
+    }
+}
+
+#[test]
+fn a_method_reading_its_own_name_is_not_renamed() {
+    let report = ruby(
+        "class A\n  def old\n    __method__\n  end\nend\n",
+        "class A\n  def new\n    __method__\n  end\nend\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+}
+
+#[test]
+fn a_computed_dynamic_reference_blocks_method_renames() {
+    for dynamic in [
+        "def go(n); public_send(n); end",
+        "def go(n); public_send(\"get_\" + n); end",
+        "%w[a b].each { |x| define_method(\"get_#{x}\") { x } }",
+    ] {
+        let report = ruby(
+            &format!("class A\n  {dynamic}\n  def get_a2; 1; end\n  def t; get_a2; end\nend\n"),
+            &format!("class A\n  {dynamic}\n  def get_a3; 1; end\n  def t; get_a3; end\nend\n"),
+        );
+        assert_not_structure(&report);
+    }
+    // An interpolation whose fixed text can't spell either name leaves it be.
+    let report = ruby(
+        "class A\n  def go(x); send(\"run_#{x}\"); end\n  def get_a2; 1; end\n  def t; get_a2; end\nend\n",
+        "class A\n  def go(x); send(\"run_#{x}\"); end\n  def get_a3; 1; end\n  def t; get_a3; end\nend\n",
+    );
+    assert!(kinds(&report).contains(&"rename"), "{report:#}");
+}
