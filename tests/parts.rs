@@ -47,7 +47,13 @@ fn a_rename_and_an_edit_in_one_hunk_are_a_rename_part_and_a_residual() {
     assert_eq!(cart["review_lines"], 2);
     assert_eq!(
         part(cart, "rename")["detail"]["renames"],
-        json!([{"from": "subtotal", "to": "items_total", "scope": "method", "occurrences": 2}])
+        json!([{"from": "subtotal", "to": "items_total", "scope": "method", "occurrences": 1}])
+    );
+    // Each part counts its own occurrences, so they sum to the change's.
+    assert_eq!(
+        lead(checkout)["detail"]["renames"][0]["occurrences"],
+        1,
+        "{report:#}"
     );
     // The call site's rename is backed by the definition's, inside the edit.
     assert_eq!(checkout["kind"], "rename", "{report:#}");

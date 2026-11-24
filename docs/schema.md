@@ -61,7 +61,7 @@ nothing proven is one `logic` part.
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic unless they are a run of their own (see [Runs](#runs)). |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `restyle` | yes | The same program spelled another way: the code differs only in spellings the language's frontend proves equivalent (quote style, hash syntax, block delimiters, redundant parentheses, ...). See [Restyle](#restyle). |
-| `reorder` | yes, unless its `detail.context` is non-empty | The hunk's elements of one container are the same subtrees, with the same comments leading them, in another order; lines of elements that also changed are `logic` beside it. Structure where order can't be observed: Rust items and separate `use` declarations in a module, `impl`, trait or block with no `macro_rules!` or `#[macro_use]` item among them, and a struct literal's fields whose values are literals and names. Otherwise `detail.context` names what observes the order: `load_order` for `require`s, Gemfile `gem` lines and gemspec dependencies (Bundler requires gems in order), and for Rust items beside a `macro_rules!`, a `#[macro_use]` item, an item-level macro invocation or an attribute macro; `iteration_order` for Ruby hash entries and keyword arguments (every key a distinct plain literal); `element_order` for array elements and Rust struct field declarations and enum variants; `evaluation_order` for other statements, a struct literal's fields with a value that runs code, and beside the others where a moved element calls a method. Method definitions are a `move`; positional arguments and `match` arms are never a reorder. `evidence`: `elements` (the container's elements in the hunk found on both sides) and `moved` (those out of order). `review_lines`: 0 when structure, else each moved element's lines on the after side. |
+| `reorder` | yes, unless its `detail.context` is non-empty | The hunk's elements of one container are the same subtrees, with the same comments leading them, in another order; lines of elements that also changed are `logic` beside it. Structure where order can't be observed: Rust items and separate `use` declarations in a module, `impl`, trait or block with no `macro_rules!`, `#[macro_use]` item, item-level macro invocation or attribute macro among them (whichever element moved), and a struct literal's fields whose values are literals and names. Otherwise `detail.context` names what observes the order: `load_order` for `require`s, Gemfile `gem` lines and gemspec dependencies (Bundler requires gems in order), and for Rust items beside a `macro_rules!`, a `#[macro_use]` item, an item-level macro invocation or an attribute macro; `iteration_order` for Ruby hash entries and keyword arguments (every key a distinct plain literal); `element_order` for array elements and Rust struct field declarations and enum variants; `evaluation_order` for other statements, a struct literal's fields with a value that runs code, and beside the others where a moved element calls a method. Method definitions are a `move`; positional arguments and `match` arms are never a reorder. `evidence`: `elements` (the container's elements in the hunk found on both sides) and `moved` (those out of order). `review_lines`: 0 when structure, else each moved element's lines on the after side. |
 | `default_argument` | yes, unless it has `assumptions` | A call drops or adds an argument that restates its parameter's literal default, and the method it calls is the only one the call can reach. See [Default arguments](#default-arguments). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering other statements (`require`s, Gemfile `gem` lines, callbacks, validations, `include`s, other DSL calls) is a `reorder`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
@@ -77,11 +77,14 @@ new code also defines): the part is then not claimed and its lines stay
 A part is structure only when it is proven: see [Proof status](#proof-status).
 
 Code that reads its own position (`__LINE__`, Rust's `line!()`, `column!()`
-and `dbg!`) changes value when it moves. A hunk holding such a read, or one
+and `dbg!`) or the call stack's (Ruby's `caller` and `caller_locations`,
+Rust's `Location::caller()`) changes value when it moves. A hunk holding such a read, or one
 above it in the file when the lines added and removed above the read don't
 balance, proves no structure: its lines are `logic`, with `detail.near`
-naming the kind it would have been. A shifted line `caller` or a backtrace
-reports is not checked, as any exception's backtrace would shift too.
+naming the kind it would have been and the confidence of the comparison
+that proved it. A shifted line an exception's backtrace
+reports is not checked, as every line added above any raise would shift it;
+nor is the caller's line a `#[track_caller]` function reports.
 
 ### Runs
 
@@ -180,8 +183,8 @@ by name, not resolved: a common name used for something else (another
 class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
 without its `?`, `!` or `=`. A file that reaches a method by a name built
-at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`) is read
-too, once per run (every file of the language is parsed for them), and held
+at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`), or a
+class or constant by one (`const_get(n)`, `n.constantize`), is read too, once per run (every file of the language is parsed for them), and held
 to the same rule as in the change: a computed name that could spell the old
 one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. The
 name as a whole word in any other file code may read (config such as YAML
@@ -322,7 +325,11 @@ every name that differs passes these checks:
   name counts when the name's fixed text could spell it:
   `define_method("get_#{x}")` could be `get_old`, and `public_send(name)` or
   `send("get_" + n)` could be anything, so in a change holding one no method
-  is renamed.
+  is renamed. A constant lookup by a computed name (`const_get`,
+  `qualified_const_get`, `const_defined?`, `constantize`,
+  `safe_constantize`) counts the same way for a class, module or constant,
+  matched on the name's last `::` segment (`const_get("Zoo::#{x}")` could be
+  any constant).
 - A local isn't renamed in a scope that reads locals by name at runtime
   (`binding`, `eval`, `local_variables`, a string `instance_eval`; an ERB
   template's `result(binding)`), and a method isn't renamed when it reads its
@@ -332,6 +339,11 @@ every name that differs passes these checks:
   and global variables aren't renamed.
 - Neither name of a method rename is a [reserved name](#reserved-names): the
   language calls those without a call site shapr can see.
+- A public method of a Rails application's controller, mailer, job or
+  channel (a file under `app/controllers/`, `app/mailers/`, `app/jobs/` or
+  `app/channels/` beside `config/application.rb`) isn't renamed: routes,
+  templates, `deliver_later` and `perform_later` reach it by name. A job or
+  mailer class elsewhere is a documented limit.
 - A class or module (in Rust a struct, enum, union, trait or `mod`) renames
   like a constant, held to every rule here: in a library's public surface
   it assumes `public_api`. It isn't renamed in a Ruby repository that loads
@@ -366,14 +378,14 @@ field; a `method` or `constant` in every parsed file of the change.
 | `renames` | array | One object per rename the part makes. |
 | `from`, `to` | string | The old and new name. |
 | `scope` | string | Where the old name lives, and so where every use had to change: `local`, `field`, `method` or `constant`. |
-| `occurrences` | int | Uses renamed across the change, the definition included; a class or module name counts once. |
+| `occurrences` | int | Uses this part renames, the definition included; a class or module name counts once. A rename spanning hunks lists the pair in each, so occurrences sum over parts to the change's. |
 
 `evidence`, beside `comparison`:
 
 | key | type | meaning |
 |---|---|---|
 | `renamed` | int | Sum of the part's renames' `occurrences`. |
-| `uses` | int | Uses of the old names shapr saw in their scopes before the change. More than `renamed` when another hunk deleted some. |
+| `uses` | int | Uses of the old names shapr saw in their scopes before the change, across the change. More than `renamed` when another hunk renamed or deleted some. |
 | `searched` | int or null | Files the repository search read for uses of the old and new names outside the change (see [Proof status](#proof-status)); `null` when no name can be used outside its scope (locals), or no search ran. |
 
 `confidence` is the weakest rename's score. A local's is `renamed / uses`.
@@ -609,7 +621,7 @@ Each part:
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
-| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
+| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. A part that isn't structure whose picked lines aren't among its own changed ones (an arbitrary moved element left unchanged): all of its lines. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
 
 ## Evidence
 
@@ -770,7 +782,7 @@ its new place differs. Its `context` names each difference:
 | `module` | Rust, across files: each file is a module, so the paths it resolves and its own path change. |
 | `owner` | A different enclosing class, module or `impl` (a Rust namespace's attributes count: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`). |
 | `visibility` | A method in a different visibility section: it crossed a bare `private`, `protected`, `public` or `module_function`. A constant or class isn't affected by one. |
-| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or, for anything but a method, any statement that runs code at load time (a `require`, a DSL call, a constant whose value calls something: `X = Counter.next`). Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
+| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition. Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
 | `directives` | Across files, different file-level directives (`# frozen_string_literal`). |
 | `position` | The unit reads its own line (`__LINE__`, Rust's `line!()`), or its own file (`__FILE__`, `__dir__`, `require_relative`, Rust's `file!()`) and moved to another file. |
 

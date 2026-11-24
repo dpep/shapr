@@ -143,8 +143,10 @@ fn rust(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependen
             // what a `#[macro_use]` module or crate brings in; an item-level
             // macro or an attribute macro (`SPELLS` on an item) may expand
             // differently by order. In a block a macro call is a statement.
+            // Which element the alignment calls moved is arbitrary: any item
+            // macro in the container may see the new order.
             let textual = tree.code_children(container).any(|c| macro_scoped(tree, c));
-            let expands = moved.iter().any(|&m| {
+            let expands = tree.code_children(container).any(|m| {
                 let node = tree.node(m);
                 let item = ITEMS.contains(&node.kind);
                 (node.kind == "macro_invocation" && kind != "block")

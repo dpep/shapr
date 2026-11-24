@@ -1,0 +1,13 @@
+{
+  "description": "two #[used] #[link_section = \".init_array\"] statics swapped: their order is the constructors' order, so behavior, and a reviewer reads the moved lines",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": "behavior",
+        "review_lines": {
+          "$not": 0
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,3 @@
+[package]
+name = "zoo"
+publish = false

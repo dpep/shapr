@@ -151,9 +151,13 @@ pub enum Hazard {
     /// Reads or writes the enclosing method's locals by name at runtime
     /// (`binding`, `eval`): a local can't be renamed under it.
     Binding,
-    /// Reads the enclosing method's frame: its name (`__method__`), its
-    /// callers (`caller`), the last regexp match (`$~`, `$1`).
+    /// Reads the enclosing method's frame: its name (`__method__`), the
+    /// last regexp match (`$~`, `$1`).
     Frame,
+    /// Reads the call stack (`caller`, `caller_locations`, Rust's
+    /// `Location::caller()`): its frames' method names, files and lines,
+    /// its own among them.
+    Stack,
     /// Reads its own source line (`__LINE__`, `line!()`): moving the code
     /// changes the value.
     Line,
@@ -165,7 +169,7 @@ pub enum Hazard {
 /// Facts a frontend marks on a node beside its role. Not in the hash or the
 /// output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Flags(u8);
+pub struct Flags(u16);
 
 impl Flags {
     /// Bounds local variables: a local's scope is the nearest node so
@@ -197,6 +201,9 @@ impl Flags {
     /// `Point = Struct.new(:x)`, `Class.new`, `Module.new`, `Data.define`):
     /// its name is a class's name.
     pub const CLASS_VALUE: Flags = Flags(1 << 7);
+    /// A [`Role::DynamicName`] that reaches a constant, not a method (Ruby's
+    /// `const_get(n)`, `n.constantize`).
+    pub const CONSTANT: Flags = Flags(1 << 8);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
@@ -234,6 +241,13 @@ pub struct Semantics {
     /// [`Role::Visibility`] statements, and a definition is public by default
     /// (Ruby).
     pub private_by_default: bool,
+    /// A definition takes effect when its statement runs (Ruby's `def`), so
+    /// code running beside it at load time may observe it, through
+    /// reflection or a hook.
+    pub definitions_run: bool,
+    /// Methods the runtime calls when a method is defined (Ruby's
+    /// `method_added`): defining one changes what the definitions after it do.
+    pub definition_hooks: &'static [&'static str],
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A
@@ -412,6 +426,9 @@ pub enum Canonical {
     /// order the frontend reported them, not source order (a modifier `if`
     /// lists its condition first either way).
     Syntax(Vec<u8>),
+    /// Stands for the node's own text; its code children are read as a set,
+    /// in no order (a braced import list resolves by name).
+    Unordered(Vec<u8>),
     /// The node means its only code child (redundant parentheses).
     Transparent,
 }
@@ -1043,6 +1060,17 @@ fn canon(tree: &Tree, i: usize, leaf: bool, canonical: Option<&Canonical>) -> (u
             for child in code() {
                 h.write_u8(MARK);
                 child.canon.hash(&mut h);
+            }
+        }
+        Some(Canonical::Unordered(text)) => {
+            node.kind.hash(&mut h);
+            h.write_u8(b'u');
+            text.hash(&mut h);
+            let mut children: Vec<u64> = code().map(|c| c.canon).collect();
+            children.sort_unstable();
+            for child in children {
+                h.write_u8(MARK);
+                child.hash(&mut h);
             }
         }
         Some(Canonical::Transparent) if code().count() == 1 => {

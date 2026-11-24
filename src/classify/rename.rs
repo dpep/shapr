@@ -15,6 +15,7 @@ use super::proof::{self, Assumption, Search, Verified};
 use super::site::{self, CodeLines};
 use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
+use crate::frontend;
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -112,7 +113,6 @@ struct Facts {
 type Verdicts<'f> = BTreeMap<&'f Pair, Result<Verdict, String>>;
 
 struct Verdict {
-    renamed: usize,
     uses: usize,
     score: f64,
     /// What the rename relies on that the search couldn't settle.
@@ -217,7 +217,11 @@ pub(super) fn run(
             .iter()
             .map(|diff| (diff, judged(t, hunk.file, diff, &verdicts)))
             .partition(|(_, verdict)| verdict.is_ok());
-        if let Some((_, Err(why))) = rejected.first() {
+        // A rejection with no rename story keeps the plain reason.
+        let story = rejected
+            .iter()
+            .find_map(|(_, v)| v.as_ref().err().filter(|w| !w.is_empty()));
+        if let Some(why) = story {
             label.residual.reason = why.clone();
         }
         // A line holding code that differs, or a rename that fails, is logic.
@@ -244,12 +248,20 @@ pub(super) fn run(
         if claimed.is_empty() {
             continue;
         }
+        // Each pair's occurrences in this hunk: another hunk's part holds its own.
+        let mut here: BTreeMap<&Pair, usize> = BTreeMap::new();
+        for (diff, verdict) in &accepted {
+            if let Ok((pair, _)) = verdict {
+                *here.entry(*pair).or_default() +=
+                    usize::from(!is_name_node(&t.before, diff.before));
+            }
+        }
         let pairs: BTreeMap<&Pair, &Verdict> = accepted
             .into_iter()
             .filter_map(|(_, verdict)| verdict.ok())
             .collect();
         let score = pairs.values().map(|v| v.score).fold(1.0, f64::min);
-        let renamed: usize = pairs.values().map(|v| v.renamed).sum();
+        let renamed: usize = here.values().sum();
         let uses: usize = pairs.values().map(|v| v.uses).sum();
         let assumptions: BTreeSet<Assumption> = pairs
             .values()
@@ -257,13 +269,13 @@ pub(super) fn run(
             .collect();
         let searched = pairs.values().filter_map(|v| v.searched).max();
         let renames: Vec<Value> = pairs
-            .iter()
-            .map(|(p, v)| {
+            .keys()
+            .map(|p| {
                 json!({
                     "from": p.from,
                     "to": p.to,
                     "scope": p.space.scope.as_str(),
-                    "occurrences": v.renamed,
+                    "occurrences": here[p],
                 })
             })
             .collect();
@@ -439,8 +451,21 @@ fn judge(
     {
         return Err(format!("calls {} instead of {}", pair.to, pair.from));
     }
-    holds(change, pair, facts, all, outside)
-        .map_err(|why| format!("renames {} to {}, but {why}", pair.from, pair.to))
+    holds(change, pair, facts, all, outside).map_err(|why| match swapped(change, pair, facts) {
+        true => String::new(),
+        false => format!("renames {} to {}, but {why}", pair.from, pair.to),
+    })
+}
+
+/// Both names are there on both sides of the change: the old one still
+/// after it, the new one already before it. A swap or a replaced call,
+/// not a rename, so a rejection tells no rename story.
+fn swapped(change: &Change, pair: &Pair, facts: &Facts) -> bool {
+    let (before, after) = roots(change, pair, facts);
+    let scope = pair.space.scope;
+    let has =
+        |roots: &Roots, name: &str| roots.iter().any(|&(_, t, r)| conflicts(t, r, scope, name));
+    has(&before, &pair.to) && has(&after, &pair.from)
 }
 
 /// Whether method `pair.to` has a definition, in the change's after side or
@@ -514,6 +539,11 @@ fn holds(
             "{from} names a class or module, which an autoloader finds by its file's name"
         ));
     }
+    if pair.space.scope == Scope::Method && framework_calls(change, facts, outside) {
+        return Err(format!(
+            "{from} is a public method a framework calls by name (a Rails action or job)"
+        ));
+    }
     if facts.exposed {
         return Err(format!("an attribute may read the name {from}"));
     }
@@ -577,7 +607,6 @@ fn holds(
         renamed as f64 / uses.max(1) as f64
     };
     Ok(Verdict {
-        renamed,
         uses,
         score,
         assumptions,
@@ -606,6 +635,21 @@ fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
         _ => false,
     };
     zeitwerk || outside.read("config/application.rb").is_some()
+}
+
+/// A renamed definition is a public method a framework calls by name.
+fn framework_calls(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
+    let exists = |path: &str| outside.read(path).is_some();
+    facts.definitions.iter().any(|&(f, id)| {
+        let file = &change.files[f];
+        let path = file.diff.path();
+        let called = frontend::for_path(path).is_some_and(|fe| fe.called_by_name(path, &exists));
+        called
+            && file
+                .trees
+                .as_ref()
+                .is_ok_and(|t| proof::public(&t.before, id))
+    })
 }
 
 /// For a name code outside the change can reach: fails when a file outside
@@ -747,9 +791,14 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
                 && (literal_names(tree, id, &bare(name)) || directive_names(tree, id, name));
         };
         match n.role {
-            // A computed name reaches methods (`send(n)`, `define_method`).
+            // A computed name reaches methods (`send(n)`, `define_method`),
+            // or constants (`const_get(n)`, `n.constantize`).
             Role::DynamicName if found.contains('*') => {
-                scope == Scope::Method && spells(found, name)
+                let reaches = match n.flags.contains(Flags::CONSTANT) {
+                    true => Scope::Constant,
+                    false => Scope::Method,
+                };
+                scope == reaches && spells(found, name)
             }
             Role::DynamicName if scope == Scope::Field => bare(found) == bare(name),
             Role::DynamicName => scope != Scope::Local && found == name,
@@ -844,6 +893,7 @@ fn hazard_reason(hazard: Hazard, from: &str, to: &str) -> String {
     match hazard {
         Hazard::Super => format!("its super call now reaches the parent's {to}"),
         Hazard::Frame => format!("it reads its own name (`__method__`), which becomes {to}"),
+        Hazard::Stack => format!("it reads the call stack, whose frames name {from}"),
         Hazard::Binding => format!("its scope reads locals by name at runtime, {from} among them"),
         other => format!("it holds {other:?}, bound to {from}"),
     }

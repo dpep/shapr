@@ -1,0 +1,15 @@
+{
+  "description": "a method moved within its class from after the class's method_added hook to before it: the hook no longer sees it, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

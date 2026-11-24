@@ -71,6 +71,8 @@ impl Frontend for Ruby {
         let mut builder = TreeBuilder::new(source.clone());
         builder.semantics(Semantics {
             reserved: reserved::RESERVED,
+            definitions_run: true,
+            definition_hooks: &["method_added", "singleton_method_added"],
             spelling: Spelling {
                 sigils: &['@', '$'],
                 suffixes: &['?', '!', '='],
@@ -164,6 +166,19 @@ impl Frontend for Ruby {
             "buildfile",
             "rakefile",
         ]
+    }
+
+    /// A Rails application's controllers, mailers, jobs and channels: routes,
+    /// `deliver_later`, `perform_later` and clients reach their public methods
+    /// by name, and a template by the action's name.
+    fn called_by_name(&self, path: &str, exists: &dyn Fn(&str) -> bool) -> bool {
+        const DIRS: &[&str] = &[
+            "app/controllers/",
+            "app/mailers/",
+            "app/jobs/",
+            "app/channels/",
+        ];
+        DIRS.iter().any(|d| path.starts_with(d)) && exists("config/application.rb")
     }
 
     /// A gem's code: under `lib/` beside a `*.gemspec`.
@@ -308,7 +323,8 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
-        self.builder.flag(roles::flags(&node));
+        let flags = self.roles.flags(&node);
+        self.builder.flag(flags);
         self.respell(&node);
         self.parents.push((kind, node.location().start_offset()));
     }
@@ -544,6 +560,30 @@ mod tests {
     }
 
     #[test]
+    fn constant_lookups_mark_constant_dynamic_names() {
+        let tree = parse(
+            "Object.const_get(\"App::Widget\")\nconst_get(n)\nconst_defined?(\"#{m}::Wid#{x}\")\n\
+             name.constantize\n\"#{a}Widget\".safe_constantize\n\"Widget\".constantize\nsend(n)\n",
+        );
+        let dynamic: Vec<(&str, bool)> = (tree.nodes.iter())
+            .filter(|n| n.role == Role::DynamicName)
+            .map(|n| {
+                let constant = n.flags.contains(crate::tree::Flags::CONSTANT);
+                (n.name.as_deref().unwrap_or_default(), constant)
+            })
+            .collect();
+        let expected = [
+            ("Widget", false),
+            ("*", true),
+            ("Wid*", true),
+            ("*", true),
+            ("*Widget", true),
+            ("*", false),
+        ];
+        assert_eq!(dynamic, expected);
+    }
+
+    #[test]
     fn roles_mark_visibility() {
         use crate::tree::Visibility::*;
         let found = roles(
@@ -628,7 +668,7 @@ mod tests {
         );
         assert_eq!(
             jumps("__method__\ncaller\ncaller_locations\n$~\n$1\n$&\n"),
-            [Frame, Frame, Frame, Frame, Frame, Frame]
+            [Frame, Stack, Stack, Frame, Frame, Frame]
         );
         assert_eq!(
             jumps("__LINE__\n__FILE__\n__dir__\nrequire_relative 'a'\n"),

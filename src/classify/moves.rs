@@ -132,14 +132,17 @@ pub(super) fn run(
             mine.sort_unstable();
             mine.dedup();
             let mine: Vec<&Pair> = mine.iter().map(|&p| &pairs[p]).collect();
-            let exact = mine.iter().all(|p| p.similarity == 1.0);
+            let changed_bodies = mine.iter().filter(|p| p.similarity < 1.0).count();
             let mut context: Vec<Context> = mine.iter().flat_map(|p| p.context.clone()).collect();
             context.sort_unstable();
             context.dedup();
-            let mut reason: String = if exact {
-                "declarations moved unchanged".into()
-            } else {
-                "declarations moved, and their bodies changed".into()
+            let mut reason: String = match changed_bodies {
+                0 => "declarations moved unchanged".into(),
+                n if n == mine.len() => "declarations moved, and their bodies changed".into(),
+                n => format!(
+                    "declarations moved, {n} of {} with a changed body",
+                    mine.len()
+                ),
             };
             if !context.is_empty() {
                 let why: Vec<&str> = context.iter().map(|c| c.reason()).collect();
@@ -984,7 +987,7 @@ impl Context {
             Context::Owner => "its owner (class or module) changes",
             Context::Visibility => "its visibility section changes",
             Context::LoadOrder => {
-                "it moves past a statement that names it or that it names at load time"
+                "it moves past a statement that may read it, or that it reads, at load time"
             }
             Context::Directives => "the files' file-level directives differ",
             Context::Position => "it reads its own line or file",
@@ -1053,10 +1056,13 @@ fn pair(change: &Change, units: &[Unit]) -> Vec<Pair> {
         if !same {
             return None;
         }
+        // Not identical (the exact pass took those), so never rounded up to
+        // 1.0: that reads as unchanged and skips the changed lines.
         let sim = rounded(dice(
             subtree_hashes(ur.tree(change), &[ur.node]),
             subtree_hashes(ua.tree(change), &[ua.node]),
-        ));
+        ))
+        .min(0.99);
         (sim >= NEAR).then_some(sim)
     };
     let free_r: Vec<usize> = removed.iter().copied().filter(|&u| !taken[u]).collect();
@@ -1118,6 +1124,8 @@ fn claim(
 fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
     let (tb, ta) = (from.tree(change), to.tree(change));
     let across = from.file != to.file;
+    let into_new_file =
+        across && change.files[to.file].diff.old_path.is_none() && !ta.semantics.file_scoped;
     // A visibility section applies to methods only.
     let method = tb.node(from.node).role == Role::Definition(NameKind::Method);
     [
@@ -1132,7 +1140,12 @@ fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
         ),
         (
             Context::LoadOrder,
-            dependencies(tb, from.node) != dependencies(ta, to.node),
+            // Into a file the change adds, where its old siblings now run is
+            // `surroundings`' window; here only the new file's own.
+            match into_new_file {
+                true => !dependencies(ta, to.node).is_empty(),
+                false => dependencies(tb, from.node) != dependencies(ta, to.node),
+            },
         ),
         (
             Context::Directives,
@@ -1178,7 +1191,9 @@ pub(super) fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
 /// `private :x`, a constant read), that declare the same name, or that
 /// declare a name its own load-time code reads. For anything but a method,
 /// whose body runs later, every statement that runs code counts (not a
-/// declaration or a bare `private`): a `require` or a call may read it.
+/// declaration or a bare `private`): a `require` or a call may read it. So
+/// does it for a method where definitions run ([`crate::tree::Semantics::definitions_run`]),
+/// as does a sibling defining a definition hook (`method_added`).
 fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     let Some(parent) = tree.node(node).parent else {
         return Vec::new();
@@ -1229,7 +1244,15 @@ impl<'t> Needs<'t> {
     /// `other`.
     fn by(&self, tree: &Tree, other: NodeId) -> bool {
         let theirs = declared_name(tree, other);
-        (self.runs_now && !inert(tree, other))
+        let semantics = &tree.semantics;
+        let hook =
+            |name: Option<&str>| name.is_some_and(|n| semantics.definition_hooks.contains(&n));
+        // A hook sees the method definitions after it, either way round.
+        let other_method = tree.node(other).role == Role::Definition(NameKind::Method);
+        ((self.runs_now || semantics.definitions_run) && !inert(tree, other))
+            || (hook(theirs) && !self.runs_now)
+            || expands(tree, other)
+            || (hook(self.declared) && other_method)
             || self.declared.is_some_and(|d| {
                 theirs == Some(d) || mentions(tree, other).iter().any(|m| spells(m, d))
             })
@@ -1256,6 +1279,16 @@ fn inert(tree: &Tree, node: NodeId) -> bool {
         Role::Visibility(_) => n.children.iter().all(|&c| tree.node(c).comment),
         role => role.is_declaration(),
     }
+}
+
+/// A macro invocation, or an item an attribute macro rewrites: it may
+/// expand to anything, depending on what is beside it.
+fn expands(tree: &Tree, node: NodeId) -> bool {
+    let n = tree.node(node);
+    matches!(
+        n.role,
+        Role::Reference(NameKind::Macro) | Role::Hazard(Hazard::Macro)
+    ) || n.flags.contains(Flags::SPELLS)
 }
 
 /// The macro a sibling defines (`macro_rules!`): an invocation resolves to

@@ -444,3 +444,32 @@ fn move_fields_are_documented() {
         }
     }
 }
+
+#[test]
+fn a_move_reason_counts_the_bodies_that_changed() {
+    let (a, b) = (method("first", "2"), method("second", "3"));
+    let changed = b.replace("log(y)", "warn(y)");
+    let filler: Vec<String> = (0..3).map(|i| method(&format!("m{i}"), "5")).collect();
+    let mut before: Vec<&str> = vec![&a, &b];
+    before.extend(filler.iter().map(String::as_str));
+    let mut after: Vec<&str> = filler.iter().map(String::as_str).collect();
+    after.extend([a.as_str(), changed.as_str()]);
+    let report = classify(
+        &[("shape.rb", &class("Shape", &before))],
+        &[("shape.rb", &class("Shape", &after))],
+    );
+    let reasons: Vec<&str> = (hunks(&report).iter())
+        .filter_map(|h| {
+            h["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["kind"] == "move")
+        })
+        .map(|p| p["reason"].as_str().unwrap())
+        .collect();
+    assert!(!reasons.is_empty(), "{report:#}");
+    for reason in reasons {
+        assert!(reason.contains("1 of 2 with a changed body"), "{reason}");
+    }
+}

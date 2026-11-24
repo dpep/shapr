@@ -114,6 +114,7 @@ impl Frontend for Rust {
                 quotes: &['"', '\''],
                 ..Spelling::default()
             },
+            ..Semantics::default()
         });
         let mut parser = Parser::new();
         parser
@@ -140,6 +141,10 @@ impl Frontend for Rust {
 
     fn search_globs(&self) -> &'static [&'static str] {
         &["*.rs"]
+    }
+
+    fn called_by_name(&self, _: &str, _: &dyn Fn(&str) -> bool) -> bool {
+        false
     }
 
     /// A library crate's source: the nearest `Cargo.toml` above it has a

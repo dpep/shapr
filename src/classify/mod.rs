@@ -342,6 +342,13 @@ fn passes(change: &Change, outside: &dyn Outside) -> Labels {
     shifted_reads(change, &mut labels);
     for label in labels.iter_mut().flatten() {
         label.residual.lines = label.unclaimed();
+        // A part that isn't structure is read: when the lines its pass
+        // picked for review aren't among its changed ones, all of them.
+        for part in label.parts.iter_mut().filter(|p| !p.structure()) {
+            if part.review.is_empty() {
+                part.review = part.lines.clone();
+            }
+        }
     }
     labels
 }
@@ -382,6 +389,12 @@ fn shifted_reads(change: &Change, labels: &mut Labels) {
             label.parts = kept;
             if let Some(kind) = refused.iter().map(|p| p.kind).max() {
                 let residual = &mut label.residual;
+                // As sure as the comparison that proved the refused parts.
+                let sure = refused
+                    .iter()
+                    .map(|p| p.confidence.get())
+                    .fold(1.0, f64::min);
+                residual.confidence = Confidence::new(sure);
                 residual.reason = format!(
                     "{}, but it moves line {read}, which reads its own position",
                     kind.as_str()

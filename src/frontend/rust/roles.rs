@@ -463,14 +463,14 @@ impl Walker<'_> {
             }
             (_, "call_expression") => self.call(n, attrs),
             // Imports resolve by name, never by order: the canon reads the
-            // list's items sorted.
+            // list's items as a set. They stay in source order, so a rename
+            // pairs each item with itself.
             (_, "use_list") => {
                 self.open(&n, attrs, None, Role::Other);
                 self.b
-                    .respell(REORDER_IMPORTS, Canonical::Syntax(b"{}".to_vec()));
+                    .respell(REORDER_IMPORTS, Canonical::Unordered(b"{}".to_vec()));
                 let mut c = n.walk();
                 let kids: Vec<_> = n.children(&mut c).map(|k| (None, k)).collect();
-                let mut items = Vec::new();
                 for (i, &(_, k)) in kids.iter().enumerate() {
                     if is_comment(&k) {
                         self.comment(&k);
@@ -479,12 +479,8 @@ impl Walker<'_> {
                     } else if k.kind() == "," && trailing(&n, &kids[i + 1..]) {
                         self.b.ignore(span(&k));
                     } else if k.is_named() {
-                        items.push(k);
+                        self.emit(k, mode, &[]);
                     }
-                }
-                items.sort_by_cached_key(|k| use_key(*k, self.src));
-                for k in items {
-                    self.emit(k, mode, &[]);
                 }
                 self.b.close();
             }
@@ -705,7 +701,17 @@ impl Walker<'_> {
                     Some(p) if self.text(&p) == "Self" => Receiver::SelfRef,
                     _ => Receiver::Explicit,
                 };
-                self.open(&n, attrs, Some(name), Role::Call(receiver));
+                // `Location::caller()` reports a line: its own, or under
+                // `#[track_caller]` its caller's.
+                let location = path.is_some_and(|p| {
+                    let p = self.text(&p);
+                    p.rsplit("::").next() == Some("Location")
+                }) && name == "caller";
+                let role = match location {
+                    true => Role::Hazard(Hazard::Stack),
+                    false => Role::Call(receiver),
+                };
+                self.open(&n, attrs, Some(name), role);
                 if let Some(path) = path {
                     self.emit(path, Mode::Path, &[]);
                 }
@@ -757,25 +763,6 @@ fn beyond(attrs: &[Node<'_>], src: &[u8], derives: &[&str]) -> bool {
         }
         !NAMELESS_ATTRIBUTES.contains(&head.as_str())
     })
-}
-
-/// A use-list item's text with whitespace dropped and every nested braced
-/// list sorted: equal for items that import the same names.
-fn use_key(n: Node<'_>, src: &[u8]) -> String {
-    let mut c = n.walk();
-    let kids = n.children(&mut c).filter(|k| !is_comment(k));
-    if n.kind() == "use_list" {
-        let mut keys: Vec<String> = kids
-            .filter(Node::is_named)
-            .map(|k| use_key(k, src))
-            .collect();
-        keys.sort();
-        return format!("{{{}}}", keys.join(","));
-    }
-    if n.child_count() == 0 {
-        return String::from_utf8_lossy(&src[span(&n)]).into_owned();
-    }
-    kids.map(|k| use_key(k, src)).collect()
 }
 
 /// Every name a pattern binds in function `f`, closures included and nested

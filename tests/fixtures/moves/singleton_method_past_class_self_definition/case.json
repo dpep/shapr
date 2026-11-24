@@ -1,0 +1,15 @@
+{
+  "description": "def self.a moved past a class << self that defines a again: the later definition wins, so which a runs changes; not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}
