@@ -246,3 +246,64 @@ fn a_rust_chunk_reading_its_line_is_not_extracted() {
     );
     assert_near(&report, "extract", Some("jump"));
 }
+
+fn contexts(report: &Value) -> Vec<&str> {
+    hunks(report)
+        .iter()
+        .flat_map(|h| h["detail"]["context"].as_array().into_iter().flatten())
+        .map(|c| c.as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn a_moved_definition_reading_its_line_changes_position() {
+    let report = ruby(
+        "class A\n  def x\n    __LINE__\n  end\n\n  def y\n    1\n  end\nend\n",
+        "class A\n  def y\n    1\n  end\n\n  def x\n    __LINE__\n  end\nend\n",
+    );
+    assert_not_structure(&report);
+    assert!(contexts(&report).contains(&"position"), "{report:#}");
+    // In the same file, `__FILE__` reads the same.
+    let report = ruby(
+        "class A\n  def x\n    __FILE__\n  end\n\n  def y\n    1\n  end\nend\n",
+        "class A\n  def y\n    1\n  end\n\n  def x\n    __FILE__\n  end\nend\n",
+    );
+    assert!(kinds(&report).iter().all(|k| *k == "move"), "{report:#}");
+}
+
+#[test]
+fn a_definition_reading_its_file_changes_position_across_files() {
+    let report = classify(
+        &[
+            (
+                "a.rb",
+                "def here\n  File.dirname(__FILE__)\nend\n\ndef keep\n  1\nend\n",
+            ),
+            ("b.rb", "def other\n  2\nend\n"),
+        ],
+        &[
+            ("a.rb", "def keep\n  1\nend\n"),
+            (
+                "b.rb",
+                "def other\n  2\nend\n\ndef here\n  File.dirname(__FILE__)\nend\n",
+            ),
+        ],
+    );
+    assert_not_structure(&report);
+    assert!(contexts(&report).contains(&"position"), "{report:#}");
+}
+
+#[test]
+fn a_function_moved_past_a_macro_redefinition_it_invokes_is_not_a_move() {
+    let report = rust(
+        "macro_rules! a { () => { 1 } }\nfn f() -> i32 { a!() }\nmacro_rules! a { () => { 2 } }\nfn g() {}\n",
+        "macro_rules! a { () => { 1 } }\nmacro_rules! a { () => { 2 } }\nfn f() -> i32 { a!() }\nfn g() {}\n",
+    );
+    assert_not_structure(&report);
+    // One that doesn't invoke it moves freely.
+    let report = rust(
+        "macro_rules! a { () => { 1 } }\nfn f() -> i32 { a!() }\nfn g() {}\n",
+        "fn g() {}\nmacro_rules! a { () => { 1 } }\nfn f() -> i32 { a!() }\n",
+    );
+    assert_eq!(kinds(&report), ["move"]);
+}

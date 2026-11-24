@@ -22,7 +22,7 @@
 use super::format::{dice, subtree_hashes};
 use super::{Confidence, Kind, Labels};
 use crate::change::{Change, Trees};
-use crate::tree::{NameKind, NodeId, Role, Tree, Visibility};
+use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
@@ -432,15 +432,19 @@ pub enum Context {
     LoadOrder,
     /// Files with different file-level directives.
     Directives,
+    /// The code reads its own line (`__LINE__`), or its own file
+    /// (`__FILE__`) and moved to another file.
+    Position,
 }
 
 impl Context {
-    pub const ALL: [Context; 5] = [
+    pub const ALL: [Context; 6] = [
         Context::Module,
         Context::Owner,
         Context::Visibility,
         Context::LoadOrder,
         Context::Directives,
+        Context::Position,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -450,6 +454,7 @@ impl Context {
             Context::Visibility => "visibility",
             Context::LoadOrder => "load_order",
             Context::Directives => "directives",
+            Context::Position => "position",
         }
     }
 
@@ -462,6 +467,7 @@ impl Context {
                 "it moves past a statement that names it or that it names at load time"
             }
             Context::Directives => "the files' file-level directives differ",
+            Context::Position => "it reads its own line or file",
         }
     }
 }
@@ -605,10 +611,20 @@ fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
             Context::Directives,
             across && directives(tb) != directives(ta),
         ),
+        (Context::Position, positional(tb, from.node, across)),
     ]
     .into_iter()
     .filter_map(|(context, differs)| differs.then_some(context))
     .collect()
+}
+
+/// Whether the unit reads its own line, or its own file when it changed files.
+fn positional(tree: &Tree, node: NodeId, across: bool) -> bool {
+    tree.descendants(node).any(|d| match tree.node(d).role {
+        Role::Jump(Jump::Line) => true,
+        Role::Jump(Jump::File) => across,
+        _ => false,
+    })
 }
 
 /// The section a declaration sits in: the last bare visibility statement
@@ -656,7 +672,8 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
         let theirs = declared_name(tree, sibling);
         let depends = (runs_now && !inert(tree, sibling))
             || declared.is_some_and(|d| theirs == Some(d) || mentions(tree, sibling).contains(&d))
-            || theirs.is_some_and(|t| reads.contains(&t));
+            || theirs.is_some_and(|t| reads.contains(&t))
+            || macro_name(tree, sibling).is_some_and(|m| invokes(tree, node, m));
         if depends {
             out.push((tree.node(sibling).hash, before));
         }
@@ -680,6 +697,27 @@ fn inert(tree: &Tree, node: NodeId) -> bool {
         Role::Visibility(_) => n.children.iter().all(|&c| tree.node(c).comment),
         role => role.is_declaration(),
     }
+}
+
+/// The macro a sibling defines (`macro_rules!`): an invocation resolves to
+/// the definition textually before it, function bodies included.
+fn macro_name(tree: &Tree, node: NodeId) -> Option<&str> {
+    let n = tree.node(node);
+    n.name
+        .as_deref()
+        .filter(|_| n.role == Role::Definition(NameKind::Macro))
+}
+
+/// Whether the subtree invokes macro `name`, or may in a token tree.
+fn invokes(tree: &Tree, node: NodeId, name: &str) -> bool {
+    tree.descendants(node).any(|d| {
+        let n = tree.node(d);
+        n.name.as_deref() == Some(name)
+            && matches!(
+                n.role,
+                Role::Reference(NameKind::Macro) | Role::Jump(Jump::Macro) | Role::Opaque
+            )
+    })
 }
 
 fn declared_name(tree: &Tree, node: NodeId) -> Option<&str> {
