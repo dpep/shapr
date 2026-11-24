@@ -168,6 +168,56 @@ fn format_and_logic_in_one_change_is_mixed() {
     assert_eq!(code, 3);
 }
 
+fn review_lines(report: &Value) -> Vec<u64> {
+    report["hunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["review_lines"].as_u64().unwrap())
+        .collect()
+}
+
+#[test]
+fn an_extract_is_structure_but_still_read() {
+    let before = "class Report\n  def render(title)\n    puts title\n    puts \"-\" * 10\n    puts \"=\" * 10\n    puts \"end\"\n  end\nend\n";
+    let after = "class Report\n  def render(title)\n    puts title\n    rule\n    puts \"end\"\n  end\n\n  def rule\n    puts \"-\" * 10\n    puts \"=\" * 10\n  end\nend\n";
+    let (report, code) = classify(&[("a.rb", before)], &[("a.rb", after)]);
+    assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
+    // Every changed code line: git's diff keeps the moved statements as
+    // context and changes the lines around them.
+    assert_eq!(report["summary"]["review_lines"], 5);
+    assert_eq!(report["summary"]["behavior_lines"], 0);
+    assert_eq!(report["summary"]["verdict"], "structure");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn a_move_with_changes_reviews_only_the_changed_lines() {
+    let method = |name: &str, call: &str| {
+        format!("  def {name}(x)\n    y = x * 2\n    {call}(y)\n    y + 1\n  end\n")
+    };
+    let fillers: String = (0..3).map(|i| method(&format!("m{i}"), "log")).collect();
+    let before = format!(
+        "class Shape\n{}{}{fillers}end\n",
+        method("moved", "log"),
+        method("first", "log")
+    );
+    let after = format!(
+        "class Shape\n{}{fillers}{}end\n",
+        method("first", "log"),
+        method("moved", "warn")
+    );
+    let (report, _) = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
+    assert_eq!(
+        kinds(&report),
+        ["move_with_changes", "move_with_changes"],
+        "{report:#}"
+    );
+    // `log(y)` out of the removed body, `warn(y)` into the added one.
+    assert_eq!(review_lines(&report), [1, 1]);
+    assert_eq!(report["summary"]["behavior_lines"], 2);
+}
+
 #[test]
 fn a_syntax_error_falls_back_to_lines_with_capped_confidence() {
     let before = "def a\n  1+1\nend\ndef broken(\n";

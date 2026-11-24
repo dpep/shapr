@@ -119,7 +119,6 @@ fn a_clean_extract_without_parameters() {
     assert_eq!(hunk["evidence"]["returns"], false);
     // Twelve nodes, under the sixteen that saturate the size factor.
     assert_eq!(hunk["confidence"], 0.75);
-    assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(code, 0);
 }

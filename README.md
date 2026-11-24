@@ -32,7 +32,7 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 
 [docs/schema.md](docs/schema.md) describes every field. Highlights:
 
-- per hunk: `kind`, a graded `confidence` with the `evidence` behind it, code and comment lines added and deleted, and `review_lines`, the lines left to read once formatting, comments and other structural changes are discounted;
+- per hunk: `kind`, a graded `confidence` with the `evidence` behind it, code and comment lines added and deleted, and `review_lines`, the code lines left to read once formatting, comments, renames, exact moves and the unchanged body of a changed move are discounted (extracts and inlines still count);
 - per file: lines before the change, and the same line counts;
 - a summary: the verdict, counts per kind, `structure_share`, and Kamei's diffusion measures (files, directories, subsystems, entropy).
 

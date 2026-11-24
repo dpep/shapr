@@ -4,6 +4,7 @@
 use crate::change::{Change, FileChange};
 use crate::classify::{Confidence, Evidence, Kind, Label, Labels, Method};
 use crate::diff::{Hunk, Lines};
+use crate::tree::Tree;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -137,7 +138,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
     for (file, labels) in change.files.iter().zip(labels) {
         let mut totals = LineCounts::default();
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
-            let lines = count_lines(file, hunk, label.kind);
+            let lines = count_lines(file, hunk, label, hunks.len());
             totals.add(&lines);
             hunks.push(HunkRecord {
                 record: "hunk",
@@ -177,35 +178,72 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
     }
 }
 
-fn count_lines(file: &FileChange, hunk: &Hunk, kind: Kind) -> LineCounts {
+fn count_lines(file: &FileChange, hunk: &Hunk, label: &Label, id: usize) -> LineCounts {
     let mut counts = LineCounts {
         added: hunk.added.len(),
         deleted: hunk.removed.len(),
         ..LineCounts::default()
     };
-    match &file.trees {
-        Ok(trees) => {
-            for &line in &hunk.removed {
-                let facts = trees.before.line(line);
-                counts.code_deleted += usize::from(facts.code);
-                counts.comment_deleted += usize::from(facts.comment);
-            }
-            for &line in &hunk.added {
-                let facts = trees.after.line(line);
-                counts.code_added += usize::from(facts.code);
-                counts.comment_added += usize::from(facts.comment);
-            }
-        }
+    let Ok(trees) = &file.trees else {
         // Unparsed, every changed line is taken for code.
-        Err(_) => {
-            counts.code_added = counts.added;
-            counts.code_deleted = counts.deleted;
+        counts.code_added = counts.added;
+        counts.code_deleted = counts.deleted;
+        counts.review_lines = counts.code();
+        return counts;
+    };
+    for &line in &hunk.removed {
+        let facts = trees.before.line(line);
+        counts.code_deleted += usize::from(facts.code);
+        counts.comment_deleted += usize::from(facts.comment);
+    }
+    for &line in &hunk.added {
+        let facts = trees.after.line(line);
+        counts.code_added += usize::from(facts.code);
+        counts.comment_added += usize::from(facts.comment);
+    }
+    counts.review_lines = match label.kind {
+        Kind::FormatOnly | Kind::CommentOnly | Kind::Rename | Kind::Move => 0,
+        // Structure, but where refactoring bugs cluster: still read.
+        Kind::Extract | Kind::Inline | Kind::Logic => counts.code(),
+        Kind::MoveWithChanges => {
+            let (before, after) = moved_changes(label, id);
+            let code = |lines: &[usize], side: &Tree, changed: &BTreeSet<usize>| {
+                lines
+                    .iter()
+                    .filter(|l| changed.contains(l) && side.line(**l).code)
+                    .count()
+            };
+            code(&hunk.removed, &trees.before, &before) + code(&hunk.added, &trees.after, &after)
+        }
+    };
+    counts
+}
+
+/// The lines inside the hunk's moved units that changed in the move, from
+/// `detail.moves`: before-side lines of the units it removed, after-side
+/// lines of the units it added.
+fn moved_changes(label: &Label, id: usize) -> (BTreeSet<usize>, BTreeSet<usize>) {
+    let (mut before, mut after) = (BTreeSet::new(), BTreeSet::new());
+    let moves = label.detail.get("moves").and_then(Value::as_array);
+    for entry in moves.into_iter().flatten() {
+        let lines = |key: &str| {
+            entry[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .map(|l| l as usize)
+                .collect::<Vec<_>>()
+        };
+        let id = Some(id as u64);
+        if entry["from_hunk"].as_u64() == id {
+            before.extend(lines("changed_before"));
+        }
+        if entry["to_hunk"].as_u64() == id {
+            after.extend(lines("changed_after"));
         }
     }
-    if !kind.is_structure() {
-        counts.review_lines = counts.code();
-    }
-    counts
+    (before, after)
 }
 
 fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
@@ -221,7 +259,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
             structure_lines += hunk.lines.changed();
         } else {
             behavior += 1;
-            behavior_lines += hunk.lines.code();
+            behavior_lines += hunk.lines.review_lines;
         }
     }
     let verdict = match (structure, behavior) {

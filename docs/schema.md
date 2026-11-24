@@ -139,7 +139,7 @@ renamed with two call sites scores 0.8, and one with none 0.67.
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Lines a reviewer still has to read once formatting, comments, renames and the unchanged bodies of moves are discounted. For `logic`, `code_added + code_deleted`; for structural kinds, 0. |
+| `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. |
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. |
 
 ## Evidence
@@ -255,7 +255,7 @@ enough to match by chance, and when several units could be its other half.
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
 | `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`). 0 for one file. |
 | `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over all hunks. |
-| `behavior_lines` | int | Code lines (`code_added + code_deleted`) in hunks of behavior kinds (`logic`, `move_with_changes`): the behavior change's size, comments excluded. |
+| `behavior_lines` | int | `review_lines` summed over hunks of behavior kinds (`logic`, `move_with_changes`): the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structural hunks over all changed lines; 0 when nothing changed. |
 
 ## Exit codes

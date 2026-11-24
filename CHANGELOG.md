@@ -11,3 +11,4 @@
 - `-j` and `-J` emit the JSON schema in docs/schema.md: file, hunk and summary records, with code and comment line counts, `review_lines`, and Kamei's diffusion measures.
 - The exit code carries the verdict: 0 structure (or empty), 1 behavior, 3 mixed; 2 is an error, 64 a usage error.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
+- `review_lines` counts the code lines a reviewer still has to read: 0 for `format_only`, `comment_only`, `rename` and `move`; only the changed lines inside a `move_with_changes`; every code line of an `extract`, `inline` or `logic` hunk. `behavior_lines` sums `review_lines` over behavior hunks.
