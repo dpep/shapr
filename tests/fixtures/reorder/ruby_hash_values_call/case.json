@@ -1,0 +1,23 @@
+{
+  "description": "a hash's entries reordered where a value calls a method: iteration order and evaluation order both change",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "iteration_order",
+                "evaluation_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

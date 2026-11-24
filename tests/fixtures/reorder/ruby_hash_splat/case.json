@@ -1,0 +1,15 @@
+{
+  "description": "a hash entry reordered past a double splat: which value wins for a shared key changes",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic"
+          }
+        ]
+      }
+    ]
+  }
+}

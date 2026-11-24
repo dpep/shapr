@@ -2,7 +2,7 @@
 
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
 says which structural changes it holds (`format_only`, `comment_only`,
-`restyle`, `default_argument`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
+`restyle`, `reorder`, `default_argument`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
 explains, and the residual `logic` lines no part explains; it gives each hunk
 and the whole change a verdict: structure, behavior, or mixed (structure and
 behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
@@ -70,6 +70,7 @@ src/
                     (extents, comment placement, whitespace-insensitive hashes, per-line facts)
   frontend/
     mod.rs          the Frontend trait and the registry (for_path)
+    order.rs        per language and container, what observes the order of its elements, for reorder
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
     ruby/signature.rs  a def's parameters and a call's arguments, for default_argument
@@ -93,6 +94,8 @@ src/
                     method), and last, the reformatted lines the other passes left
     restyle.rs      the restyle pass: aligned subtrees whose canons agree (Node::canon, from
                     the frontend's TreeBuilder::respell), their changed lines where nothing else differs
+    reorder.rs      the reorder pass: a hunk's elements of one container permuted, with the context
+                    (frontend::order) naming what observes the order; structure when nothing does
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
     defaults.rs     the default_argument pass: a call drops or adds an argument restating its
                     callee's literal default, the callee tied to one definition through the search

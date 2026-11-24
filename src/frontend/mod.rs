@@ -2,6 +2,7 @@
 //! classification core sees only trees and this trait, never a parser's own
 //! types, so adding a language touches nothing outside its frontend.
 
+pub mod order;
 pub(crate) mod ruby;
 mod rust;
 

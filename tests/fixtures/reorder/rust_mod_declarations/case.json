@@ -1,0 +1,20 @@
+{
+  "description": "mod declarations reordered, too small for a move unit: module items are order-free",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "reorder",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": true,
+            "detail": {
+              "context": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

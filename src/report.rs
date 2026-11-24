@@ -479,7 +479,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
     let mut kinds: BTreeMap<&'static str, usize> =
         Kind::ALL.iter().map(|k| (k.as_str(), 0)).collect();
     let mut move_contexts: BTreeMap<&'static str, usize> =
-        Context::ALL.iter().map(|c| (c.as_str(), 0)).collect();
+        Context::MOVE.iter().map(|c| (c.as_str(), 0)).collect();
     let mut facets: BTreeMap<&'static str, usize> =
         Facet::ALL.iter().map(|f| (f.as_str(), 0)).collect();
     let mut assumptions: BTreeMap<&'static str, usize> =
@@ -500,7 +500,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         let counted = hunk.verdict.counted();
         for part in &hunk.parts {
             *kinds.entry(part.kind.as_str()).or_default() += 1;
-            for context in &part.context {
+            for context in part.context.iter().filter(|_| part.kind == Kind::Move) {
                 *move_contexts.entry(context.as_str()).or_default() += 1;
             }
             for facet in &part.facets {

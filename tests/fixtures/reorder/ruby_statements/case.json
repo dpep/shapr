@@ -1,0 +1,22 @@
+{
+  "description": "two assignments swapped in a method: the same statements run in another order",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "evaluation_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

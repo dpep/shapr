@@ -1,0 +1,53 @@
+{
+  "description": "a gem moved beside an edited gem line: the moved line is a reorder, the edit logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "load_order"
+              ]
+            },
+            "lines": {
+              "before": [
+                {
+                  "start": 1,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 2,
+                  "count": 1
+                }
+              ]
+            }
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "start": 2,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 3,
+                  "count": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

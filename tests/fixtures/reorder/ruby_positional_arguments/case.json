@@ -1,0 +1,15 @@
+{
+  "description": "a call's positional arguments swapped: another call, not a reorder",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic"
+          }
+        ]
+      }
+    ]
+  }
+}
