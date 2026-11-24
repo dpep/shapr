@@ -426,6 +426,9 @@ pub enum Canonical {
     /// order the frontend reported them, not source order (a modifier `if`
     /// lists its condition first either way).
     Syntax(Vec<u8>),
+    /// Stands for the node's own text; its code children are read as a set,
+    /// in no order (a braced import list resolves by name).
+    Unordered(Vec<u8>),
     /// The node means its only code child (redundant parentheses).
     Transparent,
 }
@@ -1057,6 +1060,17 @@ fn canon(tree: &Tree, i: usize, leaf: bool, canonical: Option<&Canonical>) -> (u
             for child in code() {
                 h.write_u8(MARK);
                 child.canon.hash(&mut h);
+            }
+        }
+        Some(Canonical::Unordered(text)) => {
+            node.kind.hash(&mut h);
+            h.write_u8(b'u');
+            text.hash(&mut h);
+            let mut children: Vec<u64> = code().map(|c| c.canon).collect();
+            children.sort_unstable();
+            for child in children {
+                h.write_u8(MARK);
+                child.hash(&mut h);
             }
         }
         Some(Canonical::Transparent) if code().count() == 1 => {

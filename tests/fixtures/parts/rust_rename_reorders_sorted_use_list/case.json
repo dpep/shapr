@@ -1,0 +1,14 @@
+{
+  "description": "a fn renamed to a name that sorts before its neighbour in a braced use list, the list kept in source order: still a rename",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "rename",
+        "verdict": "structure"
+      }
+    },
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}
