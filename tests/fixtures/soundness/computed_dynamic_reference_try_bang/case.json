@@ -1,0 +1,15 @@
+{
+  "description": "a method renamed while an unchanged file calls w.try!(n): not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

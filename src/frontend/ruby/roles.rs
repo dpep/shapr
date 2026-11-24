@@ -12,9 +12,20 @@ pub(super) const DISPATCH_WORDS: &[&str] = &[
     "send",
     "public_send",
     "__send__",
+    "try",
+    "try!",
     "method",
+    "public_method",
+    "singleton_method",
+    "instance_method",
+    "public_instance_method",
     "define_method",
+    "define_singleton_method",
     "respond_to?",
+    "method_defined?",
+    "public_method_defined?",
+    "private_method_defined?",
+    "protected_method_defined?",
     "instance_variable_get",
     "instance_variable_set",
     "const_get",
@@ -36,17 +47,26 @@ pub(super) const DISPATCH_WORDS: &[&str] = &[
 /// The calls of [`DISPATCH_WORDS`] that aren't visibility calls.
 const DYNAMIC: &[&str] = DISPATCH_WORDS.split_at(DISPATCH_WORDS.len() - 4).0;
 
-/// Dynamic calls whose first argument is the name of the method they reach.
+/// Dynamic calls whose first argument is the name of what they reach; each
+/// is a dispatch word.
 const SENDERS: &[&str] = &[
     "send",
     "public_send",
     "__send__",
     "try",
+    "try!",
     "method",
     "public_method",
+    "singleton_method",
     "instance_method",
+    "public_instance_method",
     "define_method",
+    "define_singleton_method",
     "respond_to?",
+    "method_defined?",
+    "public_method_defined?",
+    "private_method_defined?",
+    "protected_method_defined?",
     "const_get",
     "qualified_const_get",
     "const_defined?",
@@ -436,3 +456,18 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
 const COMPARISONS: &[&str] = &[
     "==", "!=", "<", ">", "<=", ">=", "<=>", "===", "=~", "!~", "!", "eql?", "equal?",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Only a dispatch word's call yields a dynamic name, and the outside
+    /// search finds computed callers by these words: a sender missing here
+    /// reaches a renamed method unseen.
+    #[test]
+    fn every_sender_and_constant_lookup_is_a_dispatch_word() {
+        for word in SENDERS.iter().chain(CONSTANT_WORDS) {
+            assert!(DYNAMIC.contains(word), "{word}");
+        }
+    }
+}

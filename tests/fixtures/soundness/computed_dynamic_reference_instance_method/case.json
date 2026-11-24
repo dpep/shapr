@@ -1,0 +1,15 @@
+{
+  "description": "a method renamed while an unchanged file calls Widget.instance_method(n): not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}
