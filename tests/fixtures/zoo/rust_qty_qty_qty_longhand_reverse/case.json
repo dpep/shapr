@@ -1,0 +1,28 @@
+{
+  "description": "qty -> qty: qty longhand (reverse) (restyle).",
+  "label": {
+    "judge": "author intent",
+    "label": "restyle",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "restyle"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[restyle] qty -> qty: qty longhand (reverse)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
+      }
+    }
+  }
+}

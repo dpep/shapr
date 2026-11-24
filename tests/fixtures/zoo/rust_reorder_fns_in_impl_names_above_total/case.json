@@ -1,0 +1,29 @@
+{
+  "description": "reorder fns in impl (names above total) (move).",
+  "label": {
+    "judge": "author intent",
+    "label": "move",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "move"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[move] reorder fns in impl (names above total)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "move",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

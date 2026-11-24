@@ -1,0 +1,26 @@
+{
+  "description": "add a test (test-only).",
+  "label": {
+    "judge": "author intent",
+    "label": "test-only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "test-only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[test-only] add a test"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    },
+    "hunks": {
+      "$some": {
+        "category": "test"
+      }
+    }
+  }
+}

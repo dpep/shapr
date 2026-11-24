@@ -1,0 +1,29 @@
+{
+  "description": "scan back into tokenize (inline).",
+  "label": {
+    "judge": "author intent",
+    "label": "inline",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "inline"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[inline] scan back into tokenize"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "inline",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "description": "inv -> stock in tests (rename).",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[rename] inv -> stock in tests"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": true
+          }
+        }
+      }
+    }
+  }
+}

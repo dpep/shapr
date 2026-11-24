@@ -1,0 +1,21 @@
+{
+  "description": "add near-miss subjects (no tests) (logic).",
+  "label": {
+    "judge": "author intent",
+    "label": "logic",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "logic"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[logic] add near-miss subjects (no tests)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "description": "module report -> output (git mv + mod + callers) (rename). Open: shapr proves the rename in src/ but leaves the use line in tests/basic.rs logic ('definition isn't renamed'), so the change is mixed.",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[rename] module report -> output (git mv + mod + callers)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": true
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

@@ -1,0 +1,21 @@
+{
+  "description": "Cargo.toml version bump (behavior).",
+  "label": {
+    "judge": "author intent",
+    "label": "behavior",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "behavior"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[behavior] Cargo.toml version bump"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

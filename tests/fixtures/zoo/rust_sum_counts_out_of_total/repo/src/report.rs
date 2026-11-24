@@ -1,0 +1,15 @@
+use crate::inventory::Inventory;
+
+pub fn render(inv: &Inventory) -> String {
+    let mut lines = Vec::new();
+    for item in inv.items() {
+        lines.push(format!("{}: {}", item.name, item.count));
+    }
+    lines.join("\n")
+}
+
+
+
+pub fn overview(inv: &Inventory) -> String {
+    format!("{} items", inv.names().len())
+}

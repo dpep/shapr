@@ -1,0 +1,28 @@
+{
+  "description": "reword /// on ShowCmd (help text output changes) (comment_only). Documented: a doc comment under a CLI derive is code (help text), so the reword is logic.",
+  "label": {
+    "judge": "author intent",
+    "label": "comment_only",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "comment_only"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[comment_only] reword /// on ShowCmd (help text output changes)"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic"
+          }
+        }
+      }
+    }
+  }
+}

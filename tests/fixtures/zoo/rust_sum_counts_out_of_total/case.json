@@ -1,0 +1,30 @@
+{
+  "description": "sum_counts out of total (extract). Open: shapr leaves a tail extract written as `let acc = self.sum_counts(); acc` as logic.",
+  "label": {
+    "judge": "author intent",
+    "label": "extract",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "extract"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[extract] sum_counts out of total"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "extract",
+            "structure": true
+          }
+        }
+      }
+    }
+  },
+  "open": true
+}

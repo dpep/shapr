@@ -1,0 +1,32 @@
+{
+  "description": "pub fn brief -> overview in library crate (rename). Documented: a pub fn rename in a publishable library crate is not structure.",
+  "label": {
+    "judge": "author intent",
+    "label": "rename",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "rename"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[rename] pub fn brief -> overview in library crate"
+  },
+  "expect": {
+    "summary": {
+      "verdict": "behavior"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "rename",
+            "structure": false,
+            "assumptions": [
+              "public_api"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

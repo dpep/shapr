@@ -1,0 +1,21 @@
+{
+  "description": "cfg back to unix (revert).",
+  "label": {
+    "judge": "author intent",
+    "label": "revert",
+    "labeller": "llm",
+    "by": "toy repo author",
+    "category": "revert"
+  },
+  "source": {
+    "repo": "shapr toy repo zoo-rust",
+    "note": "[revert] cfg back to unix"
+  },
+  "expect": {
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}
