@@ -1,0 +1,6 @@
+{
+  "description": "a Rust function moved to a new module file: a move with context module, not logic",
+  "expect": {
+    "hunks": {"$every": {"parts": {"$some": {"kind": "move", "detail": {"context": {"$some": "module"}}}}}}
+  }
+}

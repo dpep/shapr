@@ -1,0 +1,4 @@
+{
+  "description": "a class rename in a gem's lib/ is part of its public surface: a rename part that assumes public_api, not structure",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}, "parts": {"$some": {"kind": "rename", "structure": false, "assumptions": ["public_api"]}}}}}
+}

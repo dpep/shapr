@@ -1,4 +1,4 @@
 {
-  "description": "a Ruby class rename changes what `Class#name`, `inspect` and Marshal read at runtime, from any code: logic",
-  "expect": {"hunks": {"$every": {"kind": "logic"}}, "summary": {"verdict": "behavior"}}
+  "description": "an internal Ruby class rename with every reference updated is structure, though `Class#name` reads the new name: reflection on a name is a documented limit",
+  "expect": {"hunks": {"$every": {"kind": "rename", "verdict": "structure"}}, "summary": {"verdict": "structure"}}
 }

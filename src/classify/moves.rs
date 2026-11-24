@@ -20,15 +20,17 @@
 //! unchanged (git may slide a removal across identical lines), except the
 //! unit's lines that changed in the move, which stay logic.
 
-use super::align::{Alignments, Side, lcs, namespace_name, size, transparent};
+use super::align::{Alignments, Side, key, lcs, namespace_name, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
+use super::proof::Search;
 use super::{Assumption, Claim, Confidence, Kind, Labels, Outside, Part, rounded, site};
 use crate::change::{Change, Trees};
+use crate::frontend::{self, Load};
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
 use serde_json::{Map, json};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ops::RangeInclusive;
 
 /// Fewest nodes a unit needs. Size evidence is `1 - 1/nodes`: one node is
@@ -40,7 +42,12 @@ const FLOOR: usize = 3;
 /// shared, so the bodies are more alike than not.
 const NEAR: f64 = 0.5;
 
-pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, labels: &mut Labels) {
+pub(super) fn run(
+    change: &Change,
+    alignments: &Alignments,
+    outside: &dyn Outside,
+    labels: &mut Labels,
+) {
     let mut units = Vec::new();
     // Files whose declarations take part: parsed cleanly, with lines left.
     let mut aligned = vec![false; change.files.len()];
@@ -63,9 +70,10 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
             file: f,
             side,
             node,
+            wrapper: None,
         }));
     }
-    let pairs = pair(change, &units);
+    let (units, wrappers, mut pairs) = open(change, units);
     let mut by_unit: HashMap<usize, usize> = HashMap::new();
     for (p, pair) in pairs.iter().enumerate() {
         // Both halves must be lines the diff changed, or the trees and the
@@ -76,6 +84,7 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
         by_unit.insert(pair.from, p);
         by_unit.insert(pair.to, p);
     }
+    let extras = surroundings(change, outside, &units, &wrappers, &by_unit, &mut pairs);
 
     for (f, (file, labels)) in change.files.iter().zip(labels.iter_mut()).enumerate() {
         let Ok(trees) = &file.trees else { continue };
@@ -102,6 +111,15 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
                 mine.extend(here.iter().filter_map(|(u, _)| by_unit.get(u).copied()));
                 let mut ranges = file.kept(side).to_vec();
                 ranges.extend(here.iter().map(|(_, r)| r.clone()));
+                for extra in extras.iter().filter(|e| e.file == f && e.side == side) {
+                    if changed
+                        .iter()
+                        .any(|&l| extra.lines.contains(&l) && tree.line(l).code)
+                    {
+                        mine.extend(&extra.pairs);
+                        ranges.push(extra.lines.clone());
+                    }
+                }
                 let lines = site::spanned(changed, &ranges);
                 match side {
                     Side::Removed => explained.before.extend(lines),
@@ -143,15 +161,19 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
                 json!(mine.iter().map(|p| p.candidates).max()),
             );
             // Several units matched as well: which one moved is a guess.
-            let assumptions: Vec<Assumption> = mine
-                .iter()
-                .any(|p| p.candidates > 1)
-                .then_some(Assumption::AmbiguousMatch)
-                .into_iter()
-                .collect();
-            if !assumptions.is_empty() {
+            let mut assumptions: Vec<Assumption> = Vec::new();
+            let mut why = Vec::new();
+            if mine.iter().any(|p| p.public_api) {
+                assumptions.push(Assumption::PublicApi);
+                why.push("library code may load the old file without the new one");
+            }
+            if mine.iter().any(|p| p.candidates > 1) {
+                assumptions.push(Assumption::AmbiguousMatch);
+                why.push("several declarations match it equally well");
+            }
+            if !why.is_empty() {
                 let joint = if context.is_empty() { ", but" } else { ";" };
-                reason = format!("{reason}{joint} several declarations match it equally well");
+                reason = format!("{reason}{joint} {}", why.join("; "));
             }
             let entries: Vec<Entry> = mine.iter().map(|p| entry(change, &units, p)).collect();
             let (changed, first) =
@@ -204,6 +226,650 @@ struct Unit {
     file: usize,
     side: Side,
     node: NodeId,
+    /// The opened namespace it was found in, an index into the wrappers.
+    wrapper: Option<usize>,
+}
+
+/// A namespace the alignment left out that paired with nothing as a whole,
+/// so its declarations took part on their own: the `module Zoo` around a
+/// class moved into a new file.
+struct Wrapper {
+    file: usize,
+    side: Side,
+    node: NodeId,
+    parent: Option<usize>,
+}
+
+/// Lines a hunk's move part also holds beyond its paired units: an opened
+/// namespace whose every member moved, a new or deleted file's directives,
+/// the statement that loads a new file.
+struct Extra {
+    file: usize,
+    side: Side,
+    lines: RangeInclusive<usize>,
+    pairs: Vec<usize>,
+}
+
+/// Pairs the units, then opens each namespace left unpaired and pairs again
+/// with its declarations in its place, until none is left to open.
+fn open(change: &Change, mut units: Vec<Unit>) -> (Vec<Unit>, Vec<Wrapper>, Vec<Pair>) {
+    let mut wrappers = Vec::new();
+    loop {
+        let pairs = pair(change, &units);
+        let mut paired = vec![false; units.len()];
+        for p in &pairs {
+            paired[p.from] = true;
+            paired[p.to] = true;
+        }
+        let opens = |u: &Unit| {
+            let tree = u.tree(change);
+            namespace(tree, u.node) && members(tree, u.node).any(|m| is_unit(tree, m))
+        };
+        // The outermost first: a namespace one level in may yet pair whole.
+        let depth = |u: &Unit| owners(u.tree(change), u.node).len();
+        let Some(outer) = (0..units.len())
+            .filter(|&u| !paired[u] && opens(&units[u]))
+            .map(|u| depth(&units[u]))
+            .min()
+        else {
+            return (units, wrappers, pairs);
+        };
+        let mut next = Vec::new();
+        for (u, unit) in units.into_iter().enumerate() {
+            if paired[u] || !opens(&unit) || depth(&unit) != outer {
+                next.push(unit);
+                continue;
+            }
+            let w = wrappers.len();
+            let tree = unit.tree(change);
+            next.extend(
+                members(tree, unit.node)
+                    .filter(|&m| is_unit(tree, m))
+                    .map(|node| Unit {
+                        file: unit.file,
+                        side: unit.side,
+                        node,
+                        wrapper: Some(w),
+                    }),
+            );
+            wrappers.push(Wrapper {
+                file: unit.file,
+                side: unit.side,
+                node: unit.node,
+                parent: unit.wrapper,
+            });
+        }
+        units = next;
+    }
+}
+
+/// Words that may start loading a file by a name computed at runtime.
+const LOADER_WORDS: &[&str] = &[
+    "require",
+    "require_relative",
+    "load",
+    "autoload",
+    "Zeitwerk",
+];
+
+/// One statement loading a file, as [`Loading`] finds it.
+struct Point {
+    /// The index of the file in the change, when it is in it.
+    file: Option<usize>,
+    stmt: NodeId,
+    load: Load,
+    /// A statement of its own in a statement list, and so for the next one
+    /// in the list.
+    plain: bool,
+    /// At the top level of its file.
+    top: bool,
+    /// The load in the statement before it and after it in its list.
+    prev: Option<Load>,
+    next: Option<Load>,
+}
+
+/// When files load, from the statements that load them: in the change's
+/// after trees and in the repository beyond it, searched once per file.
+struct Loading<'c> {
+    change: &'c Change,
+    outside: &'c dyn Outside,
+    hazard: Option<bool>,
+    points: HashMap<String, Option<Vec<Point>>>,
+}
+
+impl<'c> Loading<'c> {
+    fn new(change: &'c Change, outside: &'c dyn Outside) -> Self {
+        Loading {
+            change,
+            outside,
+            hazard: None,
+            points: HashMap::new(),
+        }
+    }
+
+    fn covered(&self) -> BTreeSet<&'c str> {
+        let paths = self.change.files.iter();
+        paths
+            .flat_map(|f| [f.diff.old_path.as_deref(), f.diff.new_path.as_deref()])
+            .flatten()
+            .collect()
+    }
+
+    /// Some file of the language loads files by a computed name, or one
+    /// can't be read for it: any file may load at any time.
+    fn hazard(&mut self, path: &str) -> bool {
+        if let Some(hazard) = self.hazard {
+            return hazard;
+        }
+        let computed = |tree: &Tree, file: &str| {
+            let frontend = frontend::for_path(file);
+            !tree.errors.is_empty()
+                || frontend.is_some_and(|fe| {
+                    tree.descendants(Tree::ROOT)
+                        .any(|id| fe.load(tree, id, file) == Some(Load::Computed))
+                })
+        };
+        let in_change = self
+            .change
+            .files
+            .iter()
+            .any(|f| match (&f.trees, &f.diff.new_path) {
+                (Ok(t), Some(file))
+                    if frontend::for_path(file).is_some_and(|fe| fe.language() == t.language) =>
+                {
+                    computed(&t.after, file)
+                }
+                _ => false,
+            });
+        let covered = self.covered();
+        let hazard = in_change
+            || LOADER_WORDS
+                .iter()
+                .any(|word| match self.outside.uses(path, word) {
+                    Search::Done { found, .. } => found
+                        .iter()
+                        .filter(|f| !covered.contains(f.as_str()))
+                        .any(|f| self.outside.parse(f).is_none_or(|tree| computed(&tree, f))),
+                    _ => true,
+                });
+        self.hazard = Some(hazard);
+        hazard
+    }
+
+    /// Every statement loading the file at `path`; `None` when some file
+    /// that may hold one can't be read for it.
+    fn points(&mut self, path: &str) -> Option<&[Point]> {
+        if !self.points.contains_key(path) {
+            let found = self.find(path);
+            self.points.insert(path.to_string(), found);
+        }
+        self.points[path].as_deref()
+    }
+
+    fn find(&self, path: &str) -> Option<Vec<Point>> {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        let stem = base.split('.').next().unwrap_or(base);
+        let mut out = Vec::new();
+        for (f, file) in self.change.files.iter().enumerate() {
+            let (Ok(trees), Some(name)) = (&file.trees, &file.diff.new_path) else {
+                continue;
+            };
+            let Some(fe) = frontend::for_path(name) else {
+                continue;
+            };
+            if !trees.after.errors.is_empty() {
+                return None;
+            }
+            out.extend(scan(fe, &trees.after, name, path).map(|p| Point { file: Some(f), ..p }));
+        }
+        let covered = self.covered();
+        match self.outside.uses(path, stem) {
+            Search::Done {
+                found, mentioned, ..
+            } if mentioned.is_empty() => {
+                for name in found.iter().filter(|f| !covered.contains(f.as_str())) {
+                    let fe = frontend::for_path(name)?;
+                    let tree = self.outside.parse(name)?;
+                    if !tree.errors.is_empty() {
+                        return None;
+                    }
+                    out.extend(scan(fe, &tree, name, path));
+                }
+            }
+            _ => return None,
+        }
+        Some(out)
+    }
+
+    /// Whether the new file holding `to` runs `from`'s code where it ran before,
+    /// nothing in between depending on it: whether it runs after the old
+    /// file's own statements, and whether other files load it (after the
+    /// old one) rather than the old file itself; `None` when not shown.
+    ///
+    /// Shown two ways. The old file loads the new one (`require_relative`)
+    /// at its top level, and every other load of the new file follows it or
+    /// a load of the old file. Or every load of the new file directly
+    /// follows a load of the old one, and every load of the old file is
+    /// followed by one of the new: it runs right after the old file. Either
+    /// way no file may load files by a computed name.
+    fn runs(&mut self, from: &Unit, to: &Unit) -> Option<(bool, bool)> {
+        let change = self.change;
+        let old = change.files[from.file].diff.new_path.as_deref()?;
+        let new = change.files[to.file].diff.path();
+        if self.hazard(new) {
+            return None;
+        }
+        let is = |load: &Option<Load>, path: &str| matches!(load, Some(Load::Now(t)) if t.is(path));
+        let old_points: Vec<(bool, bool)> = self
+            .points(old)?
+            .iter()
+            .map(|p| (matches!(p.load, Load::Now(_)) && p.plain, is(&p.next, new)))
+            .collect();
+        let points = self.points(new)?;
+        let first = points
+            .iter()
+            .filter(|p| p.file == Some(from.file) && p.top && matches!(p.load, Load::Now(_)))
+            .min_by_key(|p| p.stmt.0);
+        let attached = |p: &Point| matches!(p.load, Load::Now(_)) && p.plain && is(&p.prev, old);
+        let trees = from.trees(change);
+        let at = match first {
+            Some(first) => {
+                let rest = points
+                    .iter()
+                    .filter(|p| p.stmt != first.stmt || p.file != first.file);
+                let fine = |p: &Point| attached(p) || (p.file == Some(from.file) && p.top);
+                if !rest.into_iter().all(fine) {
+                    return None;
+                }
+                let tops: Vec<NodeId> = members(&trees.after, Tree::ROOT).collect();
+                Some(tops.iter().position(|&t| t == first.stmt)?)
+            }
+            None => {
+                let loaded = !points.is_empty() && points.iter().all(attached);
+                let follows =
+                    !old_points.is_empty() && old_points.iter().all(|&(plain, next)| plain && next);
+                if !loaded || !follows {
+                    return None;
+                }
+                None
+            }
+        };
+        let after = window(&trees.before, from.node, &trees.after, at)?;
+        Some((after, at.is_none()))
+    }
+
+    /// The statements in the change that load the file `to`, which the
+    /// file `from` lost code to.
+    fn loaders(&mut self, _from: usize, to: usize) -> Vec<(usize, NodeId)> {
+        let new = self.change.files[to].diff.path().to_string();
+        let points = self.points(&new).unwrap_or_default();
+        points
+            .iter()
+            .filter_map(|p| Some((p.file?, p.stmt)))
+            .collect()
+    }
+}
+
+/// The statements of `tree` (the file at `name`) that load the file at
+/// `path`.
+fn scan<'t>(
+    fe: &'t dyn crate::frontend::Frontend,
+    tree: &'t Tree,
+    name: &'t str,
+    path: &'t str,
+) -> impl Iterator<Item = Point> + 't {
+    tree.descendants(Tree::ROOT).filter_map(move |id| {
+        let load = fe.load(tree, id, name)?;
+        let (Load::Now(target) | Load::Other(target)) = &load else {
+            return None;
+        };
+        if !target.is(path) {
+            return None;
+        }
+        let parent = tree.node(id).parent?;
+        let plain = transparent(tree, parent);
+        let top = tree
+            .ancestors(id)
+            .all(|a| a == Tree::ROOT || transparent(tree, a));
+        let siblings: Vec<NodeId> = tree.code_children(parent).collect();
+        let at = siblings.iter().position(|&s| s == id)?;
+        let near = |i: Option<usize>| {
+            i.and_then(|i| siblings.get(i))
+                .and_then(|&s| fe.load(tree, s, name))
+                .filter(|_| plain)
+        };
+        Some(Point {
+            file: None,
+            stmt: id,
+            load,
+            plain,
+            top,
+            prev: near(at.checked_sub(1)),
+            next: near(Some(at + 1)),
+        })
+    })
+}
+
+/// Whether `unit`, of the old file's before tree, can run where the old
+/// file's after tree loads its new file: at top-level statement `at`, or
+/// after the file's last statement when `None`. Every statement that now
+/// runs on the other side of it must not depend on it ([`Needs`]). `Some`
+/// says whether it now runs later than before.
+fn window(before: &Tree, unit: NodeId, after: &Tree, at: Option<usize>) -> Option<bool> {
+    let (tb, ta): (Vec<NodeId>, Vec<NodeId>) = (
+        members(before, Tree::ROOT).collect(),
+        members(after, Tree::ROOT).collect(),
+    );
+    let top = std::iter::once(unit)
+        .chain(before.ancestors(unit))
+        .find(|a| tb.contains(a))?;
+    let t = tb.iter().position(|&n| n == top)?;
+    let matched = lcs(
+        tb.len(),
+        ta.len(),
+        |i, j| key(before, tb[i]) == key(after, ta[j]),
+        |_| 1,
+    );
+    let r = at.unwrap_or(ta.len());
+    // Where the unit's top-level statement now stands: kept, or for a unit
+    // at the top level itself, the gap it left.
+    let (later, span) = if top == unit {
+        let slot = matched
+            .iter()
+            .filter(|(i, _)| *i < t)
+            .map(|(_, j)| j + 1)
+            .max()
+            .unwrap_or(0);
+        (r >= slot, if r >= slot { slot..r } else { r + 1..slot })
+    } else {
+        let &(_, j) = matched.iter().find(|(i, _)| *i == t)?;
+        (r > j, if r > j { j + 1..r } else { r + 1..j })
+    };
+    let needs = Needs::of(before, unit);
+    if ta[span].iter().any(|&w| needs.by(after, w)) {
+        return None;
+    }
+    // Inside the top-level statement, the unit's siblings past it (or
+    // before it) in each statement list up to it.
+    let mut x = unit;
+    while x != top {
+        let parent = before.node(x).parent?;
+        if transparent(before, parent) {
+            let siblings: Vec<NodeId> = before.code_children(parent).collect();
+            let at = siblings.iter().position(|&s| s == x)?;
+            let side = if later {
+                &siblings[at + 1..]
+            } else {
+                &siblings[..at]
+            };
+            if side.iter().any(|&w| needs.by(before, w)) {
+                return None;
+            }
+        }
+        x = parent;
+    }
+    Some(later)
+}
+
+fn namespace(tree: &Tree, node: NodeId) -> bool {
+    matches!(
+        tree.node(node).role,
+        Role::Definition(NameKind::Class | NameKind::Module)
+    )
+}
+
+/// A container's statements, through nodes with no syntax of their own:
+/// a namespace's body, a file's top level.
+fn members(tree: &Tree, node: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+    let mut stack: Vec<NodeId> = tree
+        .code_children(node)
+        .filter(|&c| transparent(tree, c))
+        .collect();
+    if node == Tree::ROOT || transparent(tree, node) {
+        stack = vec![node];
+    }
+    let mut out = Vec::new();
+    while let Some(id) = stack.pop() {
+        for c in tree.code_children(id) {
+            if transparent(tree, c) {
+                stack.push(c);
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    out.sort_unstable_by_key(|&id| tree.node(id).span.start);
+    out.into_iter()
+}
+
+/// A namespace's header: its code beside the body (the name, a superclass,
+/// a Rust attribute), as hashes.
+fn header(tree: &Tree, node: NodeId) -> Vec<u64> {
+    let code = tree.code_children(node).filter(|&c| !transparent(tree, c));
+    code.map(|c| tree.node(c).hash).collect()
+}
+
+/// The namespaces enclosing `node`, outermost first.
+fn owners(tree: &Tree, node: NodeId) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = tree
+        .ancestors(node)
+        .filter(|&a| namespace(tree, a))
+        .collect();
+    out.reverse();
+    out
+}
+
+/// What the code around each pair means in its new place beyond
+/// [`check`]: the namespaces opened around it, and for a unit moved into a
+/// file the change adds, when that file runs. Adds what differs to the
+/// pairs' context, and returns the lines their parts hold beyond the units.
+fn surroundings(
+    change: &Change,
+    outside: &dyn Outside,
+    units: &[Unit],
+    wrappers: &[Wrapper],
+    by_unit: &HashMap<usize, usize>,
+    pairs: &mut [Pair],
+) -> Vec<Extra> {
+    let tree = |file: usize, side: Side| {
+        let trees = change.files[file].trees.as_ref().expect("parsed");
+        match side {
+            Side::Removed => &trees.before,
+            Side::Added => &trees.after,
+        }
+    };
+    let added = |file: usize| change.files[file].diff.old_path.is_none();
+    let deleted = |file: usize| change.files[file].diff.new_path.is_none();
+    let live: Vec<usize> = {
+        let mut live: Vec<usize> = by_unit.values().copied().collect();
+        live.sort_unstable();
+        live.dedup();
+        live
+    };
+    // A wrapper is explained when every member moved: a paired unit, or an
+    // explained wrapper.
+    let mut explained = vec![false; wrappers.len()];
+    for w in (0..wrappers.len()).rev() {
+        let wr = &wrappers[w];
+        let t = tree(wr.file, wr.side);
+        explained[w] = members(t, wr.node).all(|m| {
+            let unit = units
+                .iter()
+                .position(|u| u.wrapper == Some(w) && u.node == m);
+            let inner = (0..wrappers.len())
+                .find(|&i| wrappers[i].parent == Some(w) && wrappers[i].node == m);
+            unit.is_some_and(|u| by_unit.contains_key(&u)) || inner.is_some_and(|i| explained[i])
+        });
+    }
+    let chain = |unit: &Unit| -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut at = unit.wrapper;
+        while let Some(w) = at {
+            out.push(w);
+            at = wrappers[w].parent;
+        }
+        out
+    };
+
+    let mut loading = Loading::new(change, outside);
+    let mut extras = Vec::new();
+    // Pairs into each file the change adds, from another file, by (from, to).
+    let mut into: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    for &p in &live {
+        let (from, to) = (&units[pairs[p].from], &units[pairs[p].to]);
+        let mut needs_after = false;
+        let mut context = Vec::new();
+        if !pairs[p].context.contains(&Context::Owner) {
+            for (unit, other) in [(from, to), (to, from)] {
+                let (t, o) = (unit.tree(change), other.tree(change));
+                let (mine, theirs) = (owners(t, unit.node), owners(o, other.node));
+                for w in chain(unit) {
+                    let wr = &wrappers[w];
+                    let Some(d) = mine.iter().position(|&n| n == wr.node) else {
+                        continue;
+                    };
+                    let Some(&ns) = theirs.get(d) else {
+                        context.push(Context::Owner);
+                        continue;
+                    };
+                    let (hw, ho) = (header(t, wr.node), header(o, ns));
+                    let same_kind = t.node(wr.node).role == o.node(ns).role;
+                    match wr.side {
+                        _ if !same_kind => context.push(Context::Owner),
+                        // A namespace no longer declared here: what it said
+                        // must still hold where the code went.
+                        Side::Removed if hw != ho => context.push(Context::Owner),
+                        Side::Removed => {}
+                        // A name alone reopens or creates the namespace in
+                        // either order; anything more (a superclass) holds
+                        // only once the old file has declared it.
+                        Side::Added if hw == ho && hw.len() == 1 => {}
+                        Side::Added if hw == ho || hw.len() == 1 => needs_after = true,
+                        Side::Added => context.push(Context::Owner),
+                    }
+                }
+            }
+        }
+        let new_file = added(to.file)
+            && from.file != to.file
+            && !tree(to.file, Side::Added).semantics.file_scoped;
+        if new_file {
+            into.entry((from.file, to.file)).or_default().push(p);
+            match loading.runs(from, to) {
+                Some((after, alone)) if after || !needs_after => {
+                    let old = change.files[from.file].diff.path();
+                    pairs[p].public_api = alone && outside.library(old);
+                }
+                _ => context.push(Context::LoadOrder),
+            }
+        } else if needs_after {
+            context.push(Context::LoadOrder);
+        }
+        let pair = &mut pairs[p];
+        pair.context.extend(context);
+        pair.context.sort_unstable();
+        pair.context.dedup();
+    }
+
+    let pairs_under = |w: usize| -> Vec<usize> {
+        let mut out: Vec<usize> = (0..units.len())
+            .filter(|&u| chain(&units[u]).contains(&w))
+            .filter_map(|u| by_unit.get(&u).copied())
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    };
+    for (w, wr) in wrappers.iter().enumerate() {
+        if explained[w] {
+            let lines = tree(wr.file, wr.side).lines(wr.node);
+            extras.push(Extra {
+                file: wr.file,
+                side: wr.side,
+                lines,
+                pairs: pairs_under(w),
+            });
+        }
+    }
+    // A file the change adds or deletes whose every statement moved: its
+    // directives move with them.
+    for (f, file) in change.files.iter().enumerate() {
+        let side = match (added(f), deleted(f)) {
+            (true, _) => Side::Added,
+            (_, true) => Side::Removed,
+            _ => continue,
+        };
+        if file.trees.as_ref().is_ok_and(|t| !t.clean()) || file.trees.is_err() {
+            continue;
+        }
+        let t = tree(f, side);
+        let mut moved = Vec::new();
+        let mut directives = Vec::new();
+        let whole = members(t, Tree::ROOT).all(|m| {
+            if t.node(m).flags.contains(Flags::DIRECTIVE) {
+                directives.push(m);
+                return true;
+            }
+            let unit = units
+                .iter()
+                .position(|u| u.file == f && u.side == side && u.wrapper.is_none() && u.node == m);
+            let wrapper = wrappers
+                .iter()
+                .position(|w| w.file == f && w.side == side && w.parent.is_none() && w.node == m);
+            if let Some(p) = unit.and_then(|u| by_unit.get(&u)) {
+                moved.push(*p);
+                true
+            } else if let Some(w) = wrapper.filter(|&w| explained[w]) {
+                moved.extend(pairs_under(w));
+                true
+            } else {
+                false
+            }
+        });
+        if !whole || moved.is_empty() {
+            continue;
+        }
+        moved.sort_unstable();
+        moved.dedup();
+        for d in directives {
+            extras.push(Extra {
+                file: f,
+                side,
+                lines: t.lines(d),
+                pairs: moved.clone(),
+            });
+        }
+        // The statements that load a new file whose every pair is proven
+        // move with it.
+        if side == Side::Added {
+            let into_here: Vec<usize> = into
+                .iter()
+                .filter(|((_, to), _)| *to == f)
+                .flat_map(|(_, ps)| ps.clone())
+                .collect();
+            let proven = into_here.len() == moved.len()
+                && moved.iter().all(|&p| pairs[p].context.is_empty());
+            if proven {
+                let froms: Vec<usize> = into
+                    .keys()
+                    .filter(|(_, to)| *to == f)
+                    .map(|(from, _)| *from)
+                    .collect();
+                for from in froms {
+                    for (file, stmt) in loading.loaders(from, f) {
+                        let lines = tree(file, Side::Added).lines(stmt);
+                        extras.push(Extra {
+                            file,
+                            side: Side::Added,
+                            lines,
+                            pairs: moved.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    extras
 }
 
 impl Unit {
@@ -327,6 +993,9 @@ struct Pair {
     nodes: usize,
     /// What differs around the unit in its new place.
     context: Vec<Context>,
+    /// Moved into a new file loaded after the old one by other files, from
+    /// library code another package may load alone.
+    public_api: bool,
 }
 
 impl Pair {
@@ -427,6 +1096,7 @@ fn claim(
             candidates,
             nodes: nodes(from).min(nodes(to)),
             context,
+            public_api: false,
         });
     }
 }
@@ -500,11 +1170,7 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     let Some(parent) = tree.node(node).parent else {
         return Vec::new();
     };
-    let declared = declared_name(tree, node);
-    let reads = mentions(tree, node);
-    // A method body runs later; anything else runs where it stands, so a
-    // statement beside it may need it (or change it) by the time it runs.
-    let runs_now = tree.node(node).role != Role::Definition(NameKind::Method);
+    let needs = Needs::of(tree, node);
     let mut before = true;
     let mut out = Vec::new();
     for &sibling in &tree.node(parent).children {
@@ -515,19 +1181,48 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
         if tree.node(sibling).comment {
             continue;
         }
-        let theirs = declared_name(tree, sibling);
-        let depends = (runs_now && !inert(tree, sibling))
-            || declared.is_some_and(|d| {
-                theirs == Some(d) || mentions(tree, sibling).iter().any(|m| spells(m, d))
-            })
-            || theirs.is_some_and(|t| reads.contains(&t))
-            || macro_name(tree, sibling).is_some_and(|m| invokes(tree, node, m));
-        if depends {
+        if needs.by(tree, sibling) {
             out.push((tree.node(sibling).hash, before));
         }
     }
     out.sort_unstable();
     out
+}
+
+/// What a unit needs of the statements around it, to tell which depend on
+/// it ([`dependencies`]).
+struct Needs<'t> {
+    tree: &'t Tree,
+    node: NodeId,
+    declared: Option<&'t str>,
+    reads: Vec<&'t str>,
+    /// A method body runs later; anything else runs where it stands, so a
+    /// statement beside it may need it (or change it) by the time it runs.
+    runs_now: bool,
+}
+
+impl<'t> Needs<'t> {
+    fn of(tree: &'t Tree, node: NodeId) -> Self {
+        Needs {
+            tree,
+            node,
+            declared: declared_name(tree, node),
+            reads: mentions(tree, node),
+            runs_now: tree.node(node).role != Role::Definition(NameKind::Method),
+        }
+    }
+
+    /// Whether statement `other`, of `tree`, depends on the unit or it on
+    /// `other`.
+    fn by(&self, tree: &Tree, other: NodeId) -> bool {
+        let theirs = declared_name(tree, other);
+        (self.runs_now && !inert(tree, other))
+            || self.declared.is_some_and(|d| {
+                theirs == Some(d) || mentions(tree, other).iter().any(|m| spells(m, d))
+            })
+            || theirs.is_some_and(|t| self.reads.contains(&t))
+            || macro_name(tree, other).is_some_and(|m| invokes(self.tree, self.node, m))
+    }
 }
 
 /// A statement that runs no code another could depend on: a declaration
@@ -540,6 +1235,9 @@ fn inert(tree: &Tree, node: NodeId) -> bool {
         tree.descendants(node)
             .any(|d| matches!(tree.node(d).role, Role::Call(_) | Role::Hazard(_)))
     };
+    if n.flags.contains(Flags::DIRECTIVE) {
+        return true;
+    }
     match n.role {
         Role::Definition(NameKind::Constant) => !calls(),
         Role::Visibility(_) => n.children.iter().all(|&c| tree.node(c).comment),

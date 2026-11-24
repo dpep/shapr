@@ -1,4 +1,4 @@
 {
-  "description": "a Rust struct rename changes what `std::any::type_name` returns, which generic code anywhere (a dependency too) may read: logic",
-  "expect": {"hunks": {"$every": {"kind": "logic"}}, "summary": {"verdict": "behavior"}}
+  "description": "a private Rust struct rename in a binary with every reference updated is structure, though `std::any::type_name` reads the new name: reflection on a name is a documented limit",
+  "expect": {"hunks": {"$every": {"kind": "rename", "verdict": "structure"}}, "summary": {"verdict": "structure"}}
 }

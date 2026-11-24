@@ -20,7 +20,7 @@
 use super::site::Site;
 use crate::change::{Change, Trees};
 use crate::tree::{NameKind, NodeId, Role, Span, Tree};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::ops::RangeInclusive;
 
 /// Per file of the change, its alignment when both sides parsed cleanly.
@@ -107,7 +107,15 @@ impl File {
                 false => size,
             })
             .collect();
-        let matched = lcs(b.len(), a.len(), |i, j| kb[i] == ka[j], |i| weight[i]);
+        // Each key as a number, so the table compares integers.
+        let mut ids: HashMap<&Key, usize> = HashMap::new();
+        let mut id = |k| {
+            let next = ids.len();
+            *ids.entry(k).or_insert(next)
+        };
+        let ib: Vec<usize> = kb.iter().map(&mut id).collect();
+        let ia: Vec<usize> = ka.iter().map(&mut id).collect();
+        let matched = lcs(b.len(), a.len(), |i, j| ib[i] == ia[j], |i| weight[i]);
         let (mut in_b, mut in_a) = (vec![false; b.len()], vec![false; a.len()]);
         for &(i, j) in &matched {
             in_b[i] = true;
@@ -120,12 +128,30 @@ impl File {
                 self.declarations(trees, nb, na);
             }
         }
-        let left = |seen: &[bool], ids: &[NodeId], side: Side| -> Vec<(Side, NodeId)> {
-            let ids = ids.iter().zip(seen).filter(|(_, seen)| !**seen);
-            ids.map(|(&n, _)| (side, n)).collect()
-        };
-        self.unmatched.extend(left(&in_b, &b, Side::Removed));
-        self.unmatched.extend(left(&in_a, &a, Side::Added));
+        // A statement list left out (all of a new file's code) leaves out
+        // each of its statements.
+        let left =
+            |seen: &[bool], ids: &[NodeId], tree: &Tree, side: Side| -> Vec<(Side, NodeId)> {
+                let mut out = Vec::new();
+                let mut stack: Vec<NodeId> = ids
+                    .iter()
+                    .zip(seen)
+                    .filter(|(_, seen)| !**seen)
+                    .map(|(&n, _)| n)
+                    .rev()
+                    .collect();
+                while let Some(n) = stack.pop() {
+                    if transparent(tree, n) {
+                        let children: Vec<NodeId> = tree.code_children(n).collect();
+                        stack.extend(children.into_iter().rev());
+                    } else {
+                        out.push((side, n));
+                    }
+                }
+                out
+            };
+        self.unmatched.extend(left(&in_b, &b, tb, Side::Removed));
+        self.unmatched.extend(left(&in_a, &a, ta, Side::Added));
     }
 }
 
@@ -140,8 +166,8 @@ fn untouched(trees: &Trees, lines: RangeInclusive<usize>) -> bool {
 }
 
 /// How a child lines up with its counterpart on the other side.
-#[derive(PartialEq, Eq)]
-enum Key<'t> {
+#[derive(PartialEq, Eq, Hash)]
+pub(super) enum Key<'t> {
     /// A namespace, by its name: its body is aligned in turn.
     Namespace(u64),
     /// Any other declaration, by its name: aligned with a different hash,
@@ -152,7 +178,7 @@ enum Key<'t> {
     Code(u64),
 }
 
-fn key(tree: &Tree, id: NodeId) -> Key<'_> {
+pub(super) fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     let node = tree.node(id);
     if matches!(
         node.role,
@@ -231,24 +257,26 @@ pub(super) fn lcs(
     eq: impl Fn(usize, usize) -> bool,
     weight: impl Fn(usize) -> usize,
 ) -> Vec<(usize, usize)> {
-    let mut table = vec![vec![0usize; m + 1]; n + 1];
+    // One row-major (n + 1) x (m + 1) table.
+    let mut table = vec![0usize; (n + 1) * (m + 1)];
+    let at = |i: usize, j: usize| i * (m + 1) + j;
     for i in (0..n).rev() {
         for j in (0..m).rev() {
             let take = if eq(i, j) {
-                weight(i) + table[i + 1][j + 1]
+                weight(i) + table[at(i + 1, j + 1)]
             } else {
                 0
             };
-            table[i][j] = take.max(table[i + 1][j]).max(table[i][j + 1]);
+            table[at(i, j)] = take.max(table[at(i + 1, j)]).max(table[at(i, j + 1)]);
         }
     }
     let (mut i, mut j, mut out) = (0, 0, Vec::new());
     while i < n && j < m {
-        if eq(i, j) && table[i][j] == weight(i) + table[i + 1][j + 1] {
+        if eq(i, j) && table[at(i, j)] == weight(i) + table[at(i + 1, j + 1)] {
             out.push((i, j));
             i += 1;
             j += 1;
-        } else if table[i + 1][j] >= table[i][j + 1] {
+        } else if table[at(i + 1, j)] >= table[at(i, j + 1)] {
             i += 1;
         } else {
             j += 1;

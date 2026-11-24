@@ -229,13 +229,11 @@ fn renaming_a_method_that_calls_super_is_logic() {
 }
 
 #[test]
-fn a_class_rename_is_logic() {
-    // `Class#name`, `inspect` and Marshal read it at runtime.
+fn an_internal_class_rename_is_a_rename() {
     let before = "class Box\n  def self.build\n    Box.new\n  end\nend\n";
-    logic_because(
-        &ruby(before, &before.replace("Box", "Crate")),
-        "Box names a class or module",
-    );
+    let report = ruby(before, &before.replace("Box", "Crate"));
+    assert_eq!(kinds(&report), ["rename"]);
+    assert_eq!(report["summary"]["verdict"], "structure");
 }
 
 #[test]

@@ -1,0 +1,7 @@
+{
+  "description": "a method moved into a new file reopening its class, required right after the only require of the old file: structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "move", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

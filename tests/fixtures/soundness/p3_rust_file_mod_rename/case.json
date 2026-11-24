@@ -1,0 +1,4 @@
+{
+  "description": "a Rust `mod old;` renamed with its uses while its file keeps the old name: the declaration names a file, so logic",
+  "expect": {"hunks": {"$every": {"kind": "logic"}}, "summary": {"verdict": "behavior"}}
+}

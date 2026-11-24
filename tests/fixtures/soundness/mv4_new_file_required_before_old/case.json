@@ -1,0 +1,4 @@
+{
+  "description": "a method moved into a new file reopening its class, required before the old file: the new file creates the class without its superclass first",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}, "$some": {"parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": {"$some": "load_order"}}}}}}, "summary": {"verdict": "behavior"}}
+}
