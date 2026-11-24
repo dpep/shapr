@@ -449,8 +449,9 @@ Attributes are read as `git check-attr` sees them in the revision the
 change ends in (B of `A..B`, a GitHub change's head), or in the working
 tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file whose
 category counts toward the verdict (`code`, `test`, `config`, `manifest`)
-by its old path, or by either path under the attributes the change starts
-from where it edits a `.gitattributes`, keeps that category. So moving code
+by its old path, or by either path under the attributes of the revision
+the change starts from (whatever a path limit leaves out of the diff),
+keeps that category. So moving code
 into `vendor/`, marking a file `linguist-generated` in the change that
 edits it, or adding a file and marking it generated, vendored or
 documentation at once, leaves the edit `code`; an attribute takes a file out

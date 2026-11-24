@@ -603,6 +603,23 @@ fn a_merge_against_its_second_parent_starts_from_that_parent() {
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
+/// A path limit that leaves out the `.gitattributes` a change edits still
+/// reads each file's category under the attributes it started from.
+#[test]
+fn a_path_limit_keeps_the_before_attributes() {
+    let code = "class A\n  def total\n    1\n  end\nend\n";
+    let dir = repo(&[
+        &[("lib/a.rb", code)],
+        &[
+            (".gitattributes", "*.rb linguist-generated\n"),
+            ("lib/a.rb", &code.replace("1\n", "2\n")),
+        ],
+    ]);
+    let report = report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD", "--", "lib"]));
+    assert_eq!(hunks(&report)[0]["category"], "code", "{report:#}");
+    assert_eq!(report["summary"]["verdict"], "behavior");
+}
+
 #[test]
 fn a_root_commit_against_its_parents_diffs_against_the_working_tree() {
     let dir = repo(&[&[("a.rb", METHOD)], &[("b.rb", "x = 1\n")]]);

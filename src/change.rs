@@ -85,24 +85,22 @@ pub fn assemble(
 ) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
     let attributes = git.linguist(&paths, after);
-    // Each file's attributes before the change, for its category there:
-    // where the change edits a .gitattributes, as they were at its start, for
-    // both its paths (a file it adds included); unknown, as none.
-    let edits_attributes = diffs
-        .iter()
-        .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
-        .flatten()
-        .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
+    // Each file's attributes before the change, for its category there, for
+    // both its paths (a file it adds included): at the revision it starts
+    // from, whatever the diff lists (a path limit can leave out the
+    // .gitattributes it edits). On stdin, where it edits one, unknown, as none.
     let both: Vec<&str> = diffs
         .iter()
         .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
         .flatten()
         .collect();
-    let was = match edits_attributes {
-        true => before
-            .map(|rev| git.linguist(&both, Some(rev)))
-            .unwrap_or_default(),
-        false => git.linguist(&both, after),
+    let edits_attributes = both
+        .iter()
+        .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
+    let was = match (before, edits_attributes) {
+        (Some(rev), _) => git.linguist(&both, Some(rev)),
+        (None, true) => HashMap::new(),
+        (None, false) => git.linguist(&both, after),
     };
     let mut blobs = Blobs::new(git);
     let mut spent = 0;
