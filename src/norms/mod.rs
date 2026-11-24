@@ -177,7 +177,8 @@ pub fn pooled(rings: &[&Counts], pooling: f64, threshold: f64) -> Option<Norm> {
     if leaders.next().is_some() {
         return None;
     }
-    let confidence = round2(confidence);
+    // Smoothing keeps the share below 1; rounding mustn't claim it.
+    let confidence = round2(confidence).min(0.99);
     (confidence >= threshold).then(|| Norm {
         style: (*top).clone(),
         confidence,
@@ -300,6 +301,8 @@ mod tests {
         assert_eq!(norm(&[("a", 4), ("b", 1)]), None);
         assert_eq!(norm(&[("a", 0), ("b", 0)]), None);
         assert_eq!(norm(&[("a", 5), ("b", 5)]), None);
+        // Finite evidence never rounds up to certainty.
+        assert_eq!(norm(&[("a", 300), ("b", 0)]).unwrap().confidence, 0.99);
     }
 
     #[test]

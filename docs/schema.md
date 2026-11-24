@@ -835,7 +835,7 @@ Each norm:
 | `evidence` | array | Per scope, nearest first: `scope` and `counts` (per style, the scope's unchanged observations outside the nearer scopes). Every scope of the hunk's chain is listed, empty ones too, so an abstention shows what it had; when renorming, the one scope's whole after side. Schema change: replaces `surrounding`. |
 | `previous` | object or null | When renorming, per style, the scope's whole before side. |
 | `inferred` | string or null | The style the scope backs. |
-| `confidence` | number 0–1 or null | Its pooled share, as above. |
+| `confidence` | number 0–1 or null | Its pooled share, as above, to 2 decimals and at most 0.99: finite counts never make a norm certain. |
 | `configured` | string or null | The style `.rubocop.yml` sets; `null` when it sets none, disables the cop, or wouldn't check the hunk's new code (above). Reported beside `inferred` even when they differ. |
 | `expected` | string or null | `inferred`, else `configured`. |
 | `direction` | string | `aligned` (new code follows `expected`), `converging` (it does, and replaces code that didn't, or the scope renormed), `diverging` (some new code doesn't) or `abstain` (nothing expected). |
