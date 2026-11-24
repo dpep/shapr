@@ -1,0 +1,6 @@
+{
+  "description": "a vim modeline setting fileencoding on line 1 sets the source encoding Ruby reads, so changing it is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

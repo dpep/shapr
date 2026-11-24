@@ -1,0 +1,6 @@
+{
+  "description": "an Emacs mode line setting coding on the line after a shebang sets the source encoding, so changing it is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

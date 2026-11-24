@@ -1,0 +1,6 @@
+{
+  "description": "an encoding comment below the first line (no shebang) is read by no one: a comment",
+  "expect": {
+    "hunks": [{"kind": "comment_only"}]
+  }
+}

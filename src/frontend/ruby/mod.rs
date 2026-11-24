@@ -80,7 +80,11 @@ impl Frontend for Ruby {
             let at = span(&comment.location());
             // A shebang picks the interpreter and its flags.
             let shebang = at.start == 0 && comment.text().starts_with(b"#!");
-            if shebang || magic.iter().any(|m| at.contains(m)) || is_directive(comment.text()) {
+            let directive = shebang
+                || magic.iter().any(|m| at.contains(m))
+                || is_directive(comment.text())
+                || sets_encoding(&source, &at);
+            if directive {
                 builder.directive(at);
             } else {
                 builder.comment(at);
@@ -131,6 +135,35 @@ fn is_directive(text: &[u8]) -> bool {
     let body = String::from_utf8_lossy(text);
     let body = body.trim_start_matches('#').trim_start();
     DIRECTIVE_PREFIXES.iter().any(|p| body.starts_with(p))
+}
+
+/// A comment Ruby scans for a source encoding when it isn't a `key: value`
+/// magic comment (a vim modeline's `fileencoding=binary`): on line 1, or
+/// line 2 after a shebang, alone on its line, holding `coding` then `:` or
+/// `=` and a name. Mirrors `set_file_encoding` in Ruby's parse.y.
+fn sets_encoding(source: &[u8], at: &Span) -> bool {
+    let line = source[..at.start].iter().filter(|&&b| b == b'\n').count();
+    let line_start = source[..at.start]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    let top = line == 0 || (line == 1 && source.starts_with(b"#!"));
+    if !top
+        || !source[line_start..at.start]
+            .iter()
+            .all(u8::is_ascii_whitespace)
+    {
+        return false;
+    }
+    let text = source[at.clone()].to_ascii_lowercase();
+    let named = |rest: &[u8]| {
+        let rest = rest.trim_ascii_start();
+        rest.first()
+            .is_some_and(|&b| b == b'-' || b == b'_' || b.is_ascii_alphanumeric())
+    };
+    text.windows(7).enumerate().any(|(i, w)| {
+        w.starts_with(b"coding") && matches!(w[6], b':' | b'=') && named(&text[i + 7..])
+    })
 }
 
 fn span(loc: &Location<'_>) -> Span {
@@ -292,6 +325,24 @@ mod tests {
         assert_eq!(kinds(&tree, true), ["comment", "comment"]);
         assert!(tree.line(1).code && !tree.line(1).comment);
         assert!(tree.line(2).comment && !tree.line(2).code);
+    }
+
+    #[test]
+    fn an_encoding_comment_on_top_is_code() {
+        let code = |src: &str| {
+            parse(src)
+                .nodes
+                .iter()
+                .any(|n| n.kind == "directive" && !n.comment)
+        };
+        assert!(code("# vim: set fileencoding=binary :\nx = 1\n"));
+        assert!(code(
+            "#!/usr/bin/env ruby\n# vim:fenc=latin1 coding=latin1\nx = 1\n"
+        ));
+        assert!(!code("x = 1\n# vim: set fileencoding=binary :\n"));
+        assert!(!code("# a\n# vim: set fileencoding=binary :\n"));
+        assert!(!code("# vim: set ts=2 :\nx = 1\n"));
+        assert!(!code("# coding is fun\nx = 1\n"));
     }
 
     #[test]

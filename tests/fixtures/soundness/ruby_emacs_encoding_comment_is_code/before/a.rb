@@ -1,0 +1,3 @@
+#!/usr/bin/env ruby
+# -*- mode: ruby; coding: utf-8 -*-
+X = "\xff"
