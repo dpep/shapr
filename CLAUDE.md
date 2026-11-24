@@ -109,9 +109,9 @@ src/
     command.rs      `shapr norms FILE...`
     ruby/           prism walk for quoted strings and scopes; .rubocop.yml with inherit_from
 tests/              end to end against throwaway git repos: cli.rs (input, output,
-                    size measures), one file per detector, rust_lang.rs (Rust end to end), norms.rs (fixtures as data
-                    under tests/norms/<case>/), github.rs (offline:
-                    a canned API on 127.0.0.1 and a file:// remote)
+                    size measures), one file per detector, rust_lang.rs (Rust end to end), github.rs (offline:
+                    a canned API on 127.0.0.1 and a file:// remote); common/ the shared helpers
+  fixtures.rs       the runner for fixtures as data, tests/fixtures/<area>/<case>/ (docs/fixtures.md)
 ```
 
 ### The language seam
@@ -215,10 +215,20 @@ denied, and `script/test_corpus.py`. CI runs the same on ubuntu. Run it before e
 
 ## Testing
 
-- End-to-end tests build tiny git repos in a tempdir and assert the JSON.
-  Anything that runs git clears `GIT_DIR`, `GIT_WORK_TREE` and
+- A new end-to-end case is a fixture first: a directory under
+  `tests/fixtures/<area>/` with `case.json`, `before/` and `after/`
+  ([docs/fixtures.md](docs/fixtures.md), the format grokr's review loop
+  writes too). `SHAPR_FIXTURE=<name>` runs matching cases;
+  `SHAPR_BLESS=1 cargo test --test fixtures` records current output into
+  their `expect` for review, never in CI. Write Rust only for what data
+  can't say: flags and stdin, errors, GitHub input, `reason` text.
+- Rust end-to-end tests use `tests/common` (`mod common; use common::*;`):
+  temp repos, running shapr, reading hunks and parts. Anything that runs git
+  goes through `common::command`, which clears `GIT_DIR`, `GIT_WORK_TREE` and
   `GIT_INDEX_FILE`, so a run under `git rebase --exec` can't touch this repo.
-- Fixtures are synthetic Ruby or Rust, with generic names.
+- Hand-written fixtures are synthetic Ruby or Rust, with generic names;
+  harvested ones copy a minimal snippet of a public, permissively licensed
+  repository and say so in `source`.
 - Prefer a test over a one-off CLI probe; a behavior worth checking once is
   worth keeping.
 

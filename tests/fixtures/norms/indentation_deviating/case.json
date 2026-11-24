@@ -1,0 +1,28 @@
+{
+  "description": "a private method at the modifier's column, where the others sit a step deeper",
+  "norm": "Layout/IndentationConsistency",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "scope": "class",
+              "inferred": "indented_internal_methods",
+              "confidence": 0.8,
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 20,
+                  "column": 3,
+                  "style": "normal",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -20,3 +20,3 @@\n-  def d\n-    4\n-  end\n+    def d\n+      4\n+    end\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

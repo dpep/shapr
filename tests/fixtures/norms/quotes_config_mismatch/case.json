@@ -1,0 +1,23 @@
+{
+  "description": "the code's own norm wins over the config, and both are reported",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "scope": "method",
+              "inferred": "single_quotes",
+              "configured": "double_quotes",
+              "expected": "single_quotes",
+              "direction": "aligned",
+              "deviations": []
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

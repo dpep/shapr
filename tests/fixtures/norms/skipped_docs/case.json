@@ -1,0 +1,15 @@
+{
+  "description": "documentation is not held to norms",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "skipped": "docs",
+          "direction": "none",
+          "flagged": false,
+          "norms": []
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "description": "a new file is compared with the files beside it",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "scope": "directory",
+              "surrounding": {
+                "single_quotes": 4,
+                "double_quotes": 0
+              },
+              "inferred": "single_quotes",
+              "direction": "diverging"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

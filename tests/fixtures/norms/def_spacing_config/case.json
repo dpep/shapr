@@ -1,0 +1,27 @@
+{
+  "description": "one gap to judge and none to infer from: an enabled cop expects a blank line",
+  "norm": "Layout/EmptyLineBetweenDefs",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": null,
+              "configured": "empty_line",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 4,
+                  "column": 1,
+                  "style": "no_empty_line",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -4,1 +4,2 @@\n-def stop\n+\n+def stop\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

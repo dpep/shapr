@@ -1,0 +1,26 @@
+{
+  "description": "where .rubocop.yml and .editorconfig both set a norm, .rubocop.yml wins",
+  "norm": "Layout/IndentationWidth",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "configured": "4",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 6,
+                  "style": "2",
+                  "expected": "4",
+                  "edit": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

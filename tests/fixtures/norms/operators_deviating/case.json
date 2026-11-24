@@ -1,0 +1,27 @@
+{
+  "description": "an operator with no space where the method spaces them; aligned assignments with extra spaces still read as space",
+  "norm": "Layout/SpaceAroundOperators",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "scope": "method",
+              "inferred": "space",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 6,
+                  "column": 12,
+                  "style": "no_space",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -6,1 +6,1 @@\n-  remainder=a % b\n+  remainder = a % b\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

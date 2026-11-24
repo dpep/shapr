@@ -1,0 +1,27 @@
+{
+  "description": "too few names to infer from: the configured method name style is expected",
+  "norm": "Naming/MethodName",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": null,
+              "configured": "snake_case",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 5,
+                  "column": 5,
+                  "style": "camelCase",
+                  "edit": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

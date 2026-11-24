@@ -1,0 +1,26 @@
+{
+  "description": ".editorconfig's insert_final_newline expects a final line break",
+  "norm": "Layout/TrailingEmptyLines",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": null,
+              "configured": "final_newline",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 4,
+                  "style": "no_final_newline",
+                  "expected": "final_newline"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

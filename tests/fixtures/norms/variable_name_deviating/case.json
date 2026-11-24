@@ -1,0 +1,32 @@
+{
+  "description": "camelCase locals among snake_case ones: a rename when every mention is the local, none when a hash key reads it by name",
+  "norm": "Naming/VariableName",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "scope": "class",
+              "inferred": "snake_case",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 10,
+                  "column": 5,
+                  "style": "camelCase",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -10,3 +10,3 @@\n-    rowCount = rows.size\n-    userName = owner\n-    render(rowCount, userName:)\n+    row_count = rows.size\n+    userName = owner\n+    render(row_count, userName:)\n"
+                },
+                {
+                  "line": 11,
+                  "style": "camelCase",
+                  "edit": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

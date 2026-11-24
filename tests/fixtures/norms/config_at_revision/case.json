@@ -1,0 +1,20 @@
+{
+  "description": "linter config is read from the revision the range ends in, not the working tree",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": null,
+              "configured": "double_quotes",
+              "expected": "double_quotes",
+              "direction": "diverging"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

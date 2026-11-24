@@ -1,0 +1,13 @@
+{
+  "description": "editing a string's text keeps its quotes, choosing no style",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": []
+        }
+      }
+    ]
+  }
+}

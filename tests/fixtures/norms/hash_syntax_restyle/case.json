@@ -1,0 +1,30 @@
+{
+  "description": "respelling a label as a rocket against a label norm is a flagged restyle",
+  "norm": "Style/HashSyntax",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "flagged": true,
+          "norms": [
+            {
+              "scope": "method",
+              "inferred": "ruby19",
+              "direction": "diverging",
+              "restyle": true,
+              "flagged": true,
+              "deviations": [
+                {
+                  "line": 5,
+                  "column": 8,
+                  "style": "hash_rockets",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -5,1 +5,1 @@\n-    go(:e => 5)\n+    go(e: 5)\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

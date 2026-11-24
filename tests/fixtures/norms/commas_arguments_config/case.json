@@ -1,0 +1,27 @@
+{
+  "description": "with no norm inferred, the configured comma style is expected",
+  "norm": "Style/TrailingCommaInArguments",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": null,
+              "configured": "comma",
+              "expected": "comma",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 4,
+                  "style": "no_comma",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -4,1 +4,1 @@\n-    2\n+    2,\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

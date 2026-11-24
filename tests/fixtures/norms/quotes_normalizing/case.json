@@ -1,0 +1,32 @@
+{
+  "description": "a divergent method brought to the file's norm",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "before": {
+                "single_quotes": 0,
+                "double_quotes": 2
+              },
+              "after": {
+                "single_quotes": 2,
+                "double_quotes": 0
+              },
+              "scope": "class",
+              "inferred": "single_quotes",
+              "direction": "converging",
+              "convergence": "normalizing",
+              "restyle": true,
+              "flagged": false,
+              "deviations": []
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "generated files are not held to norms",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "skipped": "generated",
+          "direction": "none",
+          "norms": []
+        }
+      }
+    ]
+  }
+}

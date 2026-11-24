@@ -1,0 +1,26 @@
+{
+  "description": "deleting the blank line between two unchanged methods diverges; the gap spans both lines, and with no line added there is no edit",
+  "norm": "Layout/EmptyLineBetweenDefs",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "scope": "class",
+              "inferred": "empty_line",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 13,
+                  "style": "no_empty_line",
+                  "edit": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
