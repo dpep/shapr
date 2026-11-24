@@ -389,10 +389,7 @@ impl<'c> Loading<'c> {
                     Search::Done { found, .. } => found
                         .iter()
                         .filter(|f| !covered.contains(f.as_str()))
-                        .any(|f| match (frontend::for_path(f), self.outside.read(f)) {
-                            (Some(fe), Some(source)) => computed(&fe.parse(source), f),
-                            _ => true,
-                        }),
+                        .any(|f| self.outside.parse(f).is_none_or(|tree| computed(&tree, f))),
                     _ => true,
                 });
         self.hazard = Some(hazard);
@@ -432,7 +429,7 @@ impl<'c> Loading<'c> {
             } if mentioned.is_empty() => {
                 for name in found.iter().filter(|f| !covered.contains(f.as_str())) {
                     let fe = frontend::for_path(name)?;
-                    let tree = fe.parse(self.outside.read(name)?);
+                    let tree = self.outside.parse(name)?;
                     if !tree.errors.is_empty() {
                         return None;
                     }
