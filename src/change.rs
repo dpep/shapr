@@ -63,18 +63,23 @@ pub fn assemble(
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
     let attributes = git.linguist(&paths, after);
     // Each file's attributes before the change, for its category there:
-    // where the change edits a .gitattributes, as they were at its start.
+    // where the change edits a .gitattributes, as they were at its start, for
+    // both its paths (a file it adds included); unknown, as none.
     let edits_attributes = diffs
         .iter()
         .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
         .flatten()
         .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
-    let old: Vec<&str> = diffs.iter().filter_map(|d| d.old_path.as_deref()).collect();
+    let both: Vec<&str> = diffs
+        .iter()
+        .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
+        .flatten()
+        .collect();
     let was = match edits_attributes {
         true => before
-            .map(|rev| git.linguist(&old, Some(rev)))
+            .map(|rev| git.linguist(&both, Some(rev)))
             .unwrap_or_default(),
-        false => git.linguist(&old, after),
+        false => git.linguist(&both, after),
     };
     let mut blobs = Blobs::new(git);
     let mut files = diffs
@@ -110,15 +115,26 @@ fn file_change(
     attributes: &HashMap<String, Linguist>,
     was: &HashMap<String, Linguist>,
 ) -> FileChange {
+    // git calls a text file binary under an attribute (`-diff`, `binary`);
+    // a range is diffed again as text, a diff on stdin can't be.
+    let attributed = diff.binary && !crate::git::holds_binary(blobs, &diff);
+    let binary = diff.binary && !attributed;
     let category = |path: &str, attributes: &HashMap<String, Linguist>| {
         let linguist = attributes.get(path).copied().unwrap_or_default();
-        Category::of(path, diff.binary, linguist)
+        Category::of(path, binary, linguist)
     };
     // A change can't hide its own edit: a file that counts toward the verdict
-    // on either side (moved into `vendor/`, marked generated) counts.
+    // on either side (moved into `vendor/`, marked generated) counts, and
+    // so does one the attributes before the change would count (added and
+    // marked generated at once).
     let after = category(diff.path(), attributes);
-    let category = match diff.old_path.as_deref().map(|old| category(old, was)) {
-        Some(before) if before.counted() && !after.counted() => before,
+    let before = [diff.old_path.as_deref(), diff.new_path.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(|path| category(path, was))
+        .find(|c| c.counted());
+    let category = match before {
+        Some(before) if !after.counted() => before,
         _ => after,
     };
     let before = read(blobs, diff.old_blob.as_deref(), diff.old_path.as_deref());
@@ -133,7 +149,9 @@ fn file_change(
             .map(|h| only_whitespace(h, before, &after))
             .collect();
     }
-    let trees = if diff.binary {
+    let trees = if attributed {
+        Err("git diffed it as binary for an attribute (`-diff`, `binary`): give the range, or pipe `git diff --text`".to_string())
+    } else if diff.binary {
         Err("binary file".to_string())
     } else if category == Category::Fixture {
         Err("test data, not classified".to_string())

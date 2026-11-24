@@ -1,0 +1,3 @@
+lib/gen.rb linguist-generated
+lib/third.rb linguist-vendored
+lib/guide.rb linguist-documentation

@@ -95,6 +95,49 @@ impl Git {
         {
             bail!("{}", merge(rev));
         }
+        let text = self.run_diff(range, cached, paths, false)?;
+        // An attribute (`-diff`, `binary`) makes git call a text file binary,
+        // which would take it out of the verdict: diff those again as text.
+        let mut blobs = Blobs::new(self);
+        let attributed: Vec<FileDiff> = crate::diff::parse(&text)
+            .into_iter()
+            .filter(|f| f.binary && !holds_binary(&mut blobs, f))
+            .collect();
+        if attributed.is_empty() {
+            return Ok(text);
+        }
+        let literal: Vec<String> = attributed
+            .iter()
+            .flat_map(|f| [f.old_path.as_deref(), f.new_path.as_deref()])
+            .flatten()
+            .map(|p| format!(":(top,literal){p}"))
+            .collect();
+        let again = self.run_diff(range, cached, &literal, true)?;
+        let again: Vec<(FileDiff, &str)> = file_sections(&again)
+            .into_iter()
+            .filter_map(|s| Some((crate::diff::parse(s).pop()?, s)))
+            .collect();
+        let same =
+            |a: &FileDiff, b: &FileDiff| a.old_path == b.old_path && a.new_path == b.new_path;
+        Ok(file_sections(&text)
+            .into_iter()
+            .map(|section| {
+                let Some(file) = crate::diff::parse(section).pop() else {
+                    return section;
+                };
+                match again
+                    .iter()
+                    .find(|(f, _)| attributed.iter().any(|a| same(a, &file)) && same(f, &file))
+                {
+                    Some((_, text)) => text,
+                    None => section,
+                }
+            })
+            .collect())
+    }
+
+    /// `git diff` in shapr's fixed format; TEXT diffs every file as text.
+    fn run_diff(&self, range: &str, cached: bool, paths: &[String], text: bool) -> Result<String> {
         let out = run(self
             .command()
             .args([
@@ -108,6 +151,7 @@ impl Git {
                 "-U3",
             ])
             .args(cached.then_some("--cached"))
+            .args(text.then_some("--text"))
             .args([END_OF_OPTIONS, range, "--"])
             .args(paths))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
@@ -836,6 +880,38 @@ pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
 /// Why merge commit REV isn't diffed against all its parents, and what to run instead.
 pub fn merge(rev: &str) -> String {
     format!("{rev} is a merge: diff it against one parent, {rev}^1..{rev} or {rev}^2..{rev}")
+}
+
+/// TEXT split before each file's `diff --git` line. No content line starts
+/// so: each carries a `+`, `-` or space first.
+fn file_sections(text: &str) -> Vec<&str> {
+    let mut starts: Vec<usize> = text
+        .match_indices("\ndiff --git ")
+        .map(|(at, _)| at + 1)
+        .collect();
+    starts.insert(0, 0);
+    starts
+        .iter()
+        .zip(starts.iter().skip(1).chain([&text.len()]))
+        .map(|(&from, &to)| &text[from..to])
+        .collect()
+}
+
+/// Whether CONTENT is binary as git reads content: a NUL in its first 8000
+/// bytes. Attributes aside.
+pub fn binary_content(content: &[u8]) -> bool {
+    content[..content.len().min(8000)].contains(&0)
+}
+
+/// Whether a file git diffed as binary holds binary content on either side;
+/// a side shapr can't read counts as binary, as git said.
+pub fn holds_binary(blobs: &mut Blobs, file: &FileDiff) -> bool {
+    let side = |blobs: &mut Blobs, id: &Option<String>, path: &Option<String>| match (id, path) {
+        (_, None) => false,
+        (Some(id), Some(path)) => blobs.read(id, path).is_none_or(|c| binary_content(&c)),
+        (None, Some(_)) => true,
+    };
+    side(blobs, &file.old_blob, &file.old_path) || side(blobs, &file.new_blob, &file.new_path)
 }
 
 /// Ends git's options before a revision that comes from the command line or

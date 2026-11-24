@@ -1,0 +1,7 @@
+{
+  "description": "a change that marks Ruby files -diff while editing one still shows the edit as code: git's binary verdict from an attribute isn't content",
+  "expect": {
+    "hunks": {"$some": {"file": "lib/a.rb", "category": "code", "verdict": "behavior"}},
+    "summary": {"verdict": "behavior"}
+  }
+}

@@ -1350,3 +1350,37 @@ fn hunk_lines(text: &str) -> std::str::Lines<'_> {
         .map_or("", |(_, hunks)| hunks)
         .lines()
 }
+
+#[test]
+fn a_diff_on_stdin_that_git_called_binary_for_an_attribute_is_code() {
+    let dir = repo(&[
+        &[("lib/a.rb", "def f\n  1\nend\n"), ("logo.png", "\0PNG1")],
+        &[
+            (".gitattributes", "*.rb -diff\n"),
+            ("lib/a.rb", "def f\n  2\nend\n"),
+            ("logo.png", "\0PNG2"),
+        ],
+    ]);
+    let diff = git(dir.path(), &["diff", "HEAD~1..HEAD"]);
+    assert!(diff.contains("Binary files a/lib/a.rb"), "{diff}");
+    let report = report(&shapr_stdin(dir.path(), &["-j"], &diff));
+    let mut got = categories(&report);
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            (".gitattributes", "unknown"),
+            ("lib/a.rb", "code"),
+            ("logo.png", "binary")
+        ]
+    );
+    let hunk = hunks(&report)
+        .iter()
+        .find(|h| h["file"] == "lib/a.rb")
+        .unwrap();
+    assert_eq!(hunk["verdict"], "unknown");
+    assert!(
+        lead(hunk)["reason"].as_str().unwrap().contains("--text"),
+        "{hunk:#}"
+    );
+}

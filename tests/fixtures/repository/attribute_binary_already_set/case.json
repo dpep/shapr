@@ -1,0 +1,7 @@
+{
+  "description": "a Ruby file under a binary attribute is still text, so its edit is code",
+  "expect": {
+    "hunks": [{"file": "lib/a.rb", "category": "code", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

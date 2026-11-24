@@ -411,7 +411,7 @@ still parsed and classified. The first rule that matches wins:
 
 | category | rule |
 |---|---|
-| `binary` | git reports the file as binary. |
+| `binary` | Its content is binary as git reads content: a NUL byte in the first 8000 bytes. An attribute that makes git diff a text file as binary (`-diff`, `binary`) doesn't: shapr diffs such a file again with `--text`; a diff on stdin can't be, so the file keeps its category by name, and its hunk is `unknown` with a reason saying to pipe `git diff --text`. |
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
 | `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
 | `fixture` | Under a `fixtures`, `__fixtures__` or `testdata` directory, at any depth, unless it is binary, vendored, or `.gitattributes` marks it `linguist-generated` or `linguist-documentation`. It wins over the name rules below and over `generated` by name: `spec/fixtures/Gemfile.lock` and `tests/fixtures/a.rb` are fixtures. Test data: not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; the tests that read it judge it. |
@@ -426,12 +426,18 @@ A linguist attribute wins over the name either way: `-linguist-generated`
 (or `=false`) unmarks a lockfile, and `-linguist-documentation` a `README`.
 Attributes are read as `git check-attr` sees them in the revision the
 change ends in (B of `A..B`, a GitHub change's head), or in the working
-tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file it doesn't add whose
-category counts toward the verdict on its before side (`code`, `test`,
-`config`, `manifest`; its old path, under the attributes the change starts
-from where it edits a `.gitattributes`) keeps that category, so moving code
-into `vendor/`, or marking a file `linguist-generated` in the change that
-edits it, leaves the edit `code`.
+tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file whose
+category counts toward the verdict (`code`, `test`, `config`, `manifest`)
+by its old path, or by either path under the attributes the change starts
+from where it edits a `.gitattributes`, keeps that category. So moving code
+into `vendor/`, marking a file `linguist-generated` in the change that
+edits it, or adding a file and marking it generated, vendored or
+documentation at once, leaves the edit `code`; an attribute takes a file out
+of the verdict only when the change's before side already said so (a diff
+on stdin has no before side, so there it never does when the diff edits a
+`.gitattributes`). The path rules are not guarded this way: a file a
+change adds under `vendor/` or `fixtures/` is `vendored` or `fixture` by its
+name, outside the verdict, and `summary.categories` counts it.
 
 Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).

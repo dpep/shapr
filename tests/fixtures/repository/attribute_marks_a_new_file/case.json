@@ -1,0 +1,13 @@
+{
+  "description": "a change that adds files and marks them generated, vendored or documentation in the same change can't take them out of the verdict",
+  "expect": {
+    "hunks": {"$every": {"category": {"$not": "generated"}}},
+    "files": [
+      {"file": ".gitattributes"},
+      {"file": "lib/gen.rb", "category": "code"},
+      {"file": "lib/guide.rb", "category": "code"},
+      {"file": "lib/third.rb", "category": "code"}
+    ],
+    "summary": {"verdict": "behavior"}
+  }
+}
