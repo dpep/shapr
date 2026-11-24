@@ -80,12 +80,18 @@ impl Git {
                 .env_remove("GIT_WORK_TREE")
                 .env_remove("GIT_INDEX_FILE")
                 .env("GIT_TERMINAL_PROMPT", "0");
-        } else if let Some(dir) = &self.dir {
-            // `-C` names the repository; an inherited GIT_DIR would override it.
-            cmd.current_dir(dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE");
+        } else {
+            // A fetch runs what the repository's config names (`uploadpack`,
+            // `core.sshCommand`, a credential helper): never into a
+            // repository shapr didn't clone.
+            cmd.env("GIT_NO_LAZY_FETCH", "1");
+            if let Some(dir) = &self.dir {
+                // `-C` names the repository; an inherited GIT_DIR would override it.
+                cmd.current_dir(dir)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .env_remove("GIT_INDEX_FILE");
+            }
         }
         cmd
     }
@@ -335,6 +341,9 @@ impl Git {
     /// ERROR, and in a shallow clone the history it may lack: a revision
     /// past the boundary doesn't resolve.
     fn shallow_hint(&self, error: anyhow::Error) -> anyhow::Error {
+        if self.bare.is_none() && self.partial() {
+            return anyhow::anyhow!("{:#}; {PARTIAL}", error);
+        }
         if self.boundary().is_empty() {
             return error;
         }
@@ -650,6 +659,9 @@ impl Git {
         let Some(remote) = self.promisor() else {
             return Ok(());
         };
+        if self.bare.is_none() {
+            bail!("{PARTIAL}");
+        }
         let mut input = ids.join("\n").into_bytes();
         input.push(b'\n');
         let mut check = self.command();
@@ -953,6 +965,9 @@ pub fn command() -> Command {
 /// Why a range past a shallow clone's history isn't diffed, and the fix.
 pub const SHALLOW: &str =
     "shallow clone: the base commit isn't fetched (set fetch-depth: 0, or git fetch --unshallow)";
+
+/// Why a partial clone's missing objects stay missing, and the fix.
+pub const PARTIAL: &str = "a partial clone: shapr fetches nothing into a repository it didn't clone (check out without a filter, or fetch the blobs first)";
 
 /// Why a merge's combined diff isn't read, and what to run instead.
 pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";

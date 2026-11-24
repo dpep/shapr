@@ -326,6 +326,42 @@ fn text_output_quotes_control_characters_in_names() {
     assert!(text.lines().all(|l| !l.starts_with("::")), "{text}");
 }
 
+/// A partial clone fetches missing blobs from its remote, running the
+/// `uploadpack` its config names: shapr never fetches into a repository it
+/// didn't clone, so the diff fails, saying why.
+#[test]
+fn a_partial_clone_fetches_nothing() {
+    let upstream = repo(&[
+        &[("a.rb", METHOD)],
+        &[("a.rb", "def greet(other)\n  other\nend\n")],
+    ]);
+    git(
+        upstream.path(),
+        &["config", "uploadpack.allowFilter", "true"],
+    );
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", upstream.path().display());
+    git(
+        clone.path(),
+        &[
+            "clone",
+            "-q",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            ".",
+        ],
+    );
+    let marker = clone.path().join(".git/ran");
+    let pack = format!("touch '{}'; git-upload-pack", marker.display());
+    git(clone.path(), &["config", "remote.origin.uploadpack", &pack]);
+    let out = shapr(clone.path(), &["-J", "HEAD"]);
+    assert!(!marker.exists(), "ran the repository's uploadpack");
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let message = report(&out)["error"].as_str().unwrap().to_string();
+    assert!(message.contains("partial clone"), "{message}");
+}
+
 /// A clone of a three-commit repository, DEPTH commits deep.
 fn shallow(depth: &str) -> (tempfile::TempDir, tempfile::TempDir) {
     let upstream = repo(&[
