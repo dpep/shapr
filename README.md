@@ -70,7 +70,7 @@ shapr --completions zsh      # a completion script
 | shapr | same as | `meta.input` |
 |---|---|---|
 | `shapr REV` | `git show REV`: the commit against its first parent | `commit` |
-| `shapr A..B`, `shapr A B` | `git diff A..B` | `range` |
+| `shapr A..B`, `shapr A B` | `git diff A B`: compare two commits, from A's tree to B's, so A's own changes aren't in it (`shapr A^ B` includes them) | `range` |
 | `shapr A...B`, `shapr main...` | `git diff A...B`: from the merge base | `range` |
 | `shapr --merge-base REF [REV]` | `git diff --merge-base REF [REV]`: without REV, the merge base of REF and HEAD against the working tree | `merge_base_worktree`, `merge_base_range` |
 | `shapr PATH...`, `shapr .` | `git diff HEAD -- PATH...`: uncommitted changes | `worktree` |
@@ -90,8 +90,35 @@ Text output, for a commit that reformats one method's signature and changes anot
 
 ```
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
-lib/greeter.rb:15  logic             1.00  code differs beyond whitespace and comments
+lib/greeter.rb:11  logic             1.00  code differs beyond whitespace and comments [literal_only]
+                   style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
+claims: refactor in 1 of 1 message
+unproven: claims refactor; 1 hunk not shown structural
 commit 1a2b3c4: mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
+```
+
+Each line is a part: its place, kind, confidence and reason, with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
+
+`shapr norms` text output, for a directory where one method breaks the quote style:
+
+```
+norms over 5 files in lib
+  Style/StringLiterals                 single_quotes 93% (14/15)
+  Layout/TrailingWhitespace            no_trailing_whitespace 100% (31/31)
+  Layout/IndentationWidth              2 100% (8/8)
+hotspots (deviations per 100 lines; norms broken)
+  files
+    lib/greeter.rb  7.7 (1 in 13 lines; Style/StringLiterals)
+  methods
+    lib/greeter.rb:10 Greeter#bye  33.3 (1 in 3 lines; Style/StringLiterals)
+plan (apply in order; diffs under -j)
+  1. tier 2 lexical  Style/StringLiterals -> single_quotes: 1 fix on 1 line in 1 file (93% -> 100%), a restyle change
+```
+
+The plan's diffs are at `.steps[].edits[].diff` under `-j`, ready for `git apply`:
+
+```sh
+shapr norms -j lib | jq -r '.steps[].edits[].diff' | git apply
 ```
 
 Hunks in files shapr can't parse are `logic` with confidence 0; in a file of unknown category they are outside the verdict (`unknown`).
