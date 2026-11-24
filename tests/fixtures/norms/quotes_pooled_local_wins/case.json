@@ -1,0 +1,51 @@
+{
+  "description": "a method's own ten double-quoted strings outweigh its class's weak single-quote majority",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "confidence": 0.83,
+              "direction": "aligned",
+              "evidence": [
+                {
+                  "counts": {
+                    "double_quotes": 10,
+                    "single_quotes": 0
+                  },
+                  "scope": "method"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 4,
+                    "single_quotes": 6
+                  },
+                  "scope": "class"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "file"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "directory"
+                }
+              ],
+              "inferred": "double_quotes",
+              "norm": "Style/StringLiterals",
+              "scope": "method"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

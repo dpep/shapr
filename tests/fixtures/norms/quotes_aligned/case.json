@@ -17,10 +17,36 @@
                 "double_quotes": 0
               },
               "scope": "method",
-              "surrounding": {
-                "single_quotes": 3,
-                "double_quotes": 0
-              },
+              "evidence": [
+                {
+                  "scope": "method",
+                  "counts": {
+                    "single_quotes": 3,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "class",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                }
+              ],
               "inferred": "single_quotes",
               "confidence": 0.8,
               "configured": null,

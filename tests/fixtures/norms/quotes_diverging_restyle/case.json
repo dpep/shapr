@@ -17,10 +17,36 @@
                 "double_quotes": 2
               },
               "scope": "class",
-              "surrounding": {
-                "single_quotes": 4,
-                "double_quotes": 0
-              },
+              "evidence": [
+                {
+                  "scope": "method",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "class",
+                  "counts": {
+                    "single_quotes": 4,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                }
+              ],
               "inferred": "single_quotes",
               "direction": "diverging",
               "convergence": null,

@@ -1,0 +1,37 @@
+{
+  "description": "a new file whose directory holds no strings has no evidence anywhere: abstain",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "direction": "abstain",
+              "evidence": [
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "file"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "directory"
+                }
+              ],
+              "expected": null,
+              "inferred": null,
+              "norm": "Style/StringLiterals",
+              "scope": null
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

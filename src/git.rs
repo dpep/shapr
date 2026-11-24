@@ -409,6 +409,16 @@ impl Git {
         run_with_input(&mut fetch, &input).map(drop)
     }
 
+    /// The object ids NAMES (`rev:path`) resolve to, from trees alone, so a
+    /// partial clone needn't hold the blobs.
+    pub fn object_ids(&self, names: &[&str]) -> Result<Vec<String>> {
+        let out = run(self.command().arg("rev-parse").args(names))?;
+        Ok(String::from_utf8_lossy(&out)
+            .lines()
+            .map(str::to_string)
+            .collect())
+    }
+
     /// The contents of the blobs IDS, in order, in one request; `None` for
     /// one this repository lacks. Never fetches.
     pub fn blobs(&self, ids: &[&str]) -> Result<Vec<Option<Vec<u8>>>> {

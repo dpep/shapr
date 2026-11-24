@@ -104,21 +104,62 @@ pub struct Norm {
     pub confidence: f64,
 }
 
+/// Observations a nearer scope lends weight to its own, at most: how far a
+/// scope's few observations defer to the code around it.
+pub const POOLING: f64 = 4.0;
+
+/// What one scope adds: its unchanged observations outside any nearer scope.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Evidence {
+    pub scope: ScopeKind,
+    pub counts: Counts,
+}
+
 /// The norm `counts` back: the top style's share by the rule of succession,
 /// `(top + 1) / (total + styles)`, when it reaches `threshold`. Smoothing
 /// keeps a handful of observations from passing for a norm.
 pub fn infer(counts: &Counts, threshold: f64) -> Option<Norm> {
-    let top = counts.values().copied().max().filter(|&n| n > 0)?;
-    let mut leaders = counts.iter().filter(|(_, n)| **n == top);
-    let (style, _) = leaders.next()?;
+    pooled(&[counts], POOLING, threshold)
+}
+
+/// The norm `rings` back together, nearest first: each scope's share of a
+/// style is shrunk toward the share of the scopes around it, which count as
+/// `pooling` observations (never more than they hold), so a scope with few
+/// observations follows its surroundings and one with many speaks for itself.
+/// The outermost scope with any observations starts from the rule of
+/// succession, so a lone scope reads exactly as `infer`.
+pub fn pooled(rings: &[&Counts], pooling: f64, threshold: f64) -> Option<Norm> {
+    let styles: Vec<&String> = rings
+        .iter()
+        .flat_map(|c| c.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let kinds = styles.len().max(2) as f64;
+    let mut share: Vec<f64> = vec![1.0 / kinds; styles.len()];
+    let mut weight: Option<f64> = None;
+    for counts in rings.iter().rev() {
+        let total: usize = counts.values().sum();
+        if total == 0 {
+            continue;
+        }
+        let prior = weight.map_or(kinds, |w| w.min(pooling));
+        for (s, style) in share.iter_mut().zip(&styles) {
+            let k = counts.get(*style).copied().unwrap_or_default() as f64;
+            *s = (k + prior * *s) / (total as f64 + prior);
+        }
+        weight = Some(total as f64 + prior);
+    }
+    weight?;
+    let best = share.iter().copied().fold(f64::MIN, f64::max);
+    let mut leaders = styles.iter().zip(&share).filter(|(_, s)| **s == best);
+    let (top, &confidence) = leaders.next()?;
     if leaders.next().is_some() {
         return None;
     }
-    let total: usize = counts.values().sum();
-    let styles = counts.len().max(2);
-    let confidence = round2((top + 1) as f64 / (total + styles) as f64);
+    let confidence = round2(confidence);
     (confidence >= threshold).then(|| Norm {
-        style: style.clone(),
+        style: (*top).clone(),
         confidence,
     })
 }
@@ -225,6 +266,42 @@ mod tests {
         assert_eq!(norm(&[("a", 4), ("b", 1)]), None);
         assert_eq!(norm(&[("a", 0), ("b", 0)]), None);
         assert_eq!(norm(&[("a", 5), ("b", 5)]), None);
+    }
+
+    #[test]
+    fn pooling_shrinks_a_scope_toward_its_surroundings() {
+        let norm = |rings: &[&[(&str, usize)]]| {
+            let rings: Vec<Counts> = rings.iter().map(|r| counts(r)).collect();
+            let rings: Vec<&Counts> = rings.iter().collect();
+            pooled(&rings, POOLING, DEFAULT_THRESHOLD).map(|n| (n.style, n.confidence))
+        };
+        let (a3, b0, none) = (
+            &[("a", 3), ("b", 0)][..],
+            &[("a", 0), ("b", 0)][..],
+            &[][..],
+        );
+        // A lone scope is the rule of succession, wherever it sits.
+        assert_eq!(norm(&[a3]), Some(("a".into(), 0.8)));
+        assert_eq!(norm(&[b0, b0, a3]), norm(&[a3]));
+        assert_eq!(norm(&[b0, none]), None);
+        // Few observations follow strong surroundings; many speak for themselves.
+        assert_eq!(
+            norm(&[
+                &[("a", 0), ("b", 1)],
+                &[("a", 1), ("b", 0)],
+                &[("a", 12), ("b", 0)]
+            ]),
+            None
+        );
+        assert_eq!(
+            norm(&[b0, &[("a", 1), ("b", 0)], &[("a", 12), ("b", 0)]]),
+            Some(("a".into(), 0.94))
+        );
+        assert_eq!(norm(&[&[("a", 0), ("b", 3)], &[("a", 20), ("b", 0)]]), None);
+        assert_eq!(
+            norm(&[&[("a", 0), ("b", 10)], &[("a", 6), ("b", 4)]]),
+            Some(("b".into(), 0.83))
+        );
     }
 
     #[test]

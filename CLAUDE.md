@@ -105,8 +105,8 @@ src/
                     conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
   norms/            style norms, self-contained: `style` on each hunk and `shapr norms FILE`
-    mod.rs          Observation, inference (rule of succession vs --norm-threshold), the skip
-                    rule, the Language trait
+    mod.rs          Observation, inference (scopes pooled from the rule of succession, vs
+                    --norm-threshold), the skip rule, the Language trait
     align.rs        a hunk against its surrounding norm (method, class, file, directory):
                     direction, convergence, restyle, deviations
     edit.rs         a deviation's fix as a unified diff

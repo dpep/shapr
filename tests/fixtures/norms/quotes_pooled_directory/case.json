@@ -1,0 +1,51 @@
+{
+  "description": "a method with no strings, in a file with one, follows the files beside it: the directory's evidence backs the file's",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "confidence": 0.94,
+              "direction": "diverging",
+              "evidence": [
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "method"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 1
+                  },
+                  "scope": "class"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "file"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 12
+                  },
+                  "scope": "directory"
+                }
+              ],
+              "inferred": "single_quotes",
+              "norm": "Style/StringLiterals",
+              "scope": "class"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -692,20 +692,30 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 | `Style/HashSyntax` | `ruby19`, `hash_rockets` | each pair of a hash or keyword arguments whose key is a symbol: `a: 1` or `:a => 1` where the symbol can be a label, a quoted label `"a-b": 1` as `ruby19`. As in RuboCop's `ruby19`, a rocket counts only when every key in its hash can be a label; a hash with an omitted value (`{a:}`) chooses nothing. `ruby19_no_mixed_keys` reads as `ruby19` |
 | `Layout/IndentationConsistency` | `normal`, `indented_internal_methods` | each method defined after a bare `private` or `protected` in a class or module body: at the modifier's column, or deeper. As in RuboCop, the method is measured from its modifier, outdented or not; `public` ends the section |
 | `Layout/TrailingWhitespace` | `no_trailing_whitespace`, `trailing_whitespace` | each non-empty line up to `__END__`, but not a line whose break is inside a string, heredoc, regexp or quoted symbol, where whitespace is data. `.rubocop.yml` configures it by enabling the cop; `.editorconfig` by `trim_trailing_whitespace = true` |
-| `Layout/TrailingEmptyLines` | `final_newline`, `final_blank_line`, `no_final_newline` | how each non-empty file ends: one line break, more, or none; one observation per file, so a file's own code never backs a norm and a new file's directory or the configured style does. `.editorconfig`'s `insert_final_newline` sets `final_newline` (`true`) or `no_final_newline` (`false`) |
+| `Layout/TrailingEmptyLines` | `final_newline`, `final_blank_line`, `no_final_newline` | how each non-empty file ends: one line break, more, or none; one observation per file, so a file's own code never backs a norm and its directory or the configured style does. `.editorconfig`'s `insert_final_newline` sets `final_newline` (`true`) or `no_final_newline` (`false`) |
 | `Layout/IndentationWidth` | the width in spaces: `2`, `4`, ... | each body's first statement, when it starts its own line, against what opens the body: a `def`, `class`, `module` or block from the start of its line; `if`, `unless`, `while`, `until`, `case`/`when`, `else`, `begin`, `rescue` and `ensure` from their keyword when it starts its line (so `x = if` chooses nothing). Tab-indented lines choose nothing. No suggested edit: reindenting a body reaches past the line. RuboCop's `Width`, or `.editorconfig`'s `indent_size` (`tab_width` for `tab`) unless `indent_style = tab`, configures it |
 | `Naming/MethodName` | `snake_case`, `camelCase` | each `def` whose name has two or more words, ignoring a leading `_` and a trailing `?`, `!` or `=`: lowercase words joined by `_`, or a lowercase start with capitals and no `_`. A one-word name chooses nothing. A rename is suggested only for a private instance method (in a `private` section, or `private def`) whose every mention in the file is its `def` or a call with no receiver or `self`, and whose new name the file doesn't already use; any other method is interface, reported with no edit |
 | `Naming/VariableName` | `snake_case`, `camelCase` | each local of two or more words, once per scope that declares it (program, class or module body, method, block), at its first mention; a keyword parameter is interface and chooses nothing. A rename covers the scope and is suggested when every mention of the name there is that local (not a method call, symbol, string, comment or `{name:}` key), the new name is unused there, and nothing in the scope reads locals by name (`binding`, `eval`, `local_variables`) |
 | `Layout/SpaceAroundOperators` | `space`, `no_space` | each binary operator call (`+`, `==`, `<<`, ...), `&&`, `\|\|`, and assignment (`=`, `+=`, `\|\|=`, attribute and index writes): whitespace of any width, line breaks included, on both sides is `space`, so aligned operators read as `space`; anything less is `no_space`. `**`, unary operators, `and`/`or` and default parameters (`a=1`) aren't observed. Only the edit to `space` is suggested: removing whitespace can change a parse (`a <<b`). `.rubocop.yml` configures it by enabling the cop |
 | `Layout/EmptyLineBetweenDefs` | `empty_line`, `no_empty_line` | the gap between two adjacent `def`s in a body: a blank line in it, or only comments or nothing. The observation spans the first's last line to the second's first, so a line added on either side, or a deletion in the gap, judges it; a one-line def (RuboCop allows two adjacent; here one beside a longer def chooses nothing too) and defs sharing a line choose nothing. The edit to `empty_line` inserts a line break after the first `def`, inside the hunk when either side of the gap is. `.rubocop.yml` configures it by enabling the cop |
 
-A style is a scope's norm when its share, as `(n + 1) / (total + styles)`, is
-at least `--norm-threshold` (default 0.8): three of three backs a norm, two of
-two abstains. The scope is the narrowest unchanged code that backs one: the
-enclosing method, then class, then file, then, for a new file, its directory's
-other files. When none does and the hunk's scope moved wholesale from one
-style to another, that move is the norm (`renorming`). With no norm inferred,
-the style the project configures is expected instead.
+The evidence is the unchanged code around the hunk, per scope from the
+nearest: the enclosing method, class and file, each counting only what lies
+outside the nearer scopes, then the directory's other files (up to 20 of the
+language). The scopes are pooled from the outside in: the outermost scope
+holding any observations starts from the rule of succession, `(n + 1) /
+(total + styles)`, and each nearer one shrinks its own share toward that,
+`(k + w × p) / (n + w)`, where `p` is the share so far and `w` the weight it
+lends: 4 observations' worth, or fewer when the scopes around hold less. So a
+method with a few observations follows its surroundings, one with many speaks
+for itself, and a lone scope reads exactly as the rule of succession: three
+of three backs a norm, two of two abstains. A style is the norm when its
+pooled share is at least `--norm-threshold` (default 0.8). The weight 4 is
+the one that best predicted the style of new code over 30,000 corpus hunks
+([decisions](decisions.md) #79). When no style reaches the threshold and the
+hunk's scope moved wholesale from one style to another, that move is the norm
+(`renorming`). With no norm inferred, the style the project configures is
+expected instead.
 
 Configured styles come from `.rubocop.yml` (the nearest one, with local
 `inherit_from`) and `.editorconfig` (each one from the file's directory up
@@ -714,7 +724,7 @@ section globs matched against the file as editorconfig.org specifies).
 Where both set the same norm, `.rubocop.yml` wins: it is the Ruby-specific
 file. The table above says which settings configure each norm.
 
-Config and a new file's neighbors are read as of the change's after side:
+Config and a file's neighbors are read as of the change's after side:
 from the revision a range ends in (`B` of `A..B`; a GitHub change's head),
 or from the index or the working tree when the change ends there (one
 revision, or a diff on stdin as [Proof status](#proof-status) reads it; the
@@ -735,11 +745,11 @@ Each norm:
 |---|---|---|
 | `norm` | string | The norm, by its RuboCop name. |
 | `before`, `after` | object | Per style, the observations on the hunk's `-` and `+` lines. |
-| `scope` | string or null | Where the norm was inferred: `method`, `class`, `file` or `directory`; `null` when none backs one. |
-| `surrounding` | object or null | Per style, the observations in that scope's unchanged code (or, when renorming, the scope's whole after side). |
+| `scope` | string or null | The nearest scope with observations, whose pooled share backs the norm: `method`, `class`, `file` or `directory`; `null` when none backs one. |
+| `evidence` | array | Per scope, nearest first: `scope` and `counts` (per style, the scope's unchanged observations outside the nearer scopes). Every scope of the hunk's chain is listed, empty ones too, so an abstention shows what it had; when renorming, the one scope's whole after side. Schema change: replaces `surrounding`. |
 | `previous` | object or null | When renorming, per style, the scope's whole before side. |
 | `inferred` | string or null | The style the scope backs. |
-| `confidence` | number 0–1 or null | Its share, as above. |
+| `confidence` | number 0–1 or null | Its pooled share, as above. |
 | `configured` | string or null | The style `.rubocop.yml` sets; `null` when it sets none or disables the cop. Reported beside `inferred` even when they differ. |
 | `expected` | string or null | `inferred`, else `configured`. |
 | `direction` | string | `aligned` (new code follows `expected`), `converging` (it does, and replaces code that didn't, or the scope renormed), `diverging` (some new code doesn't) or `abstain` (nothing expected). |

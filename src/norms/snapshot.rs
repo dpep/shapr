@@ -1,4 +1,4 @@
-//! The repository state norms read beside the diff: linter config and a new
+//! The repository state norms read beside the diff: linter config and a
 //! file's neighbors, from the revision the change produced, or the index or
 //! the working tree when the change ends there. Paths are relative to the
 //! repository's top, `/`-separated; nothing above the top is read.
@@ -12,6 +12,10 @@ pub trait Snapshot {
     fn read(&self, path: &str) -> Option<Vec<u8>>;
     /// The files directly in `dir` (`""` for the top), as paths.
     fn list(&self, dir: &str) -> Vec<String>;
+    /// Several files, in order: a directory's neighbors.
+    fn read_all(&self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+        paths.iter().map(|p| self.read(p)).collect()
+    }
 }
 
 pub struct Worktree(pub PathBuf);
@@ -64,6 +68,30 @@ impl Snapshot for Revision<'_> {
 
     fn list(&self, dir: &str) -> Vec<String> {
         self.git.ls(&self.rev, dir)
+    }
+
+    /// One `git cat-file --batch`; in a partial clone, the blobs it lacks
+    /// are fetched in one request first.
+    fn read_all(&self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+        let names: Vec<String> = paths.iter().map(|p| format!("{}:{p}", self.rev)).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let mut found = self.git.blobs(&names).unwrap_or_default();
+        if found.iter().any(Option::is_none)
+            && let Ok(ids) = self.git.object_ids(&names)
+        {
+            let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+            if self.git.prefetch(&ids).is_ok() {
+                found = self.git.blobs(&names).unwrap_or_default();
+            }
+        }
+        paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| match found.get(i) {
+                Some(Some(blob)) => Some(blob.clone()),
+                _ => self.read(p),
+            })
+            .collect()
     }
 }
 

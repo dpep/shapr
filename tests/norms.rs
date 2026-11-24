@@ -47,3 +47,24 @@ fn config_above_the_repository_is_not_read() {
         }
     }
 }
+
+/// The text line names each scope's evidence, so a reader sees why.
+#[test]
+fn text_shows_the_evidence_per_scope() {
+    let neighbors = "A = 'a'\nB = 'b'\nC = 'c'\n";
+    let before = "class G\n  def one\n    'a'\n  end\n\n  def two\n    x = 1\n  end\nend\n";
+    let after =
+        "class G\n  def one\n    'a'\n  end\n\n  def two\n    x = 1\n    \"b\"\n  end\nend\n";
+    let dir = repo(&[
+        &[("lib/n.rb", neighbors), ("lib/a.rb", before)],
+        &[("lib/a.rb", after)],
+    ]);
+    let out = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(
+        out.contains(
+            "style Style/StringLiterals: diverging at line 8; \
+             class expects single_quotes (0.84: class 1 of 1, directory 3 of 3)"
+        ),
+        "{out}"
+    );
+}

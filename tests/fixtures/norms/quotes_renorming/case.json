@@ -9,10 +9,15 @@
             {
               "norm": "Style/StringLiterals",
               "scope": "file",
-              "surrounding": {
-                "single_quotes": 4,
-                "double_quotes": 0
-              },
+              "evidence": [
+                {
+                  "scope": "file",
+                  "counts": {
+                    "single_quotes": 4,
+                    "double_quotes": 0
+                  }
+                }
+              ],
               "previous": {
                 "single_quotes": 0,
                 "double_quotes": 4

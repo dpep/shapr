@@ -9,7 +9,36 @@
             {
               "norm": "Style/StringLiterals",
               "scope": null,
-              "surrounding": null,
+              "evidence": [
+                {
+                  "scope": "method",
+                  "counts": {
+                    "single_quotes": 2,
+                    "double_quotes": 2
+                  }
+                },
+                {
+                  "scope": "class",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "single_quotes": 0,
+                    "double_quotes": 0
+                  }
+                }
+              ],
               "inferred": null,
               "confidence": null,
               "expected": null,

@@ -1,0 +1,51 @@
+{
+  "description": "a method's three double-quoted strings against its class's twenty single-quoted ones back neither: abstain",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "confidence": null,
+              "direction": "abstain",
+              "evidence": [
+                {
+                  "counts": {
+                    "double_quotes": 3,
+                    "single_quotes": 0
+                  },
+                  "scope": "method"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 20
+                  },
+                  "scope": "class"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "file"
+                },
+                {
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  },
+                  "scope": "directory"
+                }
+              ],
+              "inferred": null,
+              "norm": "Style/StringLiterals",
+              "scope": null
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

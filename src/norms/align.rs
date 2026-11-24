@@ -1,20 +1,22 @@
 //! A hunk's style against its surroundings: per norm, the styles it removed
 //! and added, the norm of the unchanged code around it (enclosing method,
-//! then class, then file; for a new file, its directory), and whether the
-//! change converges on that norm or diverges from it.
+//! class, file and directory, pooled with the nearest weighted most), and
+//! whether the change converges on that norm or diverges from it.
 
 use super::snapshot::{Snapshot, parent};
 use super::{
-    Analysis, Counts, Language, LineIndex, NormDef, Observation, Replace, ScopeKind, count, edit,
-    for_path, infer, skipped,
+    Analysis, Counts, Evidence, Language, LineIndex, NormDef, Observation, POOLING, Replace,
+    ScopeKind, count, edit, for_path, infer, pooled, skipped,
 };
 use crate::change::{Change, FileChange};
 use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 
-/// Neighbor files read for a new file's directory norm, at most.
+/// Neighbor files a directory's evidence reads, at most.
 const NEIGHBORS: usize = 20;
 
 #[derive(Serialize)]
@@ -74,7 +76,7 @@ pub struct Entry {
     pub before: Counts,
     pub after: Counts,
     pub scope: Option<ScopeKind>,
-    pub surrounding: Option<Counts>,
+    pub evidence: Vec<Evidence>,
     pub inferred: Option<String>,
     pub confidence: Option<f64>,
     pub previous: Option<Counts>,
@@ -107,13 +109,19 @@ pub fn text(style: &HunkStyle) -> Vec<String> {
         ) else {
             continue;
         };
-        let backing = match (&e.surrounding, e.confidence, e.scope) {
-            (Some(counts), Some(confidence), Some(scope)) => {
-                let k = counts.get(expected).copied().unwrap_or_default();
-                let n: usize = counts.values().sum();
+        let backing = match (e.confidence, e.scope) {
+            (Some(confidence), Some(scope)) => {
+                let counts: Vec<String> = (e.evidence.iter())
+                    .filter_map(|ev| {
+                        let n: usize = ev.counts.values().sum();
+                        let k = ev.counts.get(expected).copied().unwrap_or_default();
+                        (n > 0).then(|| format!("{} {k} of {n}", scope_name(ev.scope)))
+                    })
+                    .collect();
                 format!(
-                    "{} expects {expected} ({k} of {n}, {confidence:.2})",
-                    scope_name(scope)
+                    "{} expects {expected} ({confidence:.2}: {})",
+                    scope_name(scope),
+                    counts.join(", ")
                 )
             }
             _ => format!("config expects {expected}"),
@@ -151,16 +159,17 @@ fn scope_name(scope: ScopeKind) -> &'static str {
 
 /// Every hunk's style, in report order; `None` where no language checks
 /// norms or the file wasn't read. `snapshot` is the repository the change
-/// ends in, for linter config and a new file's neighbors.
+/// ends in, for linter config and each file's neighbors.
 pub fn styles(
     change: &Change,
     snapshot: Option<&dyn Snapshot>,
     threshold: f64,
 ) -> Vec<Option<HunkStyle>> {
     let mut out = Vec::new();
+    let directory = Directory::default();
     for file in &change.files {
         let hunks = &file.diff.hunks;
-        match file_styles(file, snapshot, threshold) {
+        match file_styles(file, snapshot, &directory, threshold) {
             Some(styles) => out.extend(styles.into_iter().map(Some)),
             None => out.extend(hunks.iter().map(|_| None)),
         }
@@ -180,6 +189,7 @@ fn skipped_style(reason: &'static str) -> HunkStyle {
 fn file_styles(
     file: &FileChange,
     snapshot: Option<&dyn Snapshot>,
+    directory: &Directory,
     threshold: f64,
 ) -> Option<Vec<HunkStyle>> {
     let path = file.diff.path();
@@ -202,11 +212,7 @@ fn file_styles(
     let configured = snapshot
         .map(|s| language.configured(path, s))
         .unwrap_or_default();
-    // A new file has no unchanged code of its own.
-    let neighbors = match (file.diff.old_path.is_none(), snapshot) {
-        (true, Some(snapshot)) => Some(neighbors(language, snapshot, path)),
-        _ => None,
-    };
+    let neighbors = snapshot.map(|s| directory.read(language, s, path));
     let touched: Vec<bool> = after
         .observations
         .iter()
@@ -248,22 +254,42 @@ fn file_styles(
     )
 }
 
-/// Observations in the same directory's other files, unchanged code all.
-fn neighbors(language: &dyn Language, snapshot: &dyn Snapshot, path: &str) -> Vec<Observation> {
-    let mut files: Vec<String> = snapshot
-        .list(parent(path))
-        .into_iter()
-        .filter(|p| p != path && language.handles(p))
-        .collect();
-    files.truncate(NEIGHBORS);
-    crate::verbose!("{path}: new file, reading {} neighbor(s)", files.len());
-    files
-        .iter()
-        .filter_map(|p| snapshot.read(p))
-        .map(|source| language.analyze(&source))
-        .filter(|a| !a.errors)
-        .flat_map(|a| a.observations)
-        .collect()
+/// A directory's files of one language, each with its observations.
+type Neighbors = Vec<(String, Vec<Observation>)>;
+
+/// Each directory's files, read once per run however many changed files
+/// sit in it.
+#[derive(Default)]
+struct Directory(RefCell<HashMap<(&'static str, String), Rc<Neighbors>>>);
+
+impl Directory {
+    /// The first files of `path`'s directory, enough for `NEIGHBORS` besides
+    /// `path` itself.
+    fn read(&self, language: &dyn Language, snapshot: &dyn Snapshot, path: &str) -> Rc<Neighbors> {
+        let dir = parent(path).to_string();
+        let key = (language.name(), dir.clone());
+        if let Some(found) = self.0.borrow().get(&key) {
+            return found.clone();
+        }
+        let files: Vec<String> = snapshot
+            .list(&dir)
+            .into_iter()
+            .filter(|p| language.handles(p))
+            .take(NEIGHBORS + 1)
+            .collect();
+        crate::verbose!("{dir}/: reading {} file(s) for its norms", files.len());
+        let sources = snapshot.read_all(&files);
+        let read: Neighbors = files
+            .into_iter()
+            .zip(sources)
+            .filter_map(|(p, source)| Some((language.analyze(&source?), p)))
+            .filter(|(a, _)| !a.errors)
+            .map(|(a, p)| (p, a.observations))
+            .collect();
+        let read = Rc::new(read);
+        self.0.borrow_mut().insert(key, read.clone());
+        read
+    }
 }
 
 /// A changed line within `lines`, or, for a choice spanning lines (the gap
@@ -316,16 +342,16 @@ struct File<'a> {
     after: &'a Analysis,
     /// Per after-side observation: some hunk changed it.
     touched: Vec<bool>,
-    neighbors: Option<Vec<Observation>>,
+    /// The directory's files, this one among them, with their observations.
+    neighbors: Option<Rc<Neighbors>>,
     configured: BTreeMap<&'static str, String>,
     threshold: f64,
     index: LineIndex,
 }
 
-/// The norm a scope's counts back, and where.
+/// The norm the evidence backs, and the nearest scope holding any.
 struct Found {
     scope: ScopeKind,
-    counts: Counts,
     style: String,
     confidence: f64,
 }
@@ -348,12 +374,18 @@ impl File<'_> {
             return None;
         }
         let configured = self.configured.get(def.id).cloned();
-        let surrounding = self.surrounding(def, hunk);
+        let (mut evidence, surrounding) = self.surrounding(def, hunk);
         let renorm = match &surrounding {
             None => self.renorm(def, hunk, &fresh),
             Some(_) => None,
         };
-        let found = surrounding.as_ref().or(renorm.as_ref().map(|(f, _)| f));
+        if let Some((found, after, _)) = &renorm {
+            evidence = vec![Evidence {
+                scope: found.scope,
+                counts: after.clone(),
+            }];
+        }
+        let found = surrounding.as_ref().or(renorm.as_ref().map(|(f, _, _)| f));
         let expected = found.map(|f| f.style.clone()).or(configured.clone());
         let deviating = |o: &&&Observation| expected.as_ref().is_some_and(|e| o.style != *e);
         let direction = match &expected {
@@ -394,10 +426,10 @@ impl File<'_> {
             before: count(def, removed.into_iter()),
             after: count(def, added.into_iter()),
             scope: found.map(|f| f.scope),
-            surrounding: found.map(|f| f.counts.clone()),
+            evidence,
             inferred: found.map(|f| f.style.clone()),
             confidence: found.map(|f| f.confidence),
-            previous: renorm.map(|(_, previous)| previous),
+            previous: renorm.map(|(_, _, previous)| previous),
             configured,
             expected,
             direction,
@@ -436,48 +468,61 @@ impl File<'_> {
         })
     }
 
-    /// The norm of the unchanged code around the hunk, from the narrowest
-    /// scope whose counts back one.
-    fn surrounding(&self, def: &NormDef, hunk: &Hunk) -> Option<Found> {
-        let unchanged = |first: usize, last: usize| {
+    /// The unchanged code around the hunk, per scope from the nearest (each
+    /// scope's own, outside the nearer ones), and the norm it backs pooled.
+    fn surrounding(&self, def: &NormDef, hunk: &Hunk) -> (Vec<Evidence>, Option<Found>) {
+        let mut nearer: Option<(usize, usize)> = None;
+        let mut evidence: Vec<Evidence> = Vec::new();
+        for (scope, first, last) in chain(self.after, region(hunk.after)) {
             let observations = self.after.observations.iter().zip(&self.touched);
-            count(
+            let counts = count(
                 def,
                 observations
                     .filter(|(o, touched)| {
-                        !**touched && o.norm == def.id && (first..=last).contains(&o.line)
+                        !**touched
+                            && o.norm == def.id
+                            && (first..=last).contains(&o.line)
+                            && !nearer.is_some_and(|(a, b)| (a..=b).contains(&o.line))
                     })
                     .map(|(o, _)| o),
-            )
-        };
-        let mut scopes: Vec<(ScopeKind, Counts)> = chain(self.after, region(hunk.after))
-            .into_iter()
-            .map(|(kind, first, last)| (kind, unchanged(first, last)))
-            .collect();
-        if let Some(neighbors) = &self.neighbors {
-            let observations = neighbors.iter().filter(|o| o.norm == def.id);
-            scopes.push((ScopeKind::Directory, count(def, observations)));
+            );
+            nearer = Some((first, last));
+            evidence.push(Evidence { scope, counts });
         }
-        scopes.into_iter().find_map(|(scope, counts)| {
-            let norm = infer(&counts, self.threshold)?;
+        if let Some(neighbors) = &self.neighbors {
+            let observations = (neighbors.iter())
+                .filter(|(p, _)| p != self.path)
+                .take(NEIGHBORS)
+                .flat_map(|(_, observations)| observations)
+                .filter(|o| o.norm == def.id);
+            evidence.push(Evidence {
+                scope: ScopeKind::Directory,
+                counts: count(def, observations),
+            });
+        }
+        let rings: Vec<&Counts> = evidence.iter().map(|e| &e.counts).collect();
+        let found = pooled(&rings, POOLING, self.threshold).and_then(|norm| {
+            let nearest = evidence
+                .iter()
+                .find(|e| e.counts.values().sum::<usize>() > 0)?;
             Some(Found {
-                scope,
-                counts,
+                scope: nearest.scope,
                 style: norm.style,
                 confidence: norm.confidence,
             })
-        })
+        });
+        (evidence, found)
     }
 
     /// A scope that moved wholesale: before the change its code backed one
     /// norm, after it another, which the new code follows. Returns the norm
-    /// after, and the counts before.
+    /// after, and the counts after and before.
     fn renorm(
         &self,
         def: &NormDef,
         hunk: &Hunk,
         added: &[&Observation],
-    ) -> Option<(Found, Counts)> {
+    ) -> Option<(Found, Counts, Counts)> {
         let all = |analysis: &Analysis, first: usize, last: usize| {
             count(
                 def,
@@ -501,11 +546,10 @@ impl File<'_> {
             if old.style != new.style && added.iter().all(|o| o.style == new.style) {
                 let found = Found {
                     scope: kind,
-                    counts,
                     style: new.style,
                     confidence: new.confidence,
                 };
-                return Some((found, previous));
+                return Some((found, counts, previous));
             }
         }
         None
