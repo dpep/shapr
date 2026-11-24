@@ -286,6 +286,11 @@ fn unquote(s: &str) -> String {
         match escaped {
             b'n' => out.push(b'\n'),
             b't' => out.push(b'\t'),
+            b'r' => out.push(b'\r'),
+            b'a' => out.push(0x07),
+            b'b' => out.push(0x08),
+            b'f' => out.push(0x0c),
+            b'v' => out.push(0x0b),
             b'0'..=b'7' => {
                 let digits = &inner[i - 1..(i + 2).min(inner.len())];
                 out.push(u8::from_str_radix(digits, 8).unwrap_or(b'?'));

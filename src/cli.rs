@@ -459,7 +459,7 @@ fn dispatch() -> ExitCode {
         .as_deref()
         .and_then(|files| untracked_note(files, cli.dir.as_deref()))
     {
-        eprintln!("shapr: {note}");
+        eprintln!("shapr: {}", report::escape(&note));
     }
     let mut report = report::build(&change, &labels, claims, meta);
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
@@ -573,8 +573,12 @@ fn untracked_note(files: &[String], dir: Option<&Path>) -> Option<String> {
         Some(dir) => format!("git -C {} add -N", shell_word(&dir.to_string_lossy())),
         None => "git add -N".to_string(),
     };
-    let named: Vec<&str> = files.iter().take(3).map(String::as_str).collect();
-    let words: Vec<String> = named.iter().map(|f| shell_word(f)).collect();
+    let named: Vec<std::borrow::Cow<str>> = files
+        .iter()
+        .take(3)
+        .map(|f| report::quote_path(f))
+        .collect();
+    let words: Vec<String> = files.iter().take(3).map(|f| shell_word(f)).collect();
     Some(match files.len() {
         0 => return None,
         1 => format!(
@@ -908,7 +912,7 @@ impl BrokenPipe for std::io::Result<()> {
 
 /// The message on stderr; a structured caller also gets it on stdout.
 pub(crate) fn fail(format: Format, message: &str, code: u8) -> ExitCode {
-    eprintln!("shapr: {message}");
+    eprintln!("shapr: {}", report::escape(message));
     emit_error(format, message, code);
     exit(code)
 }

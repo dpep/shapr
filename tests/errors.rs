@@ -296,3 +296,32 @@ fn a_revision_that_looks_like_an_option_is_refused() {
             .starts_with("written")
     }));
 }
+
+#[test]
+fn text_output_quotes_control_characters_in_names() {
+    let evil = "lib/y\n::error title=x::spoof\x1b]8;;x\x07.rb";
+    let dir = repo(&[&[(evil, METHOD)]]);
+    write(dir.path(), &[(evil, "def greet\nend\n")]);
+    write(dir.path(), &[("new\n::warning::x.rb", "1\n")]);
+    let out = shapr(dir.path(), &["."]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    for stream in [&out.stdout, &out.stderr] {
+        let text = String::from_utf8_lossy(stream);
+        for line in text.lines() {
+            assert!(!line.starts_with("::"), "{text}");
+            assert!(!line.contains(['\x1b', '\x07']), "{text:?}");
+        }
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // git's quoting of the name in the diff header reads back.
+    assert!(stdout.contains(": behavior: 1 hunk"), "{stdout}");
+    assert!(
+        stdout.contains(r#""lib/y\n::error title=x::spoof\033]8;;x\a.rb":"#),
+        "{stdout}"
+    );
+    // A file name inside an error stays on its one line.
+    let missing = "nope\n::error::x";
+    let out = shapr(dir.path(), &["-J", "--", missing]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.lines().all(|l| !l.starts_with("::")), "{text}");
+}
