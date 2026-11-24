@@ -24,6 +24,6 @@ fn the_reason_names_the_argument_and_the_method() {
     );
     assert_eq!(
         reason("x.fetch(x)", "x.fetch(x, retries: 3)"),
-        "adds `retries: 3`, but the call has a receiver, so which `fetch` it reaches is unknown"
+        "adds `retries: 3`, not shown to restate a default: the call has a receiver, so which `fetch` it reaches is unknown"
     );
 }

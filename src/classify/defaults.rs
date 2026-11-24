@@ -436,7 +436,7 @@ impl<'c> Lookups<'c> {
         let (tree, frontend) = (pair.tree(r.side), pair.frontend);
         let value = pair.text(r.side, r.value);
         let what = pair.describe(r);
-        let fail = |why: String| format!("{what}, but {why}");
+        let fail = |why: String| format!("{what}, not shown to restate a default: {why}");
         if !frontend.plain_literal(tree, r.value) {
             return Err(fail(format!("`{value}` isn't a plain literal")));
         }
