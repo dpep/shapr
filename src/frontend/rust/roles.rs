@@ -3,7 +3,7 @@
 
 use super::{Walker, span};
 use crate::frontend::Construct;
-use crate::tree::{Hazard, NameKind, NodeId, Receiver, Role, Tree};
+use crate::tree::{Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
 use tree_sitter::Node;
 
@@ -119,6 +119,8 @@ impl Walker<'_> {
                     name.map(|x| self.text(&x)),
                     Role::Definition(Method),
                 );
+                // Its locals are the ones `self.locals` now holds.
+                self.b.flag(Flags::SCOPE);
                 self.children_with(
                     n,
                     &mut |f, _| match f {
@@ -134,6 +136,7 @@ impl Walker<'_> {
             (_, "trait_item" | "mod_item") => self.namespace(n, attrs, Module),
             (_, "impl_item") => {
                 self.open(&n, &[], None, Role::Definition(Class));
+                self.b.flag(Flags::SCOPE);
                 let body = field("body");
                 let start = attrs.first().map_or(n.start_byte(), |a| a.start_byte());
                 let end = body.map_or(n.end_byte(), |b| b.start_byte());
@@ -529,6 +532,7 @@ impl Walker<'_> {
         let name = n.child_by_field_name("name");
         let label = name.map(|x| self.text(&x));
         self.open(&n, attrs, label, Role::Definition(name_kind));
+        self.b.flag(Flags::SCOPE);
         let opaque = std::mem::replace(&mut self.opaque_members, names_observed(attrs, self.src));
         self.children_with(
             n,

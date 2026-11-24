@@ -2,7 +2,7 @@
 //! on the node itself.
 
 use crate::frontend::Construct;
-use crate::tree::{Hazard, NameKind, NodeId, Receiver, Role, Tree, Visibility};
+use crate::tree::{Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree, Visibility};
 use ruby_prism::Node;
 use std::collections::{HashMap, HashSet};
 
@@ -241,6 +241,15 @@ impl Roles {
             b"__dir__" | b"require_relative" if implicit => Role::Hazard(Hazard::File),
             _ => Role::Call(receiver),
         }
+    }
+}
+
+/// What the core reads off a node beside its role: a method, class or
+/// module body bounds its locals.
+pub(super) fn flags(node: &Node<'_>) -> Flags {
+    match node {
+        Node::DefNode { .. } | Node::ClassNode { .. } | Node::ModuleNode { .. } => Flags::SCOPE,
+        _ => Flags::default(),
     }
 }
 

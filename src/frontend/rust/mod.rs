@@ -690,6 +690,23 @@ mod tests {
     }
 
     #[test]
+    fn items_bound_locals_and_closures_do_not() {
+        use crate::tree::Flags;
+        let tree =
+            parse("mod m { #[derive(Clone)] struct S; impl S { fn a() { let f = |x| x; } } }");
+        let scopes: Vec<&str> = tree
+            .nodes
+            .iter()
+            .filter(|n| n.flags.contains(Flags::SCOPE))
+            .map(|n| n.kind)
+            .collect();
+        assert_eq!(
+            scopes,
+            ["mod_item", "struct_item", "impl_item", "function_item"]
+        );
+    }
+
+    #[test]
     fn annotations_mark_types_generics_and_visibility() {
         let tree = parse("pub fn a<T>(x: T) -> T where T: Copy { x }");
         let annotations = tree

@@ -133,6 +133,7 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
+        self.builder.flag(roles::flags(&node));
     }
 
     fn visit_branch_node_leave(&mut self) {
@@ -396,6 +397,21 @@ mod tests {
         assert_eq!(jumps("Proc.new\nproc\nlambda\n"), [BlockGiven; 3]);
         // A block makes them ordinary calls; a receiver makes them methods.
         assert!(jumps("proc { 1 }\nx.binding\nx.instance_eval { 1 }\n$stdout\n").is_empty());
+    }
+
+    #[test]
+    fn methods_classes_and_modules_bound_locals() {
+        use crate::tree::Flags;
+        let tree = parse(
+            "module M\n  class C\n    def a\n      [1].each { |x| x }\n    end\n  end\nend\n",
+        );
+        let scopes: Vec<&str> = tree
+            .nodes
+            .iter()
+            .filter(|n| n.flags.contains(Flags::SCOPE))
+            .map(|n| n.kind)
+            .collect();
+        assert_eq!(scopes, ["module", "class", "def"]);
     }
 
     #[test]

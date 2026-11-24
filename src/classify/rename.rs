@@ -2,7 +2,8 @@
 //! identifiers, every use of each old name in its scope became the new name,
 //! and the new name wasn't there before.
 //!
-//! A local's scope is its enclosing method, class or module; a field's, its
+//! A local's scope is the nearest scope boundary its frontend marks
+//! (`Tree::scope`: a method, class or module); a field's, its
 //! file; a member's (a field any file reaches), a method's or a constant's,
 //! every file of the change. These can be used in code shapr never sees, so
 //! their confidence is graded down. An opaque name (in a macro's tokens) may
@@ -138,7 +139,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 entry.hazards.extend(own_hazards(&t.before, diff.before));
             }
             entry.exposed |= role.is_declaration() && exposed(&t.before, diff.before);
-            entry.after_gates.insert(gate(&t.after, diff.after));
+            entry.after_gates.insert(t.after.scope(diff.after));
             entry.after_nodes.insert((hunk.file, diff.after));
         }
     }
@@ -273,7 +274,7 @@ fn pair_of(trees: &Trees, file: usize, diff: &Diff) -> Result<Pair, String> {
     let space = Space {
         scope,
         file: matches!(scope, Scope::Local | Scope::Field).then_some(file),
-        gate: (scope == Scope::Local).then(|| gate(&trees.before, diff.before)),
+        gate: (scope == Scope::Local).then(|| trees.before.scope(diff.before)),
     };
     Ok(Pair { space, from, to })
 }
@@ -294,7 +295,7 @@ fn judged<'v>(
         let local = Space {
             scope: Scope::Local,
             file: Some(file),
-            gate: Some(gate(&trees.before, diff.before)),
+            gate: Some(trees.before.scope(diff.before)),
         };
         let backing = verdicts.iter().find(|(p, v)| {
             let reaches = match p.space.scope {
@@ -510,17 +511,6 @@ fn is_name_node(tree: &Tree, id: NodeId) -> bool {
     })
 }
 
-/// The method, class or module enclosing `id`: where a local lives.
-fn gate(tree: &Tree, id: NodeId) -> NodeId {
-    let gate = |n: &crate::tree::Node| {
-        matches!(
-            n.role,
-            Role::Definition(NameKind::Method | NameKind::Class | NameKind::Module)
-        )
-    };
-    tree.enclosing(id, gate).unwrap_or(Tree::ROOT)
-}
-
 /// Whether the definition, or one enclosing it, carries syntax that makes its
 /// name visible beyond code.
 fn exposed(tree: &Tree, def: NodeId) -> bool {
@@ -552,7 +542,7 @@ fn exposed(tree: &Tree, def: NodeId) -> bool {
 /// renaming it.
 fn own_hazards(tree: &Tree, def: NodeId) -> impl Iterator<Item = Hazard> + '_ {
     tree.descendants(def)
-        .filter(move |&id| gate(tree, id) == def)
+        .filter(move |&id| tree.scope(id) == def)
         .filter_map(|id| tree.node(id).role.hazard())
         .filter(|&h| blocks(Op::RenameMethod, h))
 }

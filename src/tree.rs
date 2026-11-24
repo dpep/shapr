@@ -161,6 +161,29 @@ pub enum Hazard {
     File,
 }
 
+/// Facts a frontend marks on a node beside its role. Not in the hash or the
+/// output.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Flags(u8);
+
+impl Flags {
+    /// Bounds local variables: a local's scope is the nearest node so
+    /// marked (a method, class or module body), else the file.
+    pub const SCOPE: Flags = Flags(1);
+
+    pub fn contains(self, other: Flags) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+impl std::ops::BitOr for Flags {
+    type Output = Flags;
+
+    fn bitor(self, other: Flags) -> Flags {
+        Flags(self.0 | other.0)
+    }
+}
+
 /// Facts about a language's semantics that the core acts on, set by the
 /// frontend. The default is Ruby's: neither holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -274,6 +297,7 @@ pub struct Node {
     /// The identifier the syntax declares or references, where it has one.
     pub name: Option<Box<str>>,
     pub role: Role,
+    pub flags: Flags,
     /// Equal for subtrees that differ only in whitespace and comments.
     /// Process-local: never persisted or printed.
     pub hash: u64,
@@ -366,6 +390,13 @@ impl Tree {
     /// The nearest ancestor of `id` that `pick` accepts.
     pub fn enclosing(&self, id: NodeId, pick: impl Fn(&Node) -> bool) -> Option<NodeId> {
         self.ancestors(id).find(|&p| pick(self.node(p)))
+    }
+
+    /// The scope a local inside `id` lives in: the nearest ancestor marked
+    /// [`Flags::SCOPE`], else the root.
+    pub fn scope(&self, id: NodeId) -> NodeId {
+        self.enclosing(id, |n| n.flags.contains(Flags::SCOPE))
+            .unwrap_or(Self::ROOT)
     }
 
     /// Offsets of the non-whitespace bytes of `id`'s own span that no
@@ -599,6 +630,14 @@ impl TreeBuilder {
         self.ignored.push(span);
     }
 
+    /// Marks the innermost open node.
+    pub fn flag(&mut self, flags: Flags) {
+        if let [_, .., open] = self.stack[..] {
+            let node = &mut self.nodes[open.0 as usize];
+            node.flags = node.flags | flags;
+        }
+    }
+
     pub fn semantics(&mut self, semantics: Semantics) {
         self.semantics = semantics;
     }
@@ -625,6 +664,7 @@ impl TreeBuilder {
             comment: false,
             name: name.map(|n| String::from_utf8_lossy(n).into()),
             role,
+            flags: Flags::default(),
             hash: 0,
         });
         self.leaf.push(leaf);
@@ -693,6 +733,7 @@ impl TreeBuilder {
                 comment: !directive,
                 name: None,
                 role: Role::Other,
+                flags: Flags::default(),
                 hash: 0,
             });
             self.leaf.push(true);
