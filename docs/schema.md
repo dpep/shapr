@@ -45,8 +45,8 @@ first changed line to last, with the context between them.
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text. |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs. |
 | `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
-| `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. *Not emitted yet.* |
-| `move_with_changes` | no | A move whose body also changed. *Not emitted yet.* |
+| `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. See [Moves](#moves). |
+| `move_with_changes` | no | A move whose body also changed: read the changed lines inside it. See [Moves](#moves). |
 | `extract` | yes | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
 | `inline` | yes | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
 | `logic` | no | Anything else. The default: a hunk shapr can't prove structural is `logic`. |
@@ -195,6 +195,49 @@ Confidence is computed from the evidence, not assigned per kind.
   that hold a syntax error: `0.5 × (1 − lines with an error / lines in both
   regions)`.
 - `method` `"none"`: 0. The `logic` label is the safe default, not a finding.
+
+## Moves
+
+A *unit* is a method, class, module or constant definition of at least 3
+syntax nodes, sitting directly in a file or a class or module body (not in
+a block or conditional). Each file's trees are aligned body by body; a unit
+the alignment leaves out was removed or added. A removed unit pairs with an
+added one, in the same file or another, by equal tree (`move`) or, failing
+that, by equal name and kind with `similarity` at least 0.5
+(`move_with_changes`). A unit replaced by one of the same name in the same
+place was edited, not moved.
+
+A pair stays `logic`, with the reason saying why, when its new place changes
+what it means: a different owner (enclosing class or module), a different
+visibility section (it crossed `private`), a different order relative to a
+sibling that names it or that it names at load time (`alias_method`,
+`private :x`, a redefinition, a constant read), or, across files, different
+file-level directives (`# frozen_string_literal`).
+
+A hunk is a move when every changed code line lies in a paired unit or in
+code the alignment kept unchanged. Both halves are labeled.
+
+`evidence` keys for `move` and `move_with_changes`:
+
+| key | type | meaning |
+|---|---|---|
+| `similarity` | number 0–1 | The lowest similarity among the hunk's pairs: Dice coefficient over the two units' subtrees. 1 for `move`. |
+| `nodes` | int | Syntax nodes in the smallest unit moved. |
+| `candidates` | int | The most units, among the hunk's pairs, that matched equally well; 1 when every match is unique. |
+
+`detail` for `move` and `move_with_changes` is `moves`, an array with one
+entry per pair touching the hunk:
+
+| key | type | meaning |
+|---|---|---|
+| `name` | string or null | The declared name. |
+| `from_hunk`, `to_hunk` | int or null | `id` of the hunk removing the unit and of the hunk adding it; equal for a reorder inside one hunk. |
+| `similarity` | number 0–1 | This pair's similarity. |
+| `changed_before`, `changed_after` | int array | Lines, in the removed unit's old file and the added unit's new file, that the other doesn't share, whitespace aside. Empty for an exact move. |
+
+Confidence is `similarity × (1 − 1/nodes) ÷ candidates`, the weakest pair
+in the hunk: a match is weaker when it isn't exact, when the unit is small
+enough to match by chance, and when several units could be its other half.
 
 ## `summary` record
 
