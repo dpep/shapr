@@ -2,84 +2,25 @@
 //! description, kept apart from what the code shows.
 
 use serde_json::{Value, json};
-use std::io::Write;
-use std::path::Path;
-use std::process::{Command, Output, Stdio};
 
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-/// git and shapr with the caller's repository context removed, so a run
-/// under `git rebase --exec` can't write into the real repository.
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
+mod common;
+use common::*;
 
 /// A repo whose first commit holds `before` and whose second, with
 /// `message`, holds `after`.
-fn repo(before: &str, after: &str, message: &str) -> tempfile::TempDir {
+fn gate_repo(before: &str, after: &str, message: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    git(dir.path(), &["init", "-q", "-b", "main"]);
-    git(dir.path(), &["config", "user.email", "test@example.com"]);
-    git(dir.path(), &["config", "user.name", "Test"]);
-    for (content, message) in [(before, "Start"), (after, message)] {
-        std::fs::write(dir.path().join("gate.rb"), content).unwrap();
-        git(dir.path(), &["add", "-A"]);
-        git(dir.path(), &["commit", "-q", "-m", message]);
-    }
+    init(dir.path());
+    commit(dir.path(), &[("gate.rb", before)], "Start");
+    commit(dir.path(), &[("gate.rb", after)], message);
     dir
-}
-
-fn shapr(dir: &Path, args: &[&str], stdin: &str) -> Output {
-    let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut pipe = child.stdin.take().unwrap();
-    pipe.write_all(stdin.as_bytes()).unwrap();
-    drop(pipe);
-    child.wait_with_output().unwrap()
-}
-
-fn report(out: &Output) -> Value {
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))
 }
 
 /// The last commit's report, its claims read from its message.
 fn classify(before: &str, after: &str, message: &str) -> (Value, String) {
-    let dir = repo(before, after, message);
+    let dir = gate_repo(before, after, message);
     let sha = git(dir.path(), &["rev-parse", "HEAD"]).trim()[..12].to_string();
-    (report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"], "")), sha)
+    (report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"])), sha)
 }
 
 const GATE: &str = "class Gate\n  def open?(n)\n    if n > 1\n      :open\n    else\n      :shut\n    end\n  end\nend\n";
@@ -183,17 +124,13 @@ fn a_breaking_feature_is_typed_and_flagged() {
 
 #[test]
 fn a_description_file_adds_issue_references() {
-    let dir = repo(GATE, &flipped(), "Start over");
+    let dir = gate_repo(GATE, &flipped(), "Start over");
     std::fs::write(
         dir.path().join("pr.md"),
         "Handle small gates\n\nFixes #12, see PROJ-34 and UTF-8 docs.\n",
     )
     .unwrap();
-    let out = shapr(
-        dir.path(),
-        &["-j", "--message", "pr.md", "HEAD~1..HEAD"],
-        "",
-    );
+    let out = shapr(dir.path(), &["-j", "--message", "pr.md", "HEAD~1..HEAD"]);
     let claims = &report(&out)["summary"]["claims"];
     assert_eq!(claims["messages"], 2);
     let from_file: Vec<&Value> = claims["hints"]
@@ -213,8 +150,8 @@ fn a_description_file_adds_issue_references() {
 
 #[test]
 fn a_description_can_come_from_stdin_with_a_range() {
-    let dir = repo(GATE, &flipped(), "Start over");
-    let out = shapr(
+    let dir = gate_repo(GATE, &flipped(), "Start over");
+    let out = shapr_stdin(
         dir.path(),
         &["-j", "--message", "-", "HEAD~1..HEAD"],
         "fix: small gates\n",
@@ -225,17 +162,17 @@ fn a_description_can_come_from_stdin_with_a_range() {
 
 #[test]
 fn a_description_from_stdin_needs_a_range() {
-    let dir = repo(GATE, &flipped(), "Start");
+    let dir = gate_repo(GATE, &flipped(), "Start");
     let diff = git(dir.path(), &["diff", "HEAD~1"]);
-    let out = shapr(dir.path(), &["-j", "--message", "-"], &diff);
+    let out = shapr_stdin(dir.path(), &["-j", "--message", "-"], &diff);
     assert_eq!(out.status.code(), Some(64));
 }
 
 #[test]
 fn a_piped_diff_has_no_claims() {
-    let dir = repo(GATE, &flipped(), "fix: open at one");
+    let dir = gate_repo(GATE, &flipped(), "fix: open at one");
     let diff = git(dir.path(), &["diff", "HEAD~1"]);
-    let claims = &report(&shapr(dir.path(), &["-j"], &diff))["summary"]["claims"];
+    let claims = &report(&shapr_stdin(dir.path(), &["-j"], &diff))["summary"]["claims"];
     assert_eq!(claims["messages"], 0);
     assert_eq!(claims["hints"], json!([]));
     assert_eq!(claims["experimental"]["conflicts"], json!([]));
@@ -243,8 +180,8 @@ fn a_piped_diff_has_no_claims() {
 
 #[test]
 fn claims_show_in_text_output() {
-    let dir = repo(GATE, &flipped(), "Refactor the gate check");
-    let out = shapr(dir.path(), &["HEAD~1..HEAD"], "");
+    let dir = gate_repo(GATE, &flipped(), "Refactor the gate check");
+    let out = shapr(dir.path(), &["HEAD~1..HEAD"]);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("claims: refactor 1 (1 message)"), "{text}");
     assert!(
