@@ -411,7 +411,7 @@ still parsed and classified. The first rule that matches wins:
 
 | category | rule |
 |---|---|
-| `binary` | git reports the file as binary. |
+| `binary` | Its content is binary as git reads content: a NUL byte in the first 8000 bytes. An attribute that makes git diff a text file as binary (`-diff`, `binary`) doesn't: shapr diffs such a file again with `--text`; a diff on stdin can't be, so the file keeps its category by name, and its hunk is `unknown` with a reason saying to pipe `git diff --text`. |
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
 | `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
 | `fixture` | Under a `fixtures`, `__fixtures__` or `testdata` directory, at any depth, unless it is binary, vendored, or `.gitattributes` marks it `linguist-generated` or `linguist-documentation`. It wins over the name rules below and over `generated` by name: `spec/fixtures/Gemfile.lock` and `tests/fixtures/a.rb` are fixtures. Test data: not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; the tests that read it judge it. |
@@ -426,12 +426,18 @@ A linguist attribute wins over the name either way: `-linguist-generated`
 (or `=false`) unmarks a lockfile, and `-linguist-documentation` a `README`.
 Attributes are read as `git check-attr` sees them in the revision the
 change ends in (B of `A..B`, a GitHub change's head), or in the working
-tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file it doesn't add whose
-category counts toward the verdict on its before side (`code`, `test`,
-`config`, `manifest`; its old path, under the attributes the change starts
-from where it edits a `.gitattributes`) keeps that category, so moving code
-into `vendor/`, or marking a file `linguist-generated` in the change that
-edits it, leaves the edit `code`.
+tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file whose
+category counts toward the verdict (`code`, `test`, `config`, `manifest`)
+by its old path, or by either path under the attributes the change starts
+from where it edits a `.gitattributes`, keeps that category. So moving code
+into `vendor/`, marking a file `linguist-generated` in the change that
+edits it, or adding a file and marking it generated, vendored or
+documentation at once, leaves the edit `code`; an attribute takes a file out
+of the verdict only when the change's before side already said so (a diff
+on stdin has no before side, so there it never does when the diff edits a
+`.gitattributes`). The path rules are not guarded this way: a file a
+change adds under `vendor/` or `fixtures/` is `vendored` or `fixture` by its
+name, outside the verdict, and `summary.categories` counts it.
 
 Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).
@@ -451,7 +457,17 @@ a Rails `db/schema.rb` aren't `generated` by name; mark them in
 extensionless DSL files RuboCop includes by default (`Gemfile`, `Rakefile`,
 `Guardfile`, `Podfile`, `Vagrantfile`, `Capfile`, `Brewfile`, `Fastfile` and
 the like; a file found only by its shebang is not) (parsed with prism) and `"rust"` for `.rs` (parsed with
-tree-sitter). Any other file is `null` and its hunks `logic`. The rules above
+tree-sitter). Any other file is `null` and its hunks `logic`.
+
+A parsed file isn't compared, and its hunks are `unknown` with
+`parsed: false` and a reason saying why, when its code nests deeper than
+10,000 levels, or when it is too big to compare: its removed lines times its
+added lines pass 16,000,000 (4,000 lines rewritten in place; the largest a
+corpus commit holds, 2,842 by 937, is under a fifth of it), or the change's
+compared files together pass 64,000,000, in diff order. Comparison grows
+with those pairs: a 4,000-line file shuffled takes seconds.
+
+The rules above
 are stated in Ruby's terms; for Rust:
 
 - Comments: `//`, `/* */` and doc comments (`///`, `//!`, `/** */`) are
@@ -1134,7 +1150,9 @@ clones, `<cache>/github.com/<owner>/<repo>.git`: only the two commits, their
 trees, and the blobs the diff reads. The current repository is never
 written to. The cache is `--cache-dir`, else `SHAPR_CACHE_DIR`, else
 `$XDG_CACHE_HOME/shapr`, else `~/.cache/shapr`; a relative path is a usage
-error. A second run on the same commits fetches nothing. `SHAPR_GITHUB_API_URL`
+error. A second run on the same commits fetches nothing. A run holds a lock
+on its clone (`shapr.lock` inside it) while it fetches and reads, so runs at
+once on one repository take turns. `SHAPR_GITHUB_API_URL`
 and `SHAPR_GITHUB_GIT_URL` replace `https://api.github.com` and
 `https://github.com`.
 
@@ -1169,7 +1187,7 @@ values), `format` (`text`, `json`, `ndjson`), `exit`, `duration_ms`, and
 `norms`, `files` and `steps`). It holds no paths, repositories, revisions,
 code, messages or URLs. `SHAPR_USAGE=0` (`false`, `off`, `no`) turns logging
 off, `1` (`true`, `on`, `yes`) on, an absolute path moves the log; unset, it is
-on except under `CI=true` and in a debug build. Past 5 MB the log keeps its newest half.
+on except in CI (`CI` set to `true`, `1`, `yes` or `on` in any case, or `GITHUB_ACTIONS=true`) and in a debug build. Past 5 MB the log keeps its newest half.
 
 | field | type | meaning |
 |---|---|---|
@@ -1190,8 +1208,8 @@ the change exits 0, whatever the verdict.
 | code | meaning |
 |---|---|
 | 0 | success |
-| 2 | operational error: git failed (not a repository, a bad revision, a name that is neither a revision nor a path), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`shapr R` or `R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
-| 64 | usage: a bad command line (more than two revisions, a range beside another revision, a bare `--merge-base`), a name that is both a revision and a path (use `--`), a revision after a path, no input (no arguments and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
+| 2 | operational error: git failed (not a repository, a bad revision, a name that is neither a revision nor a path, a range reaching past a shallow clone's history: `shallow clone: the base commit isn't fetched`, naming `fetch-depth: 0` and `git fetch --unshallow`), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`shapr R` or `R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), GitHub failed (unreachable, not found, rate limited, a fetch refused), or shapr itself failed (`internal error: ..., please report it`: a bug, never a verdict) |
+| 64 | usage: a bad command line (a revision starting with `-`, one revision that isn't one commit: `REV^{tree}`, `REV:PATH`, `REV^@`, more than two revisions, a range beside another revision, a bare `--merge-base`), a name that is both a revision and a path (use `--`), a revision after a path, no input (no arguments and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `none`.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe

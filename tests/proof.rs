@@ -403,3 +403,35 @@ fn a_diff_on_stdin_that_could_end_in_the_index_or_the_working_tree_is_searched_i
     let reason = any_part(&report, "logic")["reason"].as_str().unwrap();
     assert!(reason.contains("report.rb"), "{report:#}");
 }
+
+#[test]
+fn a_use_in_a_file_with_an_odd_name_is_found() {
+    let def = |name: &str| format!("class Z\n  def {name}(x)\n    x\n  end\nend\n");
+    let caller = "class Z\n  def go\n    alpha_meth(1)\n  end\nend\n";
+    for odd in [
+        "lib/a\tb.rb",
+        "lib/a\nb.rb",
+        "lib/a\"b.rb",
+        "lib/a\\b.rb",
+        "lib/a\rb.rb",
+    ] {
+        let report = classify(
+            &[(odd, caller)],
+            &[("lib/d.rb", &def("alpha_meth"))],
+            &[("lib/d.rb", &def("beta_meth"))],
+        );
+        assert_eq!(
+            report["summary"]["verdict"], "behavior",
+            "{odd:?}: {report:#}"
+        );
+    }
+    // The text names the file as git quotes it, on one line.
+    let dir = based_repo(
+        &[("lib/a\nb.rb", caller)],
+        &[("lib/d.rb", &def("alpha_meth"))],
+        &[("lib/d.rb", &def("beta_meth"))],
+    );
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(text.contains(r"lib/a\nb.rb"), "{text}");
+    assert!(!text.lines().any(|l| l.starts_with("b.rb")), "{text}");
+}

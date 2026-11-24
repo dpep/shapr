@@ -54,7 +54,9 @@ USAGE LOG
   (else ~/.local/state/shapr/usage.jsonl): the command, input form, flag names, format,
   exit code, duration and counts. Never paths, repositories, revisions, code, messages
   or URLs. SHAPR_USAGE=0 (false, off, no) turns it off, 1 (true, on, yes) on, and an
-  absolute path moves it; CI=true turns it off unless SHAPR_USAGE is set. --usage
+  absolute path moves it; CI (CI=true, 1, yes or on; GITHUB_ACTIONS=true) turns it off
+  unless SHAPR_USAGE is set. The log is created private (0600), never through a
+  symlink. --usage
   summarizes it, --usage --reset empties it, --status shows where it is.
 
 EXIT CODES
@@ -187,9 +189,42 @@ pub(crate) fn usage_message(error: &clap::Error) -> String {
 
 pub fn run() -> ExitCode {
     let started = std::time::Instant::now();
-    let code = dispatch();
+    // A panic is reported as an error by `guarded`, in one line.
+    std::panic::set_hook(Box::new(|info| {
+        if let Ok(mut at) = PANICKED_AT.lock() {
+            *at = info.location().map(|l| l.to_string());
+        }
+    }));
+    let code = guarded(dispatch);
     crate::usage::finish(started, flag_names(std::env::args().skip(1)));
     code
+}
+
+static PANICKED_AT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// RUN's exit code; a panic is an error (2), with a JSON error record under
+/// `-j`/`-J` like any other, so a gate reading the exit code fails closed.
+fn guarded(run: impl FnOnce() -> ExitCode + std::panic::UnwindSafe) -> ExitCode {
+    let payload = match std::panic::catch_unwind(run) {
+        Ok(code) => return code,
+        Err(payload) => payload,
+    };
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic".to_string());
+    let at = PANICKED_AT.lock().ok().and_then(|mut at| at.take());
+    fail(
+        requested_format(),
+        &internal_error(&message, at.as_deref()),
+        ERROR,
+    )
+}
+
+fn internal_error(message: &dyn std::fmt::Display, at: Option<&str>) -> String {
+    let at = at.map(|at| format!(" at {at}")).unwrap_or_default();
+    format!("internal error: {message}{at}, please report it")
 }
 
 /// The canonical names of the flags in ARGS (`json` for `-j`), never their
@@ -459,7 +494,7 @@ fn dispatch() -> ExitCode {
         .as_deref()
         .and_then(|files| untracked_note(files, cli.dir.as_deref()))
     {
-        eprintln!("shapr: {note}");
+        eprintln!("shapr: {}", report::escape(&note));
     }
     let mut report = report::build(&change, &labels, claims, meta);
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
@@ -506,6 +541,17 @@ enum Input {
 fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8)> {
     let usage = |message: String| (message, USAGE);
     let error = |error: anyhow::Error| (format!("{error:#}"), ERROR);
+    // git would read it as an option (`--output=FILE`); no revision starts so.
+    if let Some(rev) = cli
+        .merge_base
+        .iter()
+        .chain(&cli.args)
+        .find(|a| a.starts_with('-'))
+    {
+        return Err(usage(format!(
+            "`{rev}` starts with `-`: a revision never does (paths go after `--`)"
+        )));
+    }
     if let [arg] = cli.args.as_slice()
         && !dashdash
         && cli.merge_base.is_none()
@@ -539,6 +585,11 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
     };
     let (form, range) = match shape {
         None => return Ok(Input::Stdin),
+        Some(Shape::Commit(rev)) if !git.is_commit(&rev) => {
+            return Err(usage(format!(
+                "`{rev}` doesn't name one commit: shapr REV takes a commit, not a tree, a file or several commits"
+            )));
+        }
         Some(Shape::Commit(rev)) => (
             report::Input::Commit,
             git.commit_range(&rev).map_err(error)?,
@@ -562,8 +613,12 @@ fn untracked_note(files: &[String], dir: Option<&Path>) -> Option<String> {
         Some(dir) => format!("git -C {} add -N", shell_word(&dir.to_string_lossy())),
         None => "git add -N".to_string(),
     };
-    let named: Vec<&str> = files.iter().take(3).map(String::as_str).collect();
-    let words: Vec<String> = named.iter().map(|f| shell_word(f)).collect();
+    let named: Vec<std::borrow::Cow<str>> = files
+        .iter()
+        .take(3)
+        .map(|f| report::quote_path(f))
+        .collect();
+    let words: Vec<String> = files.iter().take(3).map(|f| shell_word(f)).collect();
     Some(match files.len() {
         0 => return None,
         1 => format!(
@@ -897,7 +952,7 @@ impl BrokenPipe for std::io::Result<()> {
 
 /// The message on stderr; a structured caller also gets it on stdout.
 pub(crate) fn fail(format: Format, message: &str, code: u8) -> ExitCode {
-    eprintln!("shapr: {message}");
+    eprintln!("shapr: {}", report::escape(message));
     emit_error(format, message, code);
     exit(code)
 }
@@ -1038,6 +1093,17 @@ mod tests {
         );
         assert!(s(&["f", "g"], Some("main"), false).is_err());
         assert!(s(&[], Some("a..b"), false).is_err());
+    }
+
+    #[test]
+    fn a_panic_is_an_error_not_a_crash() {
+        assert_eq!(guarded(|| ExitCode::SUCCESS), ExitCode::SUCCESS);
+        let code = guarded(|| panic!("boom"));
+        assert_eq!(code, ExitCode::from(ERROR));
+        assert_eq!(
+            internal_error(&"boom", Some("src/x.rs:1:2")),
+            "internal error: boom at src/x.rs:1:2, please report it"
+        );
     }
 
     #[test]

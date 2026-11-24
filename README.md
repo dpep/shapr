@@ -129,7 +129,7 @@ Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a fil
 
 Each `classify` or `norms` run appends one JSON line to `$XDG_STATE_HOME/shapr/usage.jsonl` (else `~/.local/state/shapr/usage.jsonl`), so the commands and forms people use can steer what gets built: the time, shapr's version, the command, the input form, the names of the flags given, the output format, the exit code, the duration, and counts (files, hunks, parts per kind and the verdict; for `norms`, files and plan steps). It never records paths, repository names, revisions, code, commit messages or URLs, and nothing leaves your machine.
 
-`SHAPR_USAGE=0` (or `false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) turns it on, and `SHAPR_USAGE=/absolute/path` moves it. `CI=true` turns it off unless `SHAPR_USAGE` is set. `shapr --usage` summarizes it, `shapr --usage --reset` empties it, and `shapr --status` shows where it is and its size. The log keeps its newest half once it passes 5 MB, and a log that can't be written never fails a run.
+`SHAPR_USAGE=0` (or `false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) turns it on, and `SHAPR_USAGE=/absolute/path` moves it. CI (`CI` set to `true`, `1`, `yes` or `on`, or `GITHUB_ACTIONS=true`) turns it off unless `SHAPR_USAGE` is set. `shapr --usage` summarizes it, `shapr --usage --reset` empties it, and `shapr --status` shows where it is and its size. The log is created readable by you alone and never written through a symlink; it keeps its newest half once it passes 5 MB, and a log that can't be written never fails a run.
 
 ## Output
 
@@ -155,18 +155,23 @@ The verdict is in the output; the exit code says only whether shapr ran.
 
 ## CI recipe
 
-A pull request gate that fails a change mixing structure with behavior:
+A pull request gate that fails a change mixing structure with behavior, and
+fails closed on anything it doesn't expect:
 
 ```yaml
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0   # shapr needs the base commit, not a shallow clone
-- run: script/shape-gate.sh origin/${{ github.base_ref }}
+- run: cargo install --locked --git https://github.com/dpep/shapr --rev <sha>   # pin what you run
+- run: script/shape-gate.sh "origin/$BASE_REF"
+  env:
+    BASE_REF: ${{ github.base_ref }}   # through env: a branch name is data, never script
 ```
 
 ```sh
 #!/usr/bin/env bash
-# script/shape-gate.sh BASE: fail when the change is `mixed`.
+# script/shape-gate.sh BASE: fail when the change is `mixed`, or when shapr
+# says anything this script doesn't expect.
 set -uo pipefail
 out=$(shapr -J "$1...HEAD")   # three dots: the PR's own commits, as GitHub shows them
 case $? in
@@ -176,15 +181,29 @@ case $? in
 esac
 head -n1 <<<"$out" | jq -e '.record == "meta" and .schema == 1 and .command == "classify"' >/dev/null \
   || { echo "shape-gate: unexpected schema or command" >&2; exit 2; }
-verdict=$(tail -n1 <<<"$out" | jq -r .verdict)
+summary=$(tail -n1 <<<"$out")
+jq -e '.record == "summary"' <<<"$summary" >/dev/null \
+  || { echo "shape-gate: no summary record" >&2; exit 2; }
+verdict=$(jq -r .verdict <<<"$summary")
+unjudged=$(jq -r '.verdicts.unknown' <<<"$summary")
+set_aside=$(jq -r '.categories.vendored + .categories.fixture' <<<"$summary")
+shapr "$1...HEAD" | head -n 200   # the text report, capped for the log
 echo "shape: $verdict"
-[ "$verdict" != mixed ]
+[ "$unjudged" -eq 0 ] || echo "::warning title=shape-gate::$unjudged hunk(s) shapr didn't judge (unparsed languages, generated, binary, too big)"
+[ "$set_aside" -eq 0 ] || echo "::warning title=shape-gate::$set_aside hunk(s) in vendored or fixture files, outside the verdict"
+case $verdict in
+  structure|behavior|none|unknown) ;;
+  mixed) exit 1 ;;
+  *) echo "shape-gate: unexpected verdict: $verdict" >&2; exit 2 ;;
+esac
 ```
 
 - Read the schema version and the command from the first record, `meta.schema` and `meta.command`, and stop on one you don't know: a `shapr norms` output has no `verdict`, which `jq` reads as `null`.
+- Allowlist verdicts: a value the script doesn't know, or a missing summary, fails the gate rather than passing it.
 - Gate on verdicts, not on lists of kinds: the summary's `verdict`, a hunk's `verdict`, or a part's `structure`. A kind with `structure: false` (a public API rename) is behavior, and new kinds may appear.
-- `none` (docs and fixtures only) and `unknown` (lockfiles, unparsed files) are outside the verdict; `summary.verdicts` counts them.
-- The exit code is 0 whatever the verdict, 2 when shapr couldn't run, 64 for a usage error. The policy (failing on `mixed`) is the script's.
+- Only Ruby and Rust are parsed. Hunks shapr didn't judge (other languages, generated, vendored and binary files, a file too big to compare) are `unknown` and outside the verdict, and so are `none` hunks (docs, fixtures); `summary.verdicts` counts them, and `summary.unparsed_hunks` counts every hunk not compared as trees. The script warns on them; fail on them instead if your repository is mostly another language. A file a pull request adds under `vendor/` or `fixtures/` is outside the verdict by its path; the script warns on those too.
+- The exit code is 0 whatever the verdict, 2 when shapr couldn't run (including a shallow clone missing the base commit, and an internal error), 64 for a usage error. The policy (failing on `mixed`) is the script's.
+- shapr is safe to run on a fork's pull request: it runs no program the repository's config names, its text output escapes control characters (a file name can't start a `::error::` command), and `.gitattributes` in the pull request can't take its own files out of the verdict. Keep the job's token read-only (`permissions: contents: read`).
 
 ## Development
 

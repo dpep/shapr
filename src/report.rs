@@ -665,7 +665,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             " (outside the verdict)"
         };
         if let Some(plain) = uncompared(hunk) {
-            writeln!(out, "{:width$}  {plain}{outside}", place(hunk))?;
+            emit(out, &format!("{:width$}  {plain}{outside}", place(hunk)))?;
             continue;
         }
         // One line per part; the place names the hunk on its first.
@@ -690,10 +690,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
                 part.confidence.get(),
                 detail.join(" "),
             );
-            writeln!(out, "{}", line.trim_end())?;
+            emit(out, line.trim_end())?;
         }
         for line in hunk.style.iter().flat_map(crate::norms::text) {
-            writeln!(out, "{:width$}  {line}", "")?;
+            emit(out, &format!("{:width$}  {line}", ""))?;
         }
     }
     Ok(())
@@ -713,24 +713,25 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         *kinds.entry(part.kind.as_str()).or_default() += 1;
     }
     let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{n} {k}")).collect();
-    if let Some(source) = &report.meta.source {
-        write!(out, "{}", source.name())?;
-        if source.merge {
-            write!(out, " (a merge, against its first parent)")?;
-        }
-        write!(out, ": ")?;
+    let lead = if let Some(source) = &report.meta.source {
+        let merge = match source.merge {
+            true => " (a merge, against its first parent)",
+            false => "",
+        };
+        format!("{}{merge}: ", source.name())
     } else if let Some(subject) = &report.meta.subject {
-        write!(out, "{subject}: ")?;
-    }
+        format!("{subject}: ")
+    } else {
+        String::new()
+    };
     let outside: Vec<String> = [Verdict::None, Verdict::Unknown]
         .iter()
         .map(|v| (v.as_str(), s.verdicts[v.as_str()]))
         .filter(|(_, n)| *n > 0)
         .map(|(v, n)| format!("{n} {v}"))
         .collect();
-    writeln!(
-        out,
-        "{}: {} hunk{} ({}){}; review {} line{}{}{}{}",
+    let line = format!(
+        "{lead}{}: {} hunk{} ({}){}; review {} line{}{}{}{}",
         s.verdict.as_str(),
         s.hunks,
         if s.hunks == 1 { "" } else { "s" },
@@ -760,9 +761,10 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         } else {
             String::new()
         },
-    )?;
+    );
+    emit(out, &line)?;
     for line in crate::norms::trajectory::text(&s.config_trajectory) {
-        writeln!(out, "{line}")?;
+        emit(out, &line)?;
     }
     claims(out, &s.claims)?;
     Ok(())
@@ -788,8 +790,8 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
     match claimed.as_slice() {
         // Nothing claimed: nothing worth a line.
         [] => {}
-        [one] => writeln!(out, "claims: {one} of {of}")?,
-        many => writeln!(out, "claims: {} (of {of})", many.join(", "))?,
+        [one] => emit(out, &format!("claims: {one} of {of}"))?,
+        many => emit(out, &format!("claims: {} (of {of})", many.join(", ")))?,
     }
     for conflict in &claims.experimental.conflicts {
         let plural = if conflict.count == 1 { "" } else { "s" };
@@ -808,10 +810,9 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
             ),
             Finding::NoBehaviorHunks => ("conflict", "every hunk is structure".to_string()),
         };
-        writeln!(
+        emit(
             out,
-            "{label}: claims {}; {finding}",
-            conflict.claim.as_str()
+            &format!("{label}: claims {}; {finding}", conflict.claim.as_str()),
         )?;
     }
     Ok(())
@@ -844,19 +845,97 @@ fn place(hunk: &HunkRecord) -> String {
     } else if hunk.before.count > 0 {
         (hunk.before, " (deleted)")
     } else {
-        return hunk.file.to_string();
+        return quote_path(hunk.file).into_owned();
     };
+    let file = quote_path(hunk.file);
     match lines.last() {
-        Some(last) if last != lines.start => {
-            format!("{}:{}-{last}{suffix}", hunk.file, lines.start)
-        }
-        _ => format!("{}:{}{suffix}", hunk.file, lines.start),
+        Some(last) if last != lines.start => format!("{file}:{}-{last}{suffix}", lines.start),
+        _ => format!("{file}:{}{suffix}", lines.start),
     }
+}
+
+/// Writes LINE as one line of text output. Every text line goes through here:
+/// a control character from a file name, a reason or a message is escaped,
+/// so it can't end the line (and start a `::error::` CI command) or reach a
+/// terminal as an escape sequence.
+pub(crate) fn emit(out: &mut impl Write, line: &str) -> io::Result<()> {
+    writeln!(out, "{}", escape(line))
+}
+
+/// TEXT with each control character (C0, DEL, C1) escaped C-style, as git
+/// quotes paths: `\n`, `\t`, `\033`.
+pub fn escape(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.chars().any(char::is_control) {
+        return text.into();
+    }
+    let mut out = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        push_escaped(&mut out, c);
+    }
+    out.into()
+}
+
+/// PATH as git shows a path with `core.quotePath=false`: as it is, or in
+/// double quotes with `"`, `\` and control characters escaped.
+pub fn quote_path(path: &str) -> std::borrow::Cow<'_, str> {
+    if !path
+        .chars()
+        .any(|c| c.is_control() || c == '"' || c == '\\')
+    {
+        return path.into();
+    }
+    let mut out = String::from('"');
+    for c in path.chars() {
+        match c {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            c => push_escaped(&mut out, c),
+        }
+    }
+    out.push('"');
+    out.into()
+}
+
+fn push_escaped(out: &mut String, c: char) {
+    let short = match c {
+        '\x07' => "\\a",
+        '\x08' => "\\b",
+        '\t' => "\\t",
+        '\n' => "\\n",
+        '\x0b' => "\\v",
+        '\x0c' => "\\f",
+        '\r' => "\\r",
+        c if c.is_control() => {
+            let mut bytes = [0; 4];
+            for byte in c.encode_utf8(&mut bytes).bytes() {
+                out.push_str(&format!("\\{byte:03o}"));
+            }
+            return;
+        }
+        c => {
+            out.push(c);
+            return;
+        }
+    };
+    out.push_str(short);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paths_quote_as_git_quotes_them() {
+        assert_eq!(quote_path("lib/a.rb"), "lib/a.rb");
+        assert_eq!(quote_path("lib/é.rb"), "lib/é.rb");
+        assert_eq!(
+            quote_path("a\tb\n\u{1b}\u{85}\"\\"),
+            r#""a\tb\n\033\302\205\"\\""#
+        );
+        assert_eq!(escape("one\ntwo \"x\""), r#"one\ntwo "x""#);
+    }
 
     #[test]
     fn entropy_follows_kamei() {

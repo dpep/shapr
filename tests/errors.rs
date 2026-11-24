@@ -240,3 +240,145 @@ fn a_usage_error_keeps_the_whole_message() {
     let message = report(&out)["error"].as_str().unwrap().to_string();
     assert!(message.contains("--top <N>"), "{message}");
 }
+
+// Untrusted repositories: content and config a pull request controls.
+
+/// A repository whose config names programs git would run, and the marker
+/// file they'd leave.
+fn armed() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    write(
+        dir.path(),
+        &[("a.rb", "def greet(other)\n  \"hi #{other}\"\nend\n")],
+    );
+    let marker = dir.path().join(".git/ran");
+    let script = dir.path().join(".git/run.sh");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let script = script.to_str().unwrap();
+    git(dir.path(), &["config", "core.fsmonitor", script]);
+    let hooks = dir.path().join(".git/hooks");
+    for hook in ["reference-transaction", "post-index-change"] {
+        std::fs::copy(script, hooks.join(hook)).unwrap();
+    }
+    (dir, marker)
+}
+
+#[test]
+fn a_repositorys_config_runs_no_program() {
+    let (dir, marker) = armed();
+    for args in [&["-J", "."][..], &["-J", "HEAD"], &["-J", "--staged"]] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?} {out:?}");
+        assert!(!marker.exists(), "{args:?} ran the repository's program");
+    }
+}
+
+#[test]
+fn a_revision_that_looks_like_an_option_is_refused() {
+    let dir = repo(&[&[("a.rb", METHOD)], &[("a.rb", "def greet\nend\n")]]);
+    let written = dir.path().join("written");
+    let flag = format!("--merge-base=--output={}", written.display());
+    for args in [&["-J", &flag][..], &["-J", &flag, "HEAD"]] {
+        let message = error(&shapr(dir.path(), args), 64);
+        assert!(message.contains("starts with `-`"), "{message}");
+    }
+    assert!(!dir.path().join("written").exists());
+    assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| {
+        !e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("written")
+    }));
+}
+
+#[test]
+fn text_output_quotes_control_characters_in_names() {
+    let evil = "lib/y\n::error title=x::spoof\x1b]8;;x\x07.rb";
+    let dir = repo(&[&[(evil, METHOD)]]);
+    write(dir.path(), &[(evil, "def greet\nend\n")]);
+    write(dir.path(), &[("new\n::warning::x.rb", "1\n")]);
+    let out = shapr(dir.path(), &["."]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    for stream in [&out.stdout, &out.stderr] {
+        let text = String::from_utf8_lossy(stream);
+        for line in text.lines() {
+            assert!(!line.starts_with("::"), "{text}");
+            assert!(!line.contains(['\x1b', '\x07']), "{text:?}");
+        }
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // git's quoting of the name in the diff header reads back.
+    assert!(stdout.contains(": behavior: 1 hunk"), "{stdout}");
+    assert!(
+        stdout.contains(r#""lib/y\n::error title=x::spoof\033]8;;x\a.rb":"#),
+        "{stdout}"
+    );
+    // A file name inside an error stays on its one line.
+    let missing = "nope\n::error::x";
+    let out = shapr(dir.path(), &["-J", "--", missing]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.lines().all(|l| !l.starts_with("::")), "{text}");
+}
+
+/// A clone of a three-commit repository, DEPTH commits deep.
+fn shallow(depth: &str) -> (tempfile::TempDir, tempfile::TempDir) {
+    let upstream = repo(&[
+        &[("a.rb", METHOD)],
+        &[("a.rb", "def greet(name)\n  name\nend\n")],
+        &[("a.rb", "def greet(other)\n  other\nend\n")],
+    ]);
+    git(upstream.path(), &["checkout", "-q", "-b", "feat", "HEAD~1"]);
+    commit(upstream.path(), &[("b.rb", METHOD)], "feat");
+    git(upstream.path(), &["checkout", "-q", "main"]);
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", upstream.path().display());
+    git(
+        clone.path(),
+        &[
+            "clone",
+            "-q",
+            "--no-single-branch",
+            "--depth",
+            depth,
+            &url,
+            ".",
+        ],
+    );
+    (upstream, clone)
+}
+
+#[test]
+fn a_range_past_a_shallow_clones_history_is_an_error() {
+    let (_upstream, clone) = shallow("1");
+    for args in [
+        &["-J", "HEAD"][..],
+        &["-J", "HEAD^!"],
+        &["-J", "HEAD^-1"],
+        &["-J", "HEAD~1..HEAD"],
+        &["-J", "--merge-base", "HEAD~2"],
+        &["-J", "origin/feat...HEAD"],
+    ] {
+        let message = error(&shapr(clone.path(), args), 2);
+        assert!(message.contains("shallow clone"), "{args:?}: {message}");
+        assert!(message.contains("fetch-depth: 0"), "{message}");
+    }
+    let (_upstream, clone) = shallow("2");
+    let out = shapr(clone.path(), &["-J", "HEAD"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[test]
+fn one_revision_that_isnt_one_commit_is_a_usage_error() {
+    let dir = repo(&[&[("lib/a.rb", METHOD)], &[("lib/a.rb", "def greet\nend\n")]]);
+    for rev in ["HEAD^{tree}", "HEAD:lib/a.rb", "HEAD^@"] {
+        let message = error(&shapr(dir.path(), &["-J", rev]), 64);
+        assert!(message.starts_with(&format!("`{rev}`")), "{message}");
+        assert!(message.contains("one commit"), "{message}");
+    }
+}

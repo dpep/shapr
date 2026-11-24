@@ -1,0 +1,7 @@
+{
+  "description": "a new file under a pattern .gitattributes already marked generated is generated",
+  "expect": {
+    "files": [{"file": "gen/api.rb", "category": "generated"}],
+    "summary": {"verdict": "unknown"}
+  }
+}
