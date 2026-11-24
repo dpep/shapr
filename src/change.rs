@@ -182,7 +182,8 @@ pub enum Category {
     Manifest,
     /// Written by a tool: a lockfile, a minified asset, `linguist-generated`.
     Generated,
-    /// Third-party code: `linguist-vendored`.
+    /// Third-party code: under `vendor/`, `third_party/` or `node_modules/`, or
+    /// `linguist-vendored`.
     Vendored,
     Binary,
     /// None of the above: source shapr doesn't parse, or anything else.
@@ -232,7 +233,7 @@ impl Category {
             Category::Binary
         } else if linguist.generated.unwrap_or_else(|| generated(name)) {
             Category::Generated
-        } else if linguist.vendored == Some(true) {
+        } else if linguist.vendored.unwrap_or_else(|| vendored(path)) {
             Category::Vendored
         } else if linguist.documentation.unwrap_or_else(|| docs(path, name)) {
             Category::Docs
@@ -275,6 +276,11 @@ const LOCKFILES: &[&str] = &[
 /// A lockfile or minified asset.
 fn generated(name: &str) -> bool {
     LOCKFILES.contains(&name) || name.ends_with(".min.js") || name.ends_with(".min.css")
+}
+
+/// Under a third-party directory, as linguist reads them.
+fn vendored(path: &str) -> bool {
+    (path.split('/').rev().skip(1)).any(|d| matches!(d, "vendor" | "third_party" | "node_modules"))
 }
 
 /// Prose: under a docs directory, a prose extension, or a conventional
@@ -439,6 +445,9 @@ mod tests {
             (".rubocop.yml", "config"),
             ("Cargo.toml.orig", "unknown"),
             ("app.js", "unknown"),
+            ("vendor/x.rb", "vendored"),
+            ("app/vendor/lib/y.js", "vendored"),
+            ("lib/vendored.rb", "code"),
             ("Makefile", "unknown"),
         ] {
             assert_eq!(category(path), want, "{path}");
