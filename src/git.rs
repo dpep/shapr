@@ -3,16 +3,24 @@
 
 use crate::diff::FileDiff;
 use anyhow::{Context, Result, bail};
+use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 
 /// Where git runs: the current directory, the one `-C` names, or a bare
-/// repository with no worktree.
+/// repository with no worktree. Answers that don't change within a run are
+/// asked once, and objects are read through one long-lived `cat-file --batch`.
 pub struct Git {
     dir: Option<PathBuf>,
     bare: Option<Bare>,
+    batch: RefCell<Option<Batch>>,
+    toplevel: OnceCell<Option<PathBuf>>,
+    parents: RefCell<HashMap<String, usize>>,
+    promisor: OnceCell<Option<String>>,
+    /// Linguist attributes by source revision and path.
+    linguist: RefCell<HashMap<(Option<String>, String), Linguist>>,
 }
 
 /// The files a change ends in: a revision's, the index's (a staged diff on
@@ -32,18 +40,26 @@ struct Bare {
 
 impl Git {
     pub fn new(dir: Option<PathBuf>) -> Self {
-        Git { dir, bare: None }
+        Git {
+            dir,
+            bare: None,
+            batch: RefCell::default(),
+            toplevel: OnceCell::new(),
+            parents: RefCell::default(),
+            promisor: OnceCell::new(),
+            linguist: RefCell::default(),
+        }
     }
 
     /// Runs in the bare repository GIT_DIR, reading attributes from the
     /// commit ATTRIBUTES_FROM.
     pub fn bare(git_dir: PathBuf, attributes_from: String) -> Self {
         Git {
-            dir: None,
             bare: Some(Bare {
                 git_dir,
                 attributes_from,
             }),
+            ..Git::new(None)
         }
     }
 
@@ -139,13 +155,18 @@ impl Git {
 
     /// How many parents commit REV has.
     fn parents(&self, rev: &str) -> Result<usize> {
+        if let Some(&n) = self.parents.borrow().get(rev) {
+            return Ok(n);
+        }
         let out = run(self
             .command()
             .args(["rev-list", "--parents", "-n1", rev, "--"]))?;
-        Ok(String::from_utf8_lossy(&out)
+        let n = String::from_utf8_lossy(&out)
             .split_whitespace()
             .count()
-            .saturating_sub(1))
+            .saturating_sub(1);
+        self.parents.borrow_mut().insert(rev.to_string(), n);
+        Ok(n)
     }
 
     /// Fails in one line unless RANGE resolves as revisions in a repository.
@@ -197,8 +218,12 @@ impl Git {
     }
 
     pub fn toplevel(&self) -> Option<PathBuf> {
-        let out = run(self.command().args(["rev-parse", "--show-toplevel"])).ok()?;
-        Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
+        self.toplevel
+            .get_or_init(|| {
+                let out = run(self.command().args(["rev-parse", "--show-toplevel"])).ok()?;
+                Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
+            })
+            .clone()
     }
 
     /// The revision whose files the change ends in: B of `A..B` or `A...B`
@@ -306,10 +331,31 @@ impl Git {
     /// PATH's contents at REV, or in the index when REV is `""`; `None`
     /// when it has no such file.
     pub fn show(&self, rev: &str, path: &str) -> Option<Vec<u8>> {
-        run(self
-            .command()
-            .args(["cat-file", "blob", &format!("{rev}:{path}")]))
-        .ok()
+        self.blob(&format!("{rev}:{path}"))
+    }
+
+    /// The blob NAME (an id, `rev:path` or `:path`) names; `None` when it
+    /// names none. In a partial clone a missing blob is fetched, as
+    /// `cat-file blob` would.
+    pub fn blob(&self, name: &str) -> Option<Vec<u8>> {
+        // `--batch` reads one name per line.
+        if !name.contains('\n') {
+            let mut batch = self.batch.borrow_mut();
+            if batch.is_none() {
+                *batch = Batch::spawn(self.command()).ok();
+            }
+            if let Some(reader) = batch.as_mut() {
+                match reader.read(name) {
+                    Ok(found) => return found,
+                    // A batch that broke is dropped; the next read starts another.
+                    Err(error) => {
+                        crate::verbose!("git cat-file --batch: {error:#}");
+                        *batch = None;
+                    }
+                }
+            }
+        }
+        run(self.command().args(["cat-file", "blob", name])).ok()
     }
 
     /// The files directly in DIR at REV (`""` for the top), as paths.
@@ -452,8 +498,17 @@ impl Git {
         Ok(found)
     }
 
+    /// Whether this is a partial clone, which may lack blobs.
+    pub fn partial(&self) -> bool {
+        self.promisor().is_some()
+    }
+
     /// The remote a partial clone fetches missing objects from.
     fn promisor(&self) -> Option<String> {
+        self.promisor.get_or_init(|| self.read_promisor()).clone()
+    }
+
+    fn read_promisor(&self) -> Option<String> {
         let out = run(self.command().args([
             "config",
             "--get-regexp",
@@ -542,6 +597,39 @@ impl Git {
     /// them: as of revision AT, else the working tree's (a bare repository's
     /// head commit's). Empty outside a repository.
     pub fn linguist(&self, paths: &[&str], at: Option<&str>) -> HashMap<String, Linguist> {
+        let source = at.or(self.bare.as_ref().map(|b| b.attributes_from.as_str()));
+        let key = |path: &str| (source.map(str::to_string), path.to_string());
+        let asked: Vec<&str> = {
+            let known = self.linguist.borrow();
+            paths
+                .iter()
+                .copied()
+                .filter(|p| !known.contains_key(&key(p)))
+                .collect()
+        };
+        if !asked.is_empty()
+            && let Some(found) = self.check_attr(&asked, source)
+        {
+            let mut known = self.linguist.borrow_mut();
+            for path in &asked {
+                let attributes = found.get(*path).copied().unwrap_or_default();
+                known.insert(key(path), attributes);
+            }
+        }
+        let known = self.linguist.borrow();
+        paths
+            .iter()
+            .filter_map(|p| Some((p.to_string(), *known.get(&key(p))?)))
+            .filter(|(_, l)| *l != Linguist::default())
+            .collect()
+    }
+
+    /// `git check-attr` for PATHS as of SOURCE; `None` when it can't run.
+    fn check_attr(
+        &self,
+        paths: &[&str],
+        source: Option<&str>,
+    ) -> Option<HashMap<String, Linguist>> {
         let mut input = Vec::new();
         for path in paths {
             input.extend_from_slice(path.as_bytes());
@@ -549,14 +637,11 @@ impl Git {
         }
         let mut cmd = self.command();
         if self.bare.is_none() {
-            let Some(toplevel) = self.toplevel() else {
-                return HashMap::new();
-            };
+            let toplevel = self.toplevel()?;
             // check-attr reads paths against the cwd; the diff's are from the top.
             cmd.current_dir(toplevel);
         }
         cmd.arg("check-attr");
-        let source = at.or(self.bare.as_ref().map(|b| b.attributes_from.as_str()));
         if let Some(source) = source {
             cmd.args(["--source", source]);
         }
@@ -570,7 +655,7 @@ impl Git {
                         "can't read .gitattributes from a commit ({error:#}): categories by name only"
                     );
                 }
-                return HashMap::new();
+                return None;
             }
         };
         let out = String::from_utf8_lossy(&out);
@@ -591,7 +676,7 @@ impl Git {
                 _ => {}
             }
         }
-        found
+        Some(found)
     }
 }
 
@@ -661,6 +746,64 @@ fn check(output: Output) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+/// A running `git cat-file --batch`: each name written gets its object back.
+struct Batch {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl Batch {
+    fn spawn(mut cmd: Command) -> Result<Batch> {
+        let mut child = cmd
+            .args(["cat-file", "--batch"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("could not run git")?;
+        let stdin = child.stdin.take().context("git stdin")?;
+        let stdout = BufReader::new(child.stdout.take().context("git stdout")?);
+        Ok(Batch {
+            child,
+            stdin: Some(stdin),
+            stdout,
+        })
+    }
+
+    /// NAME's contents when it names a blob; `Ok(None)` when it names
+    /// nothing, or something else.
+    fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>> {
+        let stdin = self.stdin.as_mut().context("git stdin closed")?;
+        writeln!(stdin, "{name}")?;
+        stdin.flush()?;
+        // `<id> <type> <size>`, else `<name> missing` or `<name> ambiguous`.
+        let mut header = String::new();
+        if self.stdout.read_line(&mut header)? == 0 {
+            bail!("git cat-file exited");
+        }
+        let fields: Vec<&str> = header.trim_end().rsplitn(3, ' ').collect();
+        let [size, kind, _] = fields[..] else {
+            return Ok(None);
+        };
+        let Ok(size) = size.parse::<usize>() else {
+            return Ok(None);
+        };
+        let mut contents = vec![0; size + 1];
+        self.stdout.read_exact(&mut contents)?;
+        contents.pop();
+        Ok((kind == "blob").then_some(contents))
+    }
+}
+
+impl Drop for Batch {
+    fn drop(&mut self) {
+        // Closing its input ends it.
+        drop(self.stdin.take());
+        let _ = self.child.wait();
+    }
+}
+
 /// Reads file contents by blob id. Blobs `git diff` names for a working-tree
 /// file aren't in the object store, so those are read from disk when the
 /// file there still hashes to the id.
@@ -682,9 +825,7 @@ impl<'a> Blobs<'a> {
         if id.bytes().all(|b| b == b'0') {
             return Some(Vec::new());
         }
-        run(self.git.command().args(["cat-file", "blob", id]))
-            .ok()
-            .or_else(|| self.read_worktree(id, path))
+        self.git.blob(id).or_else(|| self.read_worktree(id, path))
     }
 
     fn read_worktree(&mut self, id: &str, path: &str) -> Option<Vec<u8>> {
@@ -698,5 +839,72 @@ impl<'a> Blobs<'a> {
             .starts_with(id)
             .then(|| std::fs::read(&file).ok())
             .flatten()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo() -> (tempfile::TempDir, Git) {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(dir.path())
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::create_dir(dir.path().join("lib")).unwrap();
+        std::fs::write(dir.path().join("lib/a.rb"), "x = 1\n").unwrap();
+        std::fs::write(dir.path().join("gen.rb"), "y\n").unwrap();
+        std::fs::write(
+            dir.path().join(".gitattributes"),
+            "gen.rb linguist-generated\n",
+        )
+        .unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        std::fs::write(dir.path().join("lib/a.rb"), "x = 2\n").unwrap();
+        git(&["add", "-A"]);
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        (dir, shell)
+    }
+
+    #[test]
+    fn blobs_are_read_by_id_revision_path_and_index_path() {
+        let (_dir, git) = repo();
+        assert_eq!(git.show("HEAD", "lib/a.rb").unwrap(), b"x = 1\n");
+        assert_eq!(git.show("", "lib/a.rb").unwrap(), b"x = 2\n");
+        let id = String::from_utf8(run(git.command().args(["rev-parse", "HEAD:gen.rb"])).unwrap())
+            .unwrap();
+        assert_eq!(git.blob(id.trim()).unwrap(), b"y\n");
+        // A tree, a missing path and a name `--batch` can't take are no blob,
+        // and the reader still answers after them.
+        assert_eq!(git.show("HEAD", "lib"), None);
+        assert_eq!(git.show("HEAD", "nope.rb"), None);
+        assert_eq!(git.show("HEAD", "a\nb"), None);
+        assert_eq!(git.show("HEAD", "gen.rb").unwrap(), b"y\n");
+    }
+
+    #[test]
+    fn linguist_attributes_are_asked_once_per_revision_and_path() {
+        let (_dir, git) = repo();
+        let generated = Linguist {
+            generated: Some(true),
+            ..Linguist::default()
+        };
+        let first = git.linguist(&["gen.rb"], Some("HEAD"));
+        assert_eq!(first, HashMap::from([("gen.rb".to_string(), generated)]));
+        // A path asked again comes from what's known; a new one is asked.
+        let both = git.linguist(&["gen.rb", "lib/a.rb"], Some("HEAD"));
+        assert_eq!(both, first);
+        assert_eq!(git.linguist.borrow().len(), 2);
     }
 }

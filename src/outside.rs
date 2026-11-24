@@ -124,13 +124,12 @@ impl<'a> Repository<'a> {
                 return Search::Unavailable;
             }
         }
-        let found = self.git.grep(&self.state, word, &pathspecs(globs));
-        let mentioned = self.mentions(word, &texts);
+        let hits = self.grep(word, globs, &texts);
         let mut computed = self.computed.borrow_mut();
         let computed = computed
             .entry(frontend.language())
             .or_insert_with(|| self.computed_names(frontend, &candidates));
-        match (found.and_then(|f| Ok((f, mentioned?))), &*computed) {
+        match (hits, &*computed) {
             (Ok((mut found, mentioned)), Some(computed)) => {
                 found.extend(
                     (computed.iter())
@@ -155,6 +154,29 @@ impl<'a> Repository<'a> {
 }
 
 impl Repository<'_> {
+    /// The files of the language (by GLOBS) and of TEXTS that hold WORD as a
+    /// whole word. A repository holding every blob is searched whole and the
+    /// hits sorted by path; a partial clone holds only the blobs prefetched
+    /// for these files, so they are searched by pathspec.
+    fn grep(
+        &self,
+        word: &str,
+        globs: &[&str],
+        texts: &[&(String, String)],
+    ) -> anyhow::Result<(Vec<String>, Vec<String>)> {
+        if matches!(self.state, State::Revision(_)) && self.git.partial() {
+            let found = self.git.grep(&self.state, word, &pathspecs(globs))?;
+            return Ok((found, self.mentions(word, texts)?));
+        }
+        let texts: BTreeSet<&str> = texts.iter().map(|(p, _)| p.as_str()).collect();
+        let (found, rest): (Vec<String>, Vec<String>) = (self.git)
+            .grep(&self.state, word, &[":(top)".to_string()])?
+            .into_iter()
+            .partition(|p| matches(globs, p));
+        let mentioned = rest.into_iter().filter(|p| texts.contains(p.as_str()));
+        Ok((found, mentioned.collect()))
+    }
+
     /// Which of TEXTS hold WORD as a whole word, searched by path in
     /// batches that keep the command line short.
     fn mentions(&self, word: &str, texts: &[&(String, String)]) -> anyhow::Result<Vec<String>> {

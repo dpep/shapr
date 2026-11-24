@@ -70,9 +70,12 @@ impl Snapshot for Revision<'_> {
         self.git.ls(&self.rev, dir)
     }
 
-    /// One `git cat-file --batch`; in a partial clone, the blobs it lacks
-    /// are fetched in one request first.
+    /// Through git's object reader; in a partial clone, one `git cat-file
+    /// --batch` after the blobs it lacks are fetched in one request.
     fn read_all(&self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+        if !self.git.partial() {
+            return paths.iter().map(|p| self.git.show(&self.rev, p)).collect();
+        }
         let names: Vec<String> = paths.iter().map(|p| format!("{}:{p}", self.rev)).collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let mut found = self.git.blobs(&names).unwrap_or_default();
