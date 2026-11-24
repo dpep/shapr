@@ -280,13 +280,17 @@ commit messages of the range (`git log` over the commits `git diff RANGE`
 spans: `A..B` and `A...B` read the commits in B and not A, a single revision
 `R` reads `R..HEAD`) and the description given with `--message FILE` (a PR
 body; `-` reads stdin when a RANGE is given). A piped diff has no commit
-messages. Claims are read by fixed rules, never change a hunk's `kind`,
+messages. For a GitHub pull request (see [GitHub input](#github-input)) the
+commit messages are the pull request's commits as the GitHub API lists them
+(up to 250) and the description is its title (the subject) and body, unless
+`--message` gives one, which replaces it; for a GitHub commit, its message.
+Claims are read by fixed rules, never change a hunk's `kind`,
 `facets` or the verdict, and carry their source, so a consumer can weigh them
 against the code rather than instead of it.
 
 | field | type | meaning |
 |---|---|---|
-| `messages` | int | Messages read: one per commit, plus one for `--message`. |
+| `messages` | int | Messages read: one per commit, plus one for the description. |
 | `hints` | array | Each hint, in message order, once per message. Below. |
 | `categories` | object | Messages carrying at least one hint of each category, every category present: `fix`, `feature`, `refactor`, `perf`, `test`, `docs`, `chore`, `revert`. |
 | `conflicts` | array | Claims the code doesn't bear out. Below. |
@@ -298,8 +302,8 @@ Each hint:
 | `hint` | string | `type`: a conventional-commit type (`fix:`, `feat(api):`, known types only). `keyword`: a purpose word in the subject (`fix`, `bug`, `regression`, `crash`, `hotfix`; `add`, `introduce`, `support`, `implement`, `allow`; `refactor`, `rename`, `move`, `extract`, `tidy`, `cleanup`, `simplify`; `perf`, `faster`, `optimize`; `test`, `spec`, `coverage`; `docs`, `readme`, `typo`, `changelog`; `chore`, `bump`, `deps`, `upgrade`, `release`, `lint`; `revert`). `revert`: a git revert's `Revert "subject"` (the quoted subject, whose own words are not read as claims) or its `This reverts commit <id>`. `issue`: `#12`, `KEY-12` (standards such as `UTF-8` aside), or an issue or pull URL (as `#12`). `breaking`: `type!:` or a `BREAKING CHANGE:` footer. `no_behavior_change`: "no behavior change", "no functional change", "no logic change", "behavior preserving", "pure refactor" (any case, hyphens as spaces) or the word `NFC`. |
 | `value` | string | What matched, lowercased for types and keywords. |
 | `category` | string or null | The category the hint claims: `feat` is `feature`, `style` is `refactor`, `build` and `ci` are `chore`, `no_behavior_change` is `refactor`, an issue after `fix`/`fixes`/`fixed` is `fix`; `null` for `breaking` and other issues. |
-| `source` | string | `commit` or `message` (`--message`). |
-| `commit` | string or null | The commit's id, 12 hex digits; `null` for `message`. |
+| `source` | string | `commit`, `message` (`--message`), or `pull_request` (a GitHub pull request's title and body). |
+| `commit` | string or null | The commit's id, 12 hex digits; `null` for a description. |
 | `field` | string | `subject` (the first non-empty line) or `body`. Purpose words are read only in the subject, where they summarize; a body mentions too much in passing. |
 
 Each conflict is a count of what the code shows, not a verdict on the author:
@@ -410,6 +414,71 @@ enough to match by chance, and when several units could be its other half.
 | `behavior_lines` | int | `review_lines` summed over hunks of behavior kinds (`logic`, `move_with_changes`): the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structural hunks over all changed lines, generated hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
+| `source` | object or null | The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local range or stdin. |
+
+## GitHub input
+
+RANGE may name a GitHub pull request or commit instead of local revisions:
+
+| form | names |
+|---|---|
+| `https://github.com/OWNER/REPO/pull/N`, with anything after it (`/files`, `/commits`, a query, a fragment) | pull request N |
+| `github.com/OWNER/REPO#N`, `OWNER/REPO#N` | pull request N |
+| `#N` | pull request N of the current repository's GitHub remote: `origin` when it is on github.com, else the only remote that is; several and none of them `origin` is a usage error |
+| `https://github.com/OWNER/REPO/commit/SHA`, `OWNER/REPO@SHA` (7 to 40 hex digits) | that commit |
+| `https://github.com/OWNER/REPO/pull/N/commits/SHA` | that commit alone |
+
+A form without `://` that also resolves as a local revision (a branch named
+`acme/widgets#12`) is the local revision. Something shaped like a GitHub
+reference that isn't one of these forms is a usage error (64) listing them.
+
+A pull request is diffed from the merge base of its base and head commits
+to its head, `git diff BASE...HEAD`, the diff GitHub's Files tab shows. A
+commit is diffed against its first parent; a root commit against the empty
+tree.
+
+`source`:
+
+| field | type | meaning |
+|---|---|---|
+| `kind` | `"pr"` or `"commit"` | What was named. |
+| `url` | string | Its page on github.com. |
+| `repo` | string | `OWNER/REPO`. |
+| `number` | int or null | The pull request's number; for a commit named inside a pull request, that pull request's; else null. |
+| `title` | string | The pull request's title, or the commit message's first line. |
+| `base` | string | The full commit id the diff starts from: the merge base for a pull request, the first parent for a commit (the empty tree's id for a root commit). |
+| `head` | string | The full commit id the diff ends at. |
+| `merge` | bool | The commit is a merge, diffed against its first parent only. |
+
+Metadata comes from the GitHub REST API: a pull request and the comparison
+of its base and head (two requests), or the commit (one). The token is
+`GH_TOKEN`, else `GITHUB_TOKEN`, else `gh auth token` when gh is installed and
+logged in, else none (public repositories only, at GitHub's unauthenticated
+rate limit). The token is never written to output or errors.
+
+Objects are fetched with git's own credentials into a cache of bare partial
+clones, `<cache>/github.com/<owner>/<repo>.git`: only the two commits, their
+trees, and the blobs the diff reads. The current repository is never
+written to. The cache is `--cache-dir`, else `SHAPR_CACHE_DIR`, else
+`$XDG_CACHE_HOME/shapr`, else `~/.cache/shapr`; a relative path is a usage
+error. A second run on the same commits fetches nothing. `SHAPR_GITHUB_API_URL`
+and `SHAPR_GITHUB_GIT_URL` replace `https://api.github.com` and
+`https://github.com`.
+
+## `cache` record
+
+`--status` and `--clear-cache` print the cache as it stands afterwards; one
+object under `-j` or `-J`.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"cache"` | |
+| `path` | string | The cache directory, with the home directory as `~`. |
+| `repositories` | array of strings | `github.com/OWNER/REPO` per cached clone, sorted. |
+| `bytes` | int | Their size on disk. |
+
+`--clear-cache` removes `<cache>/github.com` and nothing else in the
+directory.
 
 ## Exit codes
 
@@ -418,8 +487,8 @@ enough to match by chance, and when several units could be its other half.
 | 0 | `structure` or `empty` |
 | 1 | `behavior` |
 | 3 | `mixed` |
-| 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, or stdin holds no diff (no file header) |
-| 64 | usage: a bad command line, or no input (no range and an empty or blank stdin) |
+| 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
+| 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `empty`, exit 0.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe

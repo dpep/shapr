@@ -138,6 +138,8 @@ pub struct Summary {
     behavior_lines: usize,
     structure_share: f64,
     claims: Claims,
+    /// The GitHub pull request or commit analyzed; `None` for a local run.
+    pub source: Option<crate::github::Source>,
 }
 
 pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<'a> {
@@ -354,6 +356,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             round2(structure_lines as f64 / total as f64)
         },
         claims,
+        source: None,
     }
 }
 
@@ -442,6 +445,13 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .filter(|(_, n)| **n > 0)
         .map(|(k, n)| format!("{k} {n}"))
         .collect();
+    if let Some(source) = &s.source {
+        write!(out, "{}", source.name())?;
+        if source.merge {
+            write!(out, " (a merge, against its first parent)")?;
+        }
+        write!(out, ": ")?;
+    }
     writeln!(
         out,
         "{}: {} hunk{} ({}); review {} line{}{}; comments +{} -{}; structure share {:.2}",

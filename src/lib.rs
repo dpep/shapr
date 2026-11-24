@@ -9,6 +9,7 @@ mod cli;
 pub mod diff;
 pub mod frontend;
 pub mod git;
+pub mod github;
 pub mod log;
 pub mod report;
 pub mod tree;

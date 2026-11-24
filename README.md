@@ -34,8 +34,14 @@ shapr -j main..HEAD          # one pretty JSON object
 shapr -q main..HEAD          # no output; the exit code is the verdict
 shapr -C app main..HEAD      # in another repository, like git -C
 shapr --message pr.md main   # also read claims from a PR description
+shapr https://github.com/acme/widgets/pull/12   # a GitHub pull request, as its Files tab shows it
+shapr acme/widgets#12        # the same; `#12` uses this repository's GitHub remote
+shapr acme/widgets@1a2b3c4   # a GitHub commit, against its first parent
+shapr --status               # the cache of GitHub repositories; --clear-cache empties it
 shapr --completions zsh      # a completion script
 ```
+
+A GitHub pull request or commit needs no checkout: shapr reads its metadata from the GitHub API (with a token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, if any) and fetches just the two commits, with your git credentials, into a cache of partial clones under `~/.cache/shapr` (`--cache-dir` or `SHAPR_CACHE_DIR` to move it). Your repository is never written to. The forms and the cache are in [docs/schema.md](docs/schema.md#github-input).
 
 With no range, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
 

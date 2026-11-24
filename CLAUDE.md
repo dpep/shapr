@@ -39,8 +39,10 @@ src/
   main.rs, lib.rs   entry; lib exposes the modules to the integration tests
   cli.rs            clap, input selection (range or stdin, -C), exit codes, after-help
   log.rs            -v telemetry (the verbose! macro)
-  git.rs            the git calls, run in -C's directory: `git diff RANGE`, `git log` messages, blob reads
-                    (worktree fallback), linguist-generated attributes
+  git.rs            the git calls, run in -C's directory or a bare clone: `git diff RANGE`, `git log`
+                    messages, blob reads (worktree fallback), linguist-generated attributes, remotes
+  github.rs         GitHub input: PR/commit forms, REST metadata (token from env or gh), the cache of
+                    bare partial clones the diff runs in (--status, --clear-cache)
   diff.rs           unified diff parser: FileDiff, Hunk (narrowed to its changed region), Lines
   tree.rs           the language-neutral Tree and the TreeBuilder that normalizes it
                     (extents, comment placement, whitespace-insensitive hashes, per-line facts)
@@ -67,7 +69,8 @@ src/
                     conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
 tests/              end to end against throwaway git repos: cli.rs (input, output,
-                    size measures), one file per detector, rust_lang.rs (Rust end to end)
+                    size measures), one file per detector, rust_lang.rs (Rust end to end), github.rs (offline:
+                    a canned API on 127.0.0.1 and a file:// remote)
 ```
 
 ### The language seam

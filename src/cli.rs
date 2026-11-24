@@ -2,7 +2,7 @@
 
 use crate::claims::{Claims, Message, Source};
 use crate::report::{self, Format};
-use crate::{change, classify, diff, git};
+use crate::{change, classify, diff, git, github};
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
 use std::io::{IsTerminal, Read, Write};
@@ -18,6 +18,8 @@ EXAMPLES
   shapr -q main..HEAD        no output; the exit code is the verdict
   shapr -C app main..HEAD    run in another repository, like git -C
   shapr --message pr.md main..HEAD   also read claims from a PR description
+  shapr acme/widgets#12      a GitHub pull request: the diff its Files tab shows
+  shapr acme/widgets@1a2b3c4  a GitHub commit, against its (first) parent
 
   With no RANGE, shapr reads a diff from stdin; like any filter, it waits while an
   inherited stdin stays open. An empty stdin is no input (64), so a failed
@@ -26,11 +28,20 @@ EXAMPLES
   Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0.
   To leave them out: git diff main -- '*.rb' '*.rs' | shapr
 
+GITHUB
+  RANGE may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,
+  or #N for this repository's GitHub remote) or a commit (.../commit/SHA,
+  .../pull/N/commits/SHA, OWNER/REPO@SHA). A shorthand that is also a local revision
+  is the local revision. Metadata comes from the GitHub API, with a token from GH_TOKEN,
+  GITHUB_TOKEN or `gh auth token` if there is one; objects are fetched with your git
+  credentials into a cache of partial clones (--cache-dir), never into this repository.
+
 EXIT CODES
   0   structure: every hunk changes structure, not behavior (or there are no hunks)
   1   behavior: every hunk changes behavior
   3   mixed: both
-  2   error: git failed (not a repository, a bad revision), or stdin is not a diff
+  2   error: git failed (not a repository, a bad revision), stdin is not a diff, or GitHub
+      failed (unreachable, not found, rate limited)
   64  usage: the command line is wrong, or there is no input (an empty stdin)
 
   Structure is a shape, not a safety claim: extracts and inlines still deserve review.";
@@ -44,8 +55,9 @@ EXIT CODES
 )]
 struct Cli {
     /// Revisions to compare, as `git diff` takes them (`main..HEAD`,
-    /// `main...HEAD`, or one revision against the working tree). Without
-    /// it, a unified diff is read from stdin; an empty stdin is a usage error.
+    /// `main...HEAD`, or one revision against the working tree), or a GitHub
+    /// pull request or commit (see GITHUB below). Without it, a unified diff
+    /// is read from stdin; an empty stdin is a usage error.
     #[arg(value_name = "RANGE")]
     range: Option<String>,
 
@@ -78,6 +90,18 @@ struct Cli {
     /// stdin, when a RANGE is given. Claims never change a hunk's label.
     #[arg(long, value_name = "FILE")]
     message: Option<PathBuf>,
+    /// Where GitHub repositories are cached; also SHAPR_CACHE_DIR. Defaults
+    /// to $XDG_CACHE_HOME/shapr, else ~/.cache/shapr. Must be absolute.
+    #[arg(long, value_name = "DIR")]
+    cache_dir: Option<PathBuf>,
+
+    /// Show the cache: its path, the repositories in it, and their size.
+    #[arg(long, conflicts_with_all = ["range", "clear_cache"])]
+    status: bool,
+
+    /// Remove every cached GitHub repository, then show the cache.
+    #[arg(long, conflicts_with = "range")]
+    clear_cache: bool,
 
     /// Print a shell completion script (bash, zsh, fish, elvish,
     /// powershell); defaults to $SHELL.
@@ -139,7 +163,6 @@ pub fn run() -> ExitCode {
             USAGE,
         );
     }
-    let git = git::Git::new(cli.dir.clone());
     let stdin_message = cli.message.as_deref() == Some(std::path::Path::new("-"));
     if stdin_message && cli.range.is_none() {
         return fail(
@@ -148,11 +171,33 @@ pub fn run() -> ExitCode {
             USAGE,
         );
     }
+    if cli.status || cli.clear_cache {
+        return cache(format, cli.cache_dir, cli.clear_cache, cli.quiet);
+    }
+    let mut git = git::Git::new(cli.dir.clone());
+    let mut remote = None;
     let text = match &cli.range {
         Some(range) if range.starts_with('-') => {
             return fail(format, &format!("`{range}` is not a range"), USAGE);
         }
-        Some(range) => git.diff(range),
+        Some(range) => match github::resolve(range, &git) {
+            Err(message) => return fail(format, &message, USAGE),
+            Ok(None) => git.diff(range),
+            Ok(Some(target)) => {
+                let cache = match github::Cache::resolve(cli.cache_dir.clone()) {
+                    Ok(cache) => cache,
+                    Err(message) => return fail(format, &message, USAGE),
+                };
+                match github::fetch(&target, &cache) {
+                    Err(error) => return fail(format, &format!("{error:#}"), ERROR),
+                    Ok(fetched) => {
+                        let text = fetched.git.diff(&fetched.range);
+                        remote = Some(fetched);
+                        text
+                    }
+                }
+            }
+        },
         None if std::io::stdin().is_terminal() => return fail(format, NO_INPUT, USAGE),
         None => {
             let mut text = String::new();
@@ -175,13 +220,18 @@ pub fn run() -> ExitCode {
         }
         return fail(format, "stdin is not a diff: no file headers", ERROR);
     }
-    let messages = match messages(&cli, &git, stdin_message) {
+    let source = remote.as_ref().map(|r| r.source.clone());
+    let messages = match messages(&cli, &git, stdin_message, remote.as_mut()) {
         Ok(messages) => messages,
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
+    if let Some(remote) = remote {
+        git = remote.git;
+    }
     let change = change::assemble(files, &git);
     let labels = classify::classify(&change);
-    let report = report::build(&change, &labels, Claims::read(&messages));
+    let mut report = report::build(&change, &labels, Claims::read(&messages));
+    report.summary.source = source;
     if !cli.quiet {
         let mut stdout = std::io::stdout().lock();
         let written = report::render(&mut stdout, format, &report).and_then(|()| stdout.flush());
@@ -194,10 +244,20 @@ pub fn run() -> ExitCode {
     ExitCode::from(report.summary.verdict.exit_code())
 }
 
-/// The range's commit messages, then the `--message` description.
-fn messages(cli: &Cli, git: &git::Git, stdin: bool) -> anyhow::Result<Vec<Message>> {
+/// The range's commit messages, then the description: `--message`, else a
+/// pull request's own.
+fn messages(
+    cli: &Cli,
+    git: &git::Git,
+    stdin: bool,
+    remote: Option<&mut github::Remote>,
+) -> anyhow::Result<Vec<Message>> {
     let mut messages = Vec::new();
-    if let Some(range) = &cli.range {
+    let mut description = None;
+    if let Some(remote) = remote {
+        messages.append(&mut remote.commits);
+        description = remote.description.take();
+    } else if let Some(range) = &cli.range {
         for (id, text) in git.messages(range)? {
             messages.push(Message {
                 source: Source::Commit,
@@ -218,13 +278,80 @@ fn messages(cli: &Cli, git: &git::Git, stdin: bool) -> anyhow::Result<Vec<Messag
             std::fs::read_to_string(path)
                 .map_err(|e| anyhow::anyhow!("--message {}: {e}", path.display()))?
         };
-        messages.push(Message {
+        description = Some(Message {
             source: Source::Message,
             commit: None,
             text,
         });
     }
+    messages.extend(description);
     Ok(messages)
+}
+
+/// `--status` and `--clear-cache`: the cache as it stands afterwards.
+fn cache(format: Format, dir: Option<PathBuf>, clear: bool, quiet: bool) -> ExitCode {
+    let cache = match github::Cache::resolve(dir) {
+        Ok(cache) => cache,
+        Err(message) => return fail(format, &message, USAGE),
+    };
+    if clear {
+        match cache.clear() {
+            Ok(n) => crate::verbose!(
+                "removed {n} cached repositor{}",
+                if n == 1 { "y" } else { "ies" }
+            ),
+            Err(error) => return fail(format, &format!("{error:#}"), ERROR),
+        }
+    }
+    if quiet {
+        return ExitCode::SUCCESS;
+    }
+    let status = cache.status();
+    let rendered = match format {
+        Format::Json => serde_json::to_string_pretty(&status).map_err(std::io::Error::from),
+        Format::Ndjson => serde_json::to_string(&status).map_err(std::io::Error::from),
+        Format::Text => {
+            let mut text = format!(
+                "{}: {} repositor{}, {}",
+                status.path,
+                status.repositories.len(),
+                if status.repositories.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                human_bytes(status.bytes)
+            );
+            for repo in &status.repositories {
+                text.push_str("\n  ");
+                text.push_str(repo);
+            }
+            Ok(text)
+        }
+    };
+    let mut stdout = std::io::stdout().lock();
+    let written = rendered.and_then(|r| writeln!(stdout, "{r}"));
+    if let Err(error) = written.filter_broken_pipe() {
+        eprintln!("shapr: writing output: {error}");
+        return ExitCode::from(ERROR);
+    }
+    ExitCode::SUCCESS
+}
+
+/// Two significant figures are all a directory size has.
+fn human_bytes(bytes: u64) -> String {
+    let mut value = bytes as f64;
+    for unit in ["B", "KB", "MB", "GB"] {
+        if value < 1000.0 || unit == "GB" {
+            return match unit {
+                "B" => format!("{bytes} B"),
+                _ if value < 10.0 => format!("{value:.1} {unit}"),
+                _ => format!("{value:.0} {unit}"),
+            };
+        }
+        value /= 1000.0;
+    }
+    unreachable!()
 }
 
 trait BrokenPipe {

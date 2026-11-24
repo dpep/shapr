@@ -20,6 +20,8 @@ pub enum Source {
     Commit,
     /// The description given with `--message`.
     Message,
+    /// A GitHub pull request's title and description.
+    PullRequest,
 }
 
 /// What a claim says the change is for.
