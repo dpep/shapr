@@ -394,6 +394,14 @@ fn list_item(text: &str) -> Option<usize> {
     }
 }
 
+/// A token directly inside a `{ }` group of a token tree, where it may be
+/// field-init shorthand: tokens don't say whether `{` opens a struct.
+fn in_braces(n: &Node<'_>) -> bool {
+    n.parent().is_some_and(|p| {
+        p.kind() == "token_tree" && p.child(0).is_some_and(|open| open.kind() == "{")
+    })
+}
+
 fn is_comment(n: &Node<'_>) -> bool {
     matches!(n.kind(), "line_comment" | "block_comment")
 }
@@ -579,6 +587,11 @@ impl<'a> Walker<'a> {
                     "file" | "module_path" if bang => Role::Hazard(Hazard::File),
                     _ => Role::Opaque,
                 };
+                if role == Role::Opaque && in_braces(&n) {
+                    // Possibly `S { a }` shorthand, naming a field too.
+                    self.member(&n, Some(name));
+                    return self.b.close();
+                }
                 self.leaf(&n, Some(name), role);
             }
             "string_literal" => self.format_string(n),

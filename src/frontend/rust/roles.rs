@@ -532,7 +532,7 @@ impl Walker<'_> {
 
     /// Opens `S { a }`'s `a`: a field's name and a local at once, so opaque
     /// to a rename and marked as naming a member.
-    fn member(&mut self, n: &Node<'_>, name: Option<&str>) {
+    pub(super) fn member(&mut self, n: &Node<'_>, name: Option<&str>) {
         self.open(n, &[], name, Role::Opaque);
         self.b.flag(Flags::MEMBER);
     }
