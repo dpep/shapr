@@ -451,3 +451,37 @@ fn a_new_method_overriding_one_defined_elsewhere_in_the_change_is_logic() {
     );
     assert!(!kinds(&report).contains(&"extract"), "{report:#}");
 }
+
+#[test]
+fn an_extract_beside_an_edit_to_another_method_is_mixed() {
+    let before = invoice(TOTAL, None);
+    let after =
+        invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("filler2\n    2\n", "filler2\n    20\n");
+    let (report, code) = classify(&before, &after);
+    assert_eq!(
+        kinds(&report),
+        ["extract", "logic", "extract"],
+        "{report:#}"
+    );
+    assert_eq!(
+        hunks(&report)[0]["detail"]["hunks"],
+        serde_json::json!([0, 2])
+    );
+    assert_eq!(code, 3);
+}
+
+#[test]
+fn an_extract_sharing_a_hunk_with_another_edit_is_logic() {
+    let before = format!("{RENDER}X = 1\n");
+    let after = format!("{RENDER_EXTRACTED}X = 2\n");
+    let (report, _) = classify(&before, &after);
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+}
+
+#[test]
+fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_is_logic() {
+    let before = invoice(TOTAL, None);
+    let after = invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("    4\n", "    40\n");
+    let (report, _) = classify(&before, &after);
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+}

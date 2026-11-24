@@ -151,7 +151,7 @@ renamed with two call sites scores 0.8, and one with none 0.67.
 
 ## Extract and inline
 
-An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and nothing else beside the two methods changed. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets the label, or none does.
+An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and the methods' container still holds the same other code, in order, apart from siblings that changed on their own. Those siblings' hunks keep their own label; a hunk mixing the refactoring with any other change stays `logic`. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets the label, or none does.
 
 `detail` on each labeled hunk:
 

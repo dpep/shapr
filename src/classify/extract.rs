@@ -8,7 +8,7 @@
 //! A candidate is proven, not scored into existence: the caller A must be
 //! identical on both sides once the call is swapped for the chunk, B's body
 //! must equal the chunk once its parameters are renamed to the call's
-//! arguments, and everything else beside A and B must be unchanged.
+//! arguments, and a hunk may change nothing else.
 
 use super::{Confidence, Kind, Label, Labels};
 use crate::change::{Change, FileChange, Trees};
@@ -120,11 +120,31 @@ struct Found {
     dir: Dir,
     method: String,
     caller: String,
-    /// The statement container holding A and B on each side: every changed
-    /// byte inside it is explained by the refactoring.
-    scope_before: Span,
-    scope_after: Span,
+    /// Where the refactoring's hunks may change code, before and after.
+    regions: [Region; 2],
     outcome: Result<Stats, Risk>,
+}
+
+/// One side's view of the refactoring.
+struct Region {
+    /// The container of A and B.
+    scope: Span,
+    /// Siblings that changed for reasons of their own.
+    holes: Vec<Span>,
+    /// A and B: a hunk changing code here belongs to the refactoring.
+    touch: Vec<Span>,
+}
+
+impl Region {
+    fn touches(&self, at: &usize) -> bool {
+        self.touch.iter().any(|t| t.contains(at))
+    }
+
+    /// Inside the container but not in a sibling that changed on its own:
+    /// any change here is the refactoring, or diff noise in equal code.
+    fn explains(&self, at: &usize) -> bool {
+        self.scope.contains(at) && !self.holes.iter().any(|h| h.contains(at))
+    }
 }
 
 struct Stats {
@@ -185,9 +205,8 @@ fn find(
     }
     let a_chunk = unique_def(chunks, &key(calls, a_call)).ok_or("caller not on the other side")?;
     let chunk_scope = chunks.node(a_chunk).parent.ok_or("no parent")?;
-    if !rest_unchanged(calls, scope, b, a_call, chunks, chunk_scope, a_chunk) {
-        return Err("other code beside the methods changed");
-    }
+    let changed = changed_siblings(calls, scope, &[a_call, b], chunks, chunk_scope, &[a_chunk])
+        .ok_or("the methods' container changed")?;
     let (params, body) = method_body(calls, b).ok_or("unsupported parameters or body")?;
     let chunk = splice(calls, a_call, stmt, calls.node(body).kind, chunks, a_chunk)
         .ok_or("caller differs beyond the call")?;
@@ -255,15 +274,16 @@ fn find(
             returns: assigned.is_some(),
         })
     };
-    let (scope_before, scope_after) = match dir {
-        Dir::Extract => (
-            chunks.node(chunk_scope).extent.clone(),
-            calls.node(scope).extent.clone(),
-        ),
-        Dir::Inline => (
-            calls.node(scope).extent.clone(),
-            chunks.node(chunk_scope).extent.clone(),
-        ),
+    let region = |tree: &Tree, scope: NodeId, holes: &[NodeId], touch: &[NodeId]| Region {
+        scope: tree.node(scope).extent.clone(),
+        holes: holes.iter().map(|&n| tree.node(n).extent.clone()).collect(),
+        touch: touch.iter().map(|&n| tree.node(n).extent.clone()).collect(),
+    };
+    let call_side = region(calls, scope, &changed.0, &[a_call, b]);
+    let chunk_side = region(chunks, chunk_scope, &changed.1, &[a_chunk]);
+    let regions = match dir {
+        Dir::Extract => [chunk_side, call_side],
+        Dir::Inline => [call_side, chunk_side],
     };
     Ok(Found {
         dir,
@@ -274,25 +294,22 @@ fn find(
             .as_deref()
             .unwrap_or_default()
             .to_string(),
-        scope_before,
-        scope_after,
+        regions,
         outcome,
     })
 }
 
 /// Labels the hunks the refactoring touches, all or none.
 fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
-    // (hunk, whether all its changed code lies in the refactoring's scope)
+    // (hunk, whether the refactoring explains all its changed code)
     let mut touched = Vec::new();
+    let [before, after] = &found.regions;
     for (h, hunk) in file.diff.hunks.iter().enumerate() {
-        let before = code_bytes(&trees.before, &hunk.removed);
-        let after = code_bytes(&trees.after, &hunk.added);
-        let inside = |at: &usize, scope: &Span| scope.contains(at);
-        let touches = before.iter().any(|at| inside(at, &found.scope_before))
-            || after.iter().any(|at| inside(at, &found.scope_after));
-        if touches {
-            let explained = before.iter().all(|at| inside(at, &found.scope_before))
-                && after.iter().all(|at| inside(at, &found.scope_after));
+        let removed = code_bytes(&trees.before, &hunk.removed);
+        let added = code_bytes(&trees.after, &hunk.added);
+        if removed.iter().any(|at| before.touches(at)) || added.iter().any(|at| after.touches(at)) {
+            let explained = removed.iter().all(|at| before.explains(at))
+                && added.iter().all(|at| after.explains(at));
             touched.push((h, explained));
         }
     }
@@ -430,29 +447,58 @@ fn unique_def(tree: &Tree, want: &Key<'_>) -> Option<NodeId> {
     found.next().is_none().then_some(first)
 }
 
-/// Every sibling of A and B is unchanged, and so is their container's own
-/// text: the refactoring is the only change in that scope.
-fn rest_unchanged(
+/// The siblings of A and B with no equal counterpart on the other side, as
+/// (call side, chunk side), aligned by longest common subsequence. `None`
+/// when the container itself differs.
+fn changed_siblings(
     calls: &Tree,
     scope: NodeId,
-    b: NodeId,
-    a_call: NodeId,
+    skip_calls: &[NodeId],
     chunks: &Tree,
     chunk_scope: NodeId,
-    a_chunk: NodeId,
-) -> bool {
-    let left: Vec<NodeId> = code_children(calls, scope)
-        .into_iter()
-        .filter(|&c| c != b)
-        .collect();
-    let right = code_children(chunks, chunk_scope);
-    calls.node(scope).kind == chunks.node(chunk_scope).kind
-        && unmarked(own(calls, scope, None)) == unmarked(own(chunks, chunk_scope, None))
-        && left.len() == right.len()
-        && left.iter().zip(&right).all(|(&l, &r)| {
-            (l == a_call && r == a_chunk)
-                || (l != a_call && r != a_chunk && calls.node(l).hash == chunks.node(r).hash)
-        })
+    skip_chunks: &[NodeId],
+) -> Option<(Vec<NodeId>, Vec<NodeId>)> {
+    if calls.node(scope).kind != chunks.node(chunk_scope).kind
+        || unmarked(own(calls, scope, None)) != unmarked(own(chunks, chunk_scope, None))
+    {
+        return None;
+    }
+    let side = |tree: &Tree, id: NodeId, skip: &[NodeId]| -> Vec<NodeId> {
+        code_children(tree, id)
+            .into_iter()
+            .filter(|c| !skip.contains(c))
+            .collect()
+    };
+    let left = side(calls, scope, skip_calls);
+    let right = side(chunks, chunk_scope, skip_chunks);
+    let (n, m) = (left.len(), right.len());
+    let same = |i: usize, j: usize| calls.node(left[i]).hash == chunks.node(right[j]).hash;
+    // lcs[i][j]: common subsequence length of left[i..] and right[j..].
+    let mut lcs = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if same(i, j) {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
+        }
+    }
+    let (mut changed_left, mut changed_right) = (Vec::new(), Vec::new());
+    let (mut i, mut j) = (0, 0);
+    while i < n || j < m {
+        if i < n && j < m && same(i, j) {
+            i += 1;
+            j += 1;
+        } else if j == m || (i < n && lcs[i + 1][j] >= lcs[i][j + 1]) {
+            changed_left.push(left[i]);
+            i += 1;
+        } else {
+            changed_right.push(right[j]);
+            j += 1;
+        }
+    }
+    Some((changed_left, changed_right))
 }
 
 /// The statement holding the call: the call itself, or a plain assignment of
