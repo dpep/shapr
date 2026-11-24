@@ -92,6 +92,8 @@ struct Facts {
     renamed: usize,
     defined: bool,
     calls_super: bool,
+    /// A method name the language reaches without a visible call.
+    reserved: Option<String>,
     after_gates: BTreeSet<NodeId>,
 }
 
@@ -120,7 +122,14 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let Ok(pair) = pair_of(t, hunk.file, diff) else {
                 continue;
             };
+            let reserved = [(&t.before, &pair.from), (&t.after, &pair.to)]
+                .into_iter()
+                .find(|(tree, name)| {
+                    pair.space.scope == Scope::Method && tree.semantics.reserves(name)
+                })
+                .map(|(_, name)| name.clone());
             let entry = facts.entry(pair).or_default();
+            entry.reserved = entry.reserved.take().or(reserved);
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
             entry.defined |= role.defines().is_some();
@@ -385,6 +394,11 @@ fn judge(
     }
     if !facts.defined {
         return Err(format!("{from}'s definition isn't renamed"));
+    }
+    if let Some(name) = &facts.reserved {
+        return Err(format!(
+            "{name} is a name the language calls without a visible call"
+        ));
     }
     if facts.calls_super {
         return Err(format!("its super call now reaches the parent's {to}"));

@@ -963,35 +963,37 @@ fn statement_value(tree: &Tree, stmt: NodeId, v: &str) -> Option<NodeId> {
     (node.role == Role::Bind && local_name(node) == Some(v) && kids.len() == 1).then(|| kids[0])
 }
 
-/// B's name already means something: used on the side where B doesn't
+/// B's name already means something: one the language reserves (an
+/// inherited, protocol or entry-point name), or used on the side where B doesn't
 /// exist, in any file of the change (a def, a call or a dynamic reference
 /// that defining B would capture, or that removing it would break), or
 /// defined again beside B, so B takes part in dispatch beyond its one call.
 /// New calls to the new method are not collisions.
 fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) -> bool {
     let named = |tree: &Tree, id: NodeId| tree.node(id).name.as_deref() == Some(method);
-    change
-        .files
-        .iter()
-        .filter_map(|f| f.trees.as_ref().ok())
-        .any(|trees| {
-            let (calls, chunks) = dir.sides(trees);
-            ids(chunks).any(|id| {
-                named(chunks, id)
-                    && matches!(
-                        chunks.node(id).role,
-                        Role::Definition(NameKind::Method)
-                            | Role::Reference(NameKind::Method)
-                            | Role::Call(_)
-                            | Role::DynamicName
-                            | Role::Opaque
-                    )
-            }) || ids(calls).any(|id| {
-                named(calls, id)
-                    && calls.node(id).role == Role::Definition(NameKind::Method)
-                    && !(std::ptr::eq(calls, ours) && id == b)
+    ours.semantics.reserves(method)
+        || change
+            .files
+            .iter()
+            .filter_map(|f| f.trees.as_ref().ok())
+            .any(|trees| {
+                let (calls, chunks) = dir.sides(trees);
+                ids(chunks).any(|id| {
+                    named(chunks, id)
+                        && matches!(
+                            chunks.node(id).role,
+                            Role::Definition(NameKind::Method)
+                                | Role::Reference(NameKind::Method)
+                                | Role::Call(_)
+                                | Role::DynamicName
+                                | Role::Opaque
+                        )
+                }) || ids(calls).any(|id| {
+                    named(calls, id)
+                        && calls.node(id).role == Role::Definition(NameKind::Method)
+                        && !(std::ptr::eq(calls, ours) && id == b)
+                })
             })
-        })
 }
 
 /// What the tree's hash reads of a node's own text: its non-whitespace bytes

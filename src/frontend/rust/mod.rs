@@ -19,6 +19,80 @@ use tree_sitter::{Node, Parser};
 
 pub struct Rust;
 
+/// The entry point, and methods of std traits that syntax or the prelude
+/// reaches (`a + b` calls `add`, `{}` calls `fmt`, `x.clone()` prefers an
+/// inherent `clone`): defining or renaming one reaches callers shapr can't
+/// see.
+const RESERVED: &[&str] = &[
+    "add",
+    "add_assign",
+    "as_mut",
+    "as_ref",
+    "bitand",
+    "bitand_assign",
+    "bitor",
+    "bitor_assign",
+    "bitxor",
+    "bitxor_assign",
+    "borrow",
+    "borrow_mut",
+    "call",
+    "call_mut",
+    "call_once",
+    "clamp",
+    "clone",
+    "clone_from",
+    "cmp",
+    "default",
+    "deref",
+    "deref_mut",
+    "div",
+    "div_assign",
+    "drop",
+    "eq",
+    "extend",
+    "fmt",
+    "from",
+    "from_iter",
+    "from_str",
+    "ge",
+    "gt",
+    "hash",
+    "index",
+    "index_mut",
+    "into",
+    "into_future",
+    "into_iter",
+    "le",
+    "lt",
+    "main",
+    "max",
+    "min",
+    "mul",
+    "mul_assign",
+    "ne",
+    "neg",
+    "next",
+    "next_back",
+    "not",
+    "partial_cmp",
+    "poll",
+    "rem",
+    "rem_assign",
+    "shl",
+    "shl_assign",
+    "shr",
+    "shr_assign",
+    "size_hint",
+    "sub",
+    "sub_assign",
+    "to_owned",
+    "to_string",
+    "try_from",
+    "try_into",
+    "type_id",
+];
+
 impl Frontend for Rust {
     fn language(&self) -> &'static str {
         "rust"
@@ -33,6 +107,7 @@ impl Frontend for Rust {
         builder.semantics(Semantics {
             file_scoped: true,
             scoped_drop: true,
+            reserved: RESERVED,
         });
         let mut parser = Parser::new();
         parser

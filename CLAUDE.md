@@ -88,8 +88,10 @@ Language facts the core acts on travel as `Node::role` (a `tree::Role`), with
 the identifier in `Node::name`. Roles are not in the hash or the output.
 Besides `Node::role`, a frontend may set `Tree::semantics`
 (`TreeBuilder::semantics`) for language-wide facts: `file_scoped` (each file
-is a module: cross-file moves change owner) and `scoped_drop` (locals drop at
-block end: extract risk `drop`). `TreeBuilder::ignore(span)` marks a
+is a module: cross-file moves change owner), `scoped_drop` (locals drop at
+block end: extract risk `drop`), and `reserved` (method names the language
+calls without a visible call: rename refuses them, extract and inline call
+them a `collision`). `TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
 whitespace.
 

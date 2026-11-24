@@ -82,6 +82,8 @@ and every name that differs passes these checks:
 - A keyword parameter keeps its name (callers pass it), a renamed method
   doesn't call `super` (it would reach the parent's method of the new name),
   and global variables aren't renamed.
+- Neither name of a method rename is a [reserved name](#reserved-names): the
+  language calls those without a call site shapr can see.
 - A renamed dynamic reference (`send(:old)` → `send(:new)`) follows a method,
   constant or field rename that passes.
 
@@ -112,6 +114,24 @@ parsed file of the change.
 Where uses can be unseen, the unseen ones are smoothed in as one unknown
 (Laplace's rule of succession): `(renamed + 1) / (uses + 2)`, so a method
 renamed with two call sites scores 0.8, and one with none 0.67.
+
+## Reserved names
+
+Some method names are reached without a call shapr can see, so defining,
+removing or renaming a method of that name can change code anywhere: it is
+never an `extract`, `inline` or `rename`.
+
+- Ruby: every method of `Object`, `Kernel` and `BasicObject`, public and
+  private (`inspect`, `hash`, `to_s`, `initialize`, `method_missing`,
+  `respond_to?`, `send`, `puts`, `p`, `format`, `require`, `freeze`, `tap`,
+  …), since every object already has them; and the protocol and hook methods
+  the runtime calls by convention (`each`, `call`, `to_ary`, `to_str`,
+  `to_proc`, `coerce`, `marshal_dump`, `included`, `inherited`,
+  `method_added`, `const_missing`, …).
+- Rust: `main`, and the methods of std traits that syntax or the prelude
+  reaches (`drop`, `clone`, `fmt`, `to_string`, `eq`, `cmp`, `hash`, `next`,
+  `deref`, `index`, `add` and the other operators, `from`, `into`, `default`,
+  …): an inherent method of one of these names wins over the trait's.
 
 ## Generated files
 
@@ -249,7 +269,7 @@ A hunk that matches this shape but would change behavior stays `logic` and says 
 | key | type | meaning |
 |---|---|---|
 | `near` | string | `"extract"` or `"inline"`. |
-| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
+| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
 
 shapr sees only the files in the diff: a subclass override or a caller elsewhere of the new or removed method is invisible to it.
 

@@ -157,6 +157,18 @@ pub struct Semantics {
     /// A local's value is destroyed, observably, when its block ends (Rust's
     /// `Drop`): a binding moved into a new function dies sooner.
     pub scoped_drop: bool,
+    /// Method names the language or its runtime reaches without a call
+    /// shapr can see: what every object already responds to (Ruby's
+    /// `inspect`, `puts`), protocol and hook methods (`each`, `to_str`,
+    /// `inherited`), an entry point (`main`). Defining, removing or renaming
+    /// one reaches callers beyond the change.
+    pub reserved: &'static [&'static str],
+}
+
+impl Semantics {
+    pub fn reserves(&self, name: &str) -> bool {
+        self.reserved.contains(&name)
+    }
 }
 
 #[derive(Debug)]

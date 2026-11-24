@@ -307,3 +307,63 @@ fn a_function_moved_past_a_macro_redefinition_it_invokes_is_not_a_move() {
     );
     assert_eq!(kinds(&report), ["move"]);
 }
+
+// Names the language or its runtime calls without a visible call site.
+
+#[test]
+fn a_chunk_extracted_into_a_protocol_or_builtin_name_collides() {
+    let chunk = "    t = a * 2 + 1\n    u = t + a * 3\n    v = u - t\n";
+    for name in [
+        "inspect",
+        "hash",
+        "initialize",
+        "method_missing",
+        "each",
+        "call",
+        "freeze",
+        "require",
+        "display",
+        "respond_to?",
+        "to_str",
+    ] {
+        let report = ruby(
+            &format!("class A\n  def go(a)\n{chunk}    1\n  end\nend\n"),
+            &format!(
+                "class A\n  def go(a)\n    {name}(a)\n    1\n  end\n\n  def {name}(a)\n{chunk}  end\nend\n"
+            ),
+        );
+        assert_near(&report, "extract", Some("collision"));
+    }
+    let report = rust(
+        "struct A;\nimpl A {\n    fn go(&self, a: u32) -> u32 {\n        let t = a * 2 + 1;\n        let u = t + a * 3;\n        u - t\n    }\n}\n",
+        "struct A;\nimpl A {\n    fn go(&self, a: u32) -> u32 {\n        self.clone(a)\n    }\n\n    fn clone(&self, a: u32) -> u32 {\n        let t = a * 2 + 1;\n        let u = t + a * 3;\n        u - t\n    }\n}\n",
+    );
+    assert_near(&report, "extract", Some("collision"));
+}
+
+#[test]
+fn a_method_renamed_to_or_from_a_protocol_name_is_logic() {
+    for (from, to) in [
+        ("fmt", "to_s"),
+        ("setup", "initialize"),
+        ("walk", "each"),
+        ("call", "run"),
+        ("fallback", "method_missing"),
+    ] {
+        let report = ruby(
+            &format!("class A\n  def {from}(x)\n    x\n  end\nend\n"),
+            &format!("class A\n  def {to}(x)\n    x\n  end\nend\n"),
+        );
+        assert_eq!(kinds(&report), ["logic"], "{from} -> {to}");
+    }
+    for (before, after) in [
+        ("fn start() {}\n", "fn main() {}\n"),
+        ("fn main() {}\n", "fn start() {}\n"),
+        (
+            "struct A;\nimpl A { fn show(&self) -> i32 { 1 } }\n",
+            "struct A;\nimpl A { fn clone(&self) -> i32 { 1 } }\n",
+        ),
+    ] {
+        assert_eq!(kinds(&rust(before, after)), ["logic"], "{after}");
+    }
+}
