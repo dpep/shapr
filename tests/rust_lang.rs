@@ -1,79 +1,9 @@
 //! End to end: Rust files, through the tree-sitter frontend.
 
 use serde_json::Value;
-use std::path::Path;
-use std::process::Command;
 
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-/// git and shapr with the caller's repository context removed, so a run
-/// under `git rebase --exec` can't write into the real repository.
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// `shapr -j` on a commit taking `before` to `after`.
-fn classify(before: &[(&str, &str)], after: &[(&str, &str)]) -> Value {
-    let dir = tempfile::tempdir().unwrap();
-    git(dir.path(), &["init", "-q", "-b", "main"]);
-    git(dir.path(), &["config", "user.email", "test@example.com"]);
-    git(dir.path(), &["config", "user.name", "Test"]);
-    for state in [before, after] {
-        for (path, content) in state {
-            std::fs::write(dir.path().join(path), content).unwrap();
-        }
-        git(dir.path(), &["add", "-A"]);
-        git(dir.path(), &["commit", "-q", "-m", "state"]);
-    }
-    let out = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
-        .args(["-j", "HEAD~1..HEAD"])
-        .output()
-        .unwrap();
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))
-}
-
-/// One file, `lib.rs`, before and after.
-fn change(before: &str, after: &str) -> Value {
-    classify(&[("lib.rs", before)], &[("lib.rs", after)])
-}
-
-fn hunks(report: &Value) -> &Vec<Value> {
-    report["hunks"].as_array().unwrap()
-}
-
-fn kinds(report: &Value) -> Vec<&str> {
-    hunks(report)
-        .iter()
-        .map(|h| h["kind"].as_str().unwrap())
-        .collect()
-}
+mod common;
+use common::*;
 
 fn assert_kinds(report: &Value, want: &[&str]) {
     assert_eq!(kinds(report), want, "{report:#}");
@@ -109,7 +39,7 @@ fn assert_context_move(report: &Value, context: &str) {
 
 #[test]
 fn rust_files_are_parsed() {
-    let report = change("fn a() {}\n", "fn a() { b(); }\n");
+    let report = rust("fn a() {}\n", "fn a() { b(); }\n");
     let hunk = &hunks(&report)[0];
     assert_eq!(hunk["language"], "rust");
     assert_eq!(hunk["parsed"], true);
@@ -118,7 +48,7 @@ fn rust_files_are_parsed() {
 
 #[test]
 fn a_rustfmt_reflow_is_format_only() {
-    let report = change(
+    let report = rust(
         "fn total(items: &[u32]) -> u32 { items.iter().map(|x| x * 2).filter(|x| *x > 3).sum() }\n",
         "fn total(items: &[u32]) -> u32 {\n    items\n        .iter()\n        .map(|x| x * 2)\n        .filter(|x| *x > 3)\n        .sum()\n}\n",
     );
@@ -127,7 +57,7 @@ fn a_rustfmt_reflow_is_format_only() {
 
 #[test]
 fn whitespace_inside_a_string_is_logic() {
-    let report = change(
+    let report = rust(
         "fn a() -> &'static str { \"a b\" }\n",
         "fn a() -> &'static str { \"a  b\" }\n",
     );
@@ -136,7 +66,7 @@ fn whitespace_inside_a_string_is_logic() {
 
 #[test]
 fn a_doc_comment_edit_is_comment_only() {
-    let report = change(
+    let report = rust(
         "/// Adds one.\npub fn inc(x: u32) -> u32 {\n    x + 1 // plain\n}\n",
         "/// Adds one to `x`.\n///\n/// Wraps on overflow? No: panics.\npub fn inc(x: u32) -> u32 {\n    x + 1 /* block */\n}\n",
     );
@@ -157,18 +87,18 @@ fn an_attribute_change_is_logic() {
             "#![deny(dead_code)]\nfn a() {}\n",
         ),
     ] {
-        assert_kinds(&change(before, after), &["logic"]);
+        assert_kinds(&rust(before, after), &["logic"]);
     }
 }
 
 #[test]
 fn a_visibility_change_is_logic() {
-    assert_kinds(&change("fn a() {}\n", "pub fn a() {}\n"), &["logic"]);
+    assert_kinds(&rust("fn a() {}\n", "pub fn a() {}\n"), &["logic"]);
 }
 
 #[test]
 fn a_local_rename_is_a_rename() {
-    let report = change(
+    let report = rust(
         "fn area(w: u32, h: u32) -> u32 {\n    let n = w * h;\n    n + 1\n}\n",
         "fn area(w: u32, h: u32) -> u32 {\n    let size = w * h;\n    size + 1\n}\n",
     );
@@ -181,7 +111,7 @@ fn a_local_rename_is_a_rename() {
 
 #[test]
 fn a_local_renamed_inside_a_format_macro_is_a_rename() {
-    let report = change(
+    let report = rust(
         "fn show(w: u32) {\n    let n = w * 2;\n    println!(\"{} {n}\", n);\n}\n",
         "fn show(w: u32) {\n    let size = w * 2;\n    println!(\"{} {size}\", size);\n}\n",
     );
@@ -192,7 +122,7 @@ fn a_local_renamed_inside_a_format_macro_is_a_rename() {
 fn a_rename_whose_old_name_survives_in_a_macro_is_logic() {
     // The macro's tokens still say `n`: the parser can't tell what it means.
     for line in ["println!(\"{}\", n);", "println!(\"{n}\");"] {
-        let report = change(
+        let report = rust(
             &format!("fn show(w: u32) {{\n    let n = w * 2;\n    {line}\n}}\n"),
             &format!("fn show(w: u32) {{\n    let size = w * 2;\n    {line}\n}}\n"),
         );
@@ -204,7 +134,7 @@ fn a_rename_whose_old_name_survives_in_a_macro_is_logic() {
 fn a_function_rename_with_its_call_sites_is_a_rename() {
     let before = "pub fn compute(x: u32) -> u32 {\n    x + 1\n}\n\npub fn run() -> u32 {\n    compute(2) + compute(3)\n}\n";
     let after = "pub fn evaluate(x: u32) -> u32 {\n    x + 1\n}\n\npub fn run() -> u32 {\n    evaluate(2) + evaluate(3)\n}\n";
-    let report = change(before, after);
+    let report = rust(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "rename"), "{report:#}");
     let rename = &lead(&hunks(&report)[0])["detail"]["renames"][0];
     assert_eq!(rename["scope"], "method");
@@ -216,7 +146,7 @@ fn a_function_rename_missing_a_use_is_logic() {
     // `compute` still passed by name to `map`.
     let before = "fn compute(x: u32) -> u32 {\n    x + 1\n}\n\nfn run(v: Vec<u32>) -> Vec<u32> {\n    let a = compute(2);\n    v.into_iter().map(compute).collect()\n}\n";
     let after = "fn evaluate(x: u32) -> u32 {\n    x + 1\n}\n\nfn run(v: Vec<u32>) -> Vec<u32> {\n    let a = evaluate(2);\n    v.into_iter().map(compute).collect()\n}\n";
-    let report = change(before, after);
+    let report = rust(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
@@ -242,7 +172,7 @@ fn a_field_rename_reaches_every_file() {
 #[test]
 fn a_field_named_by_a_derive_is_not_renamed() {
     // Debug prints field names; serde reads and writes them.
-    let report = change(
+    let report = rust(
         "#[derive(Debug)]\npub struct Point {\n    pub x: i32,\n}\n",
         "#[derive(Debug)]\npub struct Point {\n    pub left: i32,\n}\n",
     );
@@ -254,7 +184,7 @@ const SWAP_AFTER: &str = "pub struct Counter {\n    n: u32,\n}\n\nimpl Counter {
 
 #[test]
 fn swapping_methods_in_an_impl_is_a_move() {
-    let report = change(SWAP_BEFORE, SWAP_AFTER);
+    let report = rust(SWAP_BEFORE, SWAP_AFTER);
     assert!(kinds(&report).iter().all(|k| *k == "move"), "{report:#}");
 }
 
@@ -264,7 +194,7 @@ fn a_method_moved_to_another_impl_is_a_move_to_a_new_owner() {
         "impl A {\n    fn go(&self) -> u32 {\n        self.x + self.y\n    }\n}\n\nimpl B {\n}\n";
     let after =
         "impl A {\n}\n\nimpl B {\n    fn go(&self) -> u32 {\n        self.x + self.y\n    }\n}\n";
-    let report = change(before, after);
+    let report = rust(before, after);
     assert_context_move(&report, "owner");
 }
 
@@ -275,7 +205,7 @@ fn an_attribute_left_behind_by_a_move_is_logic() {
     let f = |name: &str| format!("fn {name}() -> u32 {{\n    let v = 1;\n    v + 2\n}}\n");
     let before = format!("#[cfg(test)]\n{}{}", f("a"), f("b"));
     let after = format!("#[cfg(test)]\n{}{}", f("b"), f("a"));
-    let report = change(&before, &after);
+    let report = rust(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
@@ -307,7 +237,7 @@ fn reordering_struct_fields_or_enum_variants_is_logic() {
         ),
     ] {
         assert!(
-            kinds(&change(before, after)).iter().all(|k| *k == "logic"),
+            kinds(&rust(before, after)).iter().all(|k| *k == "logic"),
             "{before}"
         );
     }
@@ -323,7 +253,7 @@ fn extracting_a_helper_is_an_extract() {
     let after = format!(
         "{CALLER}        self.summary(rows, header)\n    }}\n\n    fn summary(&self, rows: &[u32], header: String) -> String {{\n        let total: u32 = rows.iter().sum();\n        let scaled = total * self.scale;\n        format!(\"{{}}: {{}}\", header, scaled)\n    }}\n}}\n"
     );
-    let report = change(&before, &after);
+    let report = rust(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
     let detail = &lead(&hunks(&report)[0])["detail"];
     assert_eq!(detail["method"], "summary");
@@ -339,7 +269,7 @@ fn extracting_statements_holding_a_question_mark_is_logic() {
     let after = format!(
         "{caller}        let size = self.read(path, base)?;\n        Ok(size)\n    }}\n\n    fn read(&self, path: &str, base: usize) -> Result<u32, Error> {{\n        let text = std::fs::read_to_string(path)?;\n        let n = text.trim().parse::<u32>()?;\n        Ok(n + base as u32)\n    }}\n}}\n"
     );
-    let report = change(&before, &after);
+    let report = rust(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
@@ -353,7 +283,7 @@ fn extracting_statements_followed_by_more_code_that_bind_locals_is_logic() {
     let after = format!(
         "{caller}        let count = self.lock_and_count(jobs);\n        self.notify(start);\n        count\n    }}\n\n    fn lock_and_count(&self, jobs: &[u32]) -> usize {{\n        let guard = self.lock.lock();\n        let count = jobs.len() + guard.len();\n        self.log(count);\n        count\n    }}\n}}\n"
     );
-    let report = change(&before, &after);
+    let report = rust(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
     assert_eq!(
         lead(&hunks(&report)[0])["detail"]["risk"],
@@ -372,13 +302,13 @@ fn extracting_statements_holding_an_unknown_macro_is_logic() {
     let after = format!(
         "{caller}        let doubled = self.double(v, limit);\n        Ok(doubled)\n    }}\n\n    fn double(&self, v: u32, limit: u32) -> u32 {{\n        ensure!(v < limit, \"too big\");\n        v * 2 + limit\n    }}\n}}\n"
     );
-    let report = change(&before, &after);
+    let report = rust(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
 #[test]
 fn editing_a_type_in_place_is_not_a_move() {
-    let report = change(
+    let report = rust(
         "enum Key {\n    Name(u64),\n    Code(u64),\n    Path(Vec<String>),\n    Pair(u32, u32),\n}\n",
         "enum Key<'t> {\n    Name(u64),\n    Code(u64),\n    Path(Vec<String>),\n    Pair(u32, u32),\n    Declaration(&'t str),\n}\n",
     );
@@ -390,13 +320,13 @@ fn a_function_moved_between_same_named_cfg_modules_is_a_move_to_a_new_owner() {
     let f = "    pub fn open(x: u32) -> u32 {\n        let y = x * 2;\n        y + 1\n    }\n";
     let before = format!("#[cfg(unix)]\nmod imp {{\n{f}}}\n\n#[cfg(windows)]\nmod imp {{\n}}\n");
     let after = format!("#[cfg(unix)]\nmod imp {{\n}}\n\n#[cfg(windows)]\nmod imp {{\n{f}}}\n");
-    let report = change(&before, &after);
+    let report = rust(&before, &after);
     assert_context_move(&report, "owner");
 }
 
 #[test]
 fn a_reflow_adding_trailing_commas_is_format_only() {
-    let report = change(
+    let report = rust(
         "fn a() {\n    call(first_argument, second_argument, third_argument);\n    let v = [1, 2];\n    match v.len() { 0 => 1, _ => 2 }\n}\n",
         "fn a() {\n    call(\n        first_argument,\n        second_argument,\n        third_argument,\n    );\n    let v = [1, 2,];\n    match v.len() {\n        0 => 1,\n        _ => 2,\n    }\n}\n",
     );
@@ -406,11 +336,11 @@ fn a_reflow_adding_trailing_commas_is_format_only() {
 #[test]
 fn a_comma_making_a_one_element_tuple_is_logic() {
     assert_kinds(
-        &change("fn a() -> u8 { (1) }\n", "fn a() -> (u8,) { (1,) }\n"),
+        &rust("fn a() -> u8 { (1) }\n", "fn a() -> (u8,) { (1,) }\n"),
         &["logic"],
     );
     assert_kinds(
-        &change(
+        &rust(
             "fn a(t: (u8,)) { let (x,) = t; }\n",
             "fn a(t: (u8,)) { let (x) = t; }\n",
         ),
@@ -421,7 +351,7 @@ fn a_comma_making_a_one_element_tuple_is_logic() {
 #[test]
 fn editing_a_type_s_attributes_in_place_is_not_a_move() {
     let fields = "    pub verbose: bool,\n    pub quiet: bool,\n    pub path: String,\n    pub depth: u32,\n";
-    let report = change(
+    let report = rust(
         &format!("#[derive(Parser)]\n#[command(about = \"old\")]\npub struct Cli {{\n{fields}}}\n"),
         &format!(
             "#[derive(Parser)]\n#[command(about = \"new\")]\npub struct Cli {{\n{fields}    pub color: bool,\n}}\n"
