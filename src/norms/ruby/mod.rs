@@ -66,6 +66,10 @@ static NORMS: &[NormDef] = &[
         id: naming::METHOD,
         styles: naming::STYLES,
     },
+    NormDef {
+        id: naming::VARIABLE,
+        styles: naming::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -80,6 +84,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     whitespace::see,
     width::see,
     naming::see,
+    naming::see_variables,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -165,6 +170,11 @@ static SETTINGS: &[Setting] = &[
         key: "EnforcedStyle",
         values: NAMING_VALUES,
     },
+    Setting {
+        norm: naming::VARIABLE,
+        key: "EnforcedStyle",
+        values: NAMING_VALUES,
+    },
 ];
 
 const NAMING_VALUES: &[(&str, &str)] = &[("snake_case", "snake_case"), ("camelCase", "camelCase")];
@@ -210,6 +220,7 @@ impl Language for Ruby {
         whitespace::lines(&mut walker);
         final_newline::file(&mut walker);
         naming::methods(&mut walker);
+        naming::variables(&mut walker);
         Analysis {
             observations: walker.observations,
             scopes: walker.scopes,

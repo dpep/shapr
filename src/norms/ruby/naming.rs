@@ -1,5 +1,6 @@
-//! Naming/MethodName: method names in `snake_case` or `camelCase`. Only a
-//! name of two or more words chooses: `total` reads the same in both.
+//! Naming/MethodName and Naming/VariableName: method and local variable
+//! names in `snake_case` or `camelCase`. Only a name of two or more words
+//! chooses: `total` reads the same in both.
 
 use super::Walker;
 use crate::norms::Replace;
@@ -7,6 +8,7 @@ use ruby_prism::Node;
 use std::ops::Range;
 
 pub const METHOD: &str = "Naming/MethodName";
+pub const VARIABLE: &str = "Naming/VariableName";
 pub const STYLES: &[&str] = &["snake_case", "camelCase"];
 
 /// What the walk gathers for the passes after it.
@@ -19,6 +21,70 @@ pub struct Names {
     private: Vec<usize>,
     /// Messages of calls with no receiver or `self`.
     calls: Vec<Range<usize>>,
+    /// Each local scope (program, class, method, block) and the locals it
+    /// declares.
+    scopes: Vec<(Range<usize>, Vec<Vec<u8>>)>,
+    /// Every read, write and non-keyword parameter of a local, by its name.
+    locals: Vec<Range<usize>>,
+}
+
+pub fn see_variables(w: &mut Walker, node: &Node) {
+    let locals = if let Some(n) = node.as_program_node() {
+        Some(n.locals())
+    } else if let Some(n) = node.as_def_node() {
+        Some(n.locals())
+    } else if let Some(n) = node.as_block_node() {
+        Some(n.locals())
+    } else if let Some(n) = node.as_lambda_node() {
+        Some(n.locals())
+    } else if let Some(n) = node.as_class_node() {
+        Some(n.locals())
+    } else if let Some(n) = node.as_module_node() {
+        Some(n.locals())
+    } else {
+        node.as_singleton_class_node().map(|n| n.locals())
+    };
+    if let Some(locals) = locals {
+        let loc = node.location();
+        let names = locals.iter().map(|c| c.as_slice().to_vec()).collect();
+        w.names
+            .scopes
+            .push((loc.start_offset()..loc.end_offset(), names));
+        return;
+    }
+    let name = if let Some(n) = node.as_local_variable_read_node() {
+        let end = n.location().end_offset();
+        // `{a:}` reads `a` through its key: renaming it would rename the key.
+        if w.source.get(end) == Some(&b':') && w.source.get(end + 1) != Some(&b':') {
+            return;
+        }
+        Some(n.location())
+    } else if let Some(n) = node.as_local_variable_write_node() {
+        Some(n.name_loc())
+    } else if let Some(n) = node.as_local_variable_target_node() {
+        Some(n.location())
+    } else if let Some(n) = node.as_local_variable_operator_write_node() {
+        Some(n.name_loc())
+    } else if let Some(n) = node.as_local_variable_and_write_node() {
+        Some(n.name_loc())
+    } else if let Some(n) = node.as_local_variable_or_write_node() {
+        Some(n.name_loc())
+    } else if let Some(n) = node.as_required_parameter_node() {
+        Some(n.location())
+    } else if let Some(n) = node.as_optional_parameter_node() {
+        Some(n.name_loc())
+    } else if let Some(n) = node.as_rest_parameter_node() {
+        n.name_loc()
+    } else if let Some(n) = node.as_keyword_rest_parameter_node() {
+        n.name_loc()
+    } else if let Some(n) = node.as_block_parameter_node() {
+        n.name_loc()
+    } else {
+        node.as_block_local_variable_node().map(|n| n.location())
+    };
+    if let Some(name) = name {
+        w.names.locals.push(name.start_offset()..name.end_offset());
+    }
 }
 
 pub fn see(w: &mut Walker, node: &Node) {
@@ -119,6 +185,48 @@ pub fn methods(w: &mut Walker) {
             snake(core),
             fix.into_iter().collect(),
         );
+    }
+}
+
+/// Each local that chooses, once per scope that declares it, at its first
+/// mention. A rename covers the scope, and is suggested when every mention
+/// there is the local, and nothing in the scope can read locals by name
+/// (`binding`, `eval`, `local_variables`). A keyword parameter is interface:
+/// its mention blocks the rename.
+pub fn variables(w: &mut Walker) {
+    let source = w.source;
+    let scopes = std::mem::take(&mut w.names.scopes);
+    for (range, names) in scopes {
+        let mut dynamic = None;
+        for name in names {
+            let Some((style, core)) = case(&name) else {
+                continue;
+            };
+            let uses: Vec<usize> = (w.names.locals.iter())
+                .filter(|l| range.contains(&l.start) && source[(*l).clone()] == name[..])
+                .map(|l| l.start)
+                .collect();
+            let Some(&first) = uses.iter().min() else {
+                continue;
+            };
+            let dynamic = *dynamic.get_or_insert_with(|| {
+                [&b"binding"[..], b"eval", b"local_variables"]
+                    .iter()
+                    .any(|word| !mentions(source, range.clone(), word).is_empty())
+            });
+            let fix = (!dynamic)
+                .then(|| rename(source, &name, range.clone(), &uses))
+                .flatten();
+            let line = w.index.line(first);
+            w.push(
+                VARIABLE,
+                style,
+                first,
+                (line, line),
+                snake(core),
+                fix.into_iter().collect(),
+            );
+        }
     }
 }
 
@@ -255,6 +363,51 @@ mod tests {
         assert_eq!(
             styles(src, METHOD),
             "snake_case@2 camelCase@3 camelCase@4 snake_case@6"
+        );
+    }
+
+    #[test]
+    fn locals_choose_once_per_scope() {
+        let src = "itemCount = 1\ndef a(first_name, lastName, keyArg: 1)\n  totalSum = 0\n  \
+                   totalSum += 1\n  [1].each { |rowIndex| rowIndex }\n  x = 2\nend\n";
+        assert_eq!(
+            styles(src, VARIABLE),
+            "camelCase@1 snake_case@2 camelCase@2 camelCase@3 camelCase@5"
+        );
+    }
+
+    /// The suggested rename for each `camelCase` local, as `line: text@line...`.
+    fn local_renames(src: &str) -> Vec<String> {
+        let analysis = Ruby.analyze(src.as_bytes());
+        let index = crate::norms::LineIndex::new(src.as_bytes());
+        (analysis.observations.iter())
+            .filter(|o| o.norm == VARIABLE && o.style == "camelCase")
+            .map(|o| {
+                let fix = o.fix.first().map(|(_, replaces)| {
+                    let at: Vec<String> = (replaces.iter())
+                        .map(|r| format!("{}@{}", r.text, index.line(r.span.start)))
+                        .collect();
+                    at.join(" ")
+                });
+                format!("{}: {}", o.line, fix.unwrap_or_default())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_local_rename_covers_its_scope_unless_something_else_mentions_it() {
+        let src = "def a(rowCount)\n  rowCount.times { |i| p rowCount }\nend\n\
+                   def b\n  userName = 1\n  go(userName:)\nend\n\
+                   def c\n  maxSize = 1\n  binding\nend\n\
+                   def d\n  newName = 1\n  new_name = 2\nend\n";
+        assert_eq!(
+            local_renames(src),
+            [
+                "1: row_count@1 row_count@2 row_count@2",
+                "5: ",
+                "9: ",
+                "13: "
+            ]
         );
     }
 
