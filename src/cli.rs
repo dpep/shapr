@@ -129,7 +129,7 @@ struct Cli {
     cache_dir: Option<PathBuf>,
 
     /// Experimental. Show the GitHub cache: its path, the repositories in it,
-    /// and their size.
+    /// and their size; and the usage log's path and size.
     #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "clear_cache"])]
     status: bool,
 
