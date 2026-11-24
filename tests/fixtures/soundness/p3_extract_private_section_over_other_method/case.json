@@ -1,0 +1,7 @@
+{
+  "description": "an extract under an added `private` line that also makes an existing method private: the visibility line stays logic",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}},
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "description": "an extract into a new method under a `private` line added for it alone: the visibility line belongs to the extract",
+  "expect": {
+    "hunks": [{"kind": "extract", "verdict": "structure", "parts": [{"kind": "extract", "structure": true}]}],
+    "summary": {"verdict": "structure"}
+  }
+}

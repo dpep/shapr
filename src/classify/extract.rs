@@ -225,11 +225,13 @@ fn find(
     }
     let a_chunk = unique_def(chunks, &key(calls, a_call)).ok_or("caller not on the other side")?;
     let chunk_scope = chunks.node(a_chunk).parent.ok_or("no parent")?;
-    let changed = siblings(
+    let mut changed = siblings(
         (calls, scope, &[a_call, b]),
         (chunks, chunk_scope, &[a_chunk]),
     )
     .ok_or("the methods' container changed")?;
+    // A bare `private` added (or removed) with B, governing only B, is B's.
+    changed.0.retain(|&v| !governs_only(calls, scope, v, b));
     let (params, body) = method_body(calls, b).ok_or("unsupported parameters or body")?;
     let chunk = splice(calls, a_call, stmt, calls.node(body).kind, chunks, a_chunk)
         .ok_or("caller differs beyond the call")?;
@@ -333,6 +335,29 @@ fn find(
         wiring,
         used_in: Vec::new(),
     })
+}
+
+/// Whether `v` is a bare visibility call (`private`) whose section in `scope`
+/// holds nothing but B: no other statement follows it before the next one.
+fn governs_only(tree: &Tree, scope: NodeId, v: NodeId, b: NodeId) -> bool {
+    use crate::tree::Visibility::*;
+    if !matches!(
+        tree.node(v).role,
+        Role::Visibility(Private | Protected | Public)
+    ) || !code_children(tree, v).is_empty()
+    {
+        return false;
+    }
+    let siblings = code_children(tree, scope);
+    let Some(at) = siblings.iter().position(|&c| c == v) else {
+        return false;
+    };
+    let section: Vec<NodeId> = siblings[at + 1..]
+        .iter()
+        .copied()
+        .take_while(|&c| !matches!(tree.node(c).role, Role::Visibility(_)))
+        .collect();
+    section == [b]
 }
 
 /// Why values don't flow between the call and the statements the way they
