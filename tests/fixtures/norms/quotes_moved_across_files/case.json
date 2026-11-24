@@ -1,0 +1,33 @@
+{
+  "description": "a method moved from one file to another carries its strings: code deleted elsewhere in the change, re-indented or not, chooses no style, while new code beside it does",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": []
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "after": {
+                "double_quotes": 2,
+                "single_quotes": 0
+              },
+              "deviations": [
+                {
+                  "line": 19,
+                  "style": "double_quotes"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

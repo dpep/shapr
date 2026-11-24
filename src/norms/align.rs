@@ -14,7 +14,7 @@ use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 
 /// Neighbor files a directory's evidence reads, at most.
@@ -169,14 +169,44 @@ pub fn styles(
 ) -> Vec<Option<HunkStyle>> {
     let mut out = Vec::new();
     let directory = Directory::new(change);
+    let deleted = deleted(change);
     for file in &change.files {
         let hunks = &file.diff.hunks;
-        match file_styles(file, snapshot, outside, &directory, threshold) {
+        match file_styles(file, snapshot, outside, &directory, &deleted, threshold) {
             Some(styles) => out.extend(styles.into_iter().map(Some)),
             None => out.extend(hunks.iter().map(|_| None)),
         }
     }
     out
+}
+
+/// Every line the change deletes, anywhere: without its indentation, and
+/// as it was.
+fn deleted(change: &Change) -> [HashSet<&[u8]>; 2] {
+    let mut out = [HashSet::new(), HashSet::new()];
+    for file in &change.files {
+        let Ok(trees) = &file.trees else { continue };
+        let source = &trees.before.source[..];
+        let index = LineIndex::new(source);
+        for line in file.diff.hunks.iter().flat_map(|h| &h.removed) {
+            out[0].insert(unindented(source, &index, *line, false));
+            out[1].insert(unindented(source, &index, *line, true));
+        }
+    }
+    out
+}
+
+/// Line `line` of `source`, without its indentation unless it `keeps` it;
+/// its line break stays, and a blank line keeps its whitespace, as norms
+/// read both.
+fn unindented<'a>(source: &'a [u8], index: &LineIndex, line: usize, keeps: bool) -> &'a [u8] {
+    let text = &source[index.start(line)..index.start(line + 1).min(source.len())];
+    let code = text.trim_ascii_start();
+    if keeps || code.trim_ascii().is_empty() {
+        text
+    } else {
+        code
+    }
 }
 
 fn skipped_style(reason: &'static str) -> HunkStyle {
@@ -193,6 +223,7 @@ fn file_styles(
     snapshot: Option<&dyn Snapshot>,
     outside: &dyn Outside,
     directory: &Directory,
+    deleted: &[HashSet<&[u8]>; 2],
     threshold: f64,
 ) -> Option<Vec<HunkStyle>> {
     let path = file.diff.path();
@@ -228,6 +259,7 @@ fn file_styles(
         path,
         old_path: file.diff.old_path.as_deref(),
         outside,
+        deleted,
         source: &trees.after.source,
         tree: &trees.after,
         before: &before,
@@ -392,6 +424,8 @@ struct File<'a> {
     old_path: Option<&'a str>,
     /// The repository beyond the change, for renames other files could see.
     outside: &'a dyn Outside,
+    /// The lines the change deletes anywhere: unindented, and as they were.
+    deleted: &'a [HashSet<&'a [u8]>; 2],
     source: &'a [u8],
     /// The after side, which a suggested edit must keep the same program.
     tree: &'a Tree,
@@ -428,7 +462,11 @@ impl File<'_> {
             .collect();
         // Only new code is judged: deleting code, or carrying a string over
         // unchanged into new code, chooses no style.
-        let fresh = fresh(&removed, &added);
+        // Code the change deleted elsewhere and put here, moved or
+        // re-indented, chooses no style either.
+        let fresh: Vec<&Observation> = (fresh(&removed, &added).into_iter())
+            .filter(|o| !self.carried(o.lines, def.indents))
+            .collect();
         if fresh.is_empty() {
             return None;
         }
@@ -508,6 +546,19 @@ impl File<'_> {
             restyle: false,
             flagged: false,
             deviations,
+        })
+    }
+
+    /// Every line of `lines` is one the change deleted somewhere, with the
+    /// same indentation when it `indents`.
+    fn carried(&self, (first, last): (usize, usize), indents: bool) -> bool {
+        (first..=last).all(|l| {
+            self.deleted[indents as usize].contains(unindented(
+                self.source,
+                &self.index,
+                l,
+                indents,
+            ))
         })
     }
 

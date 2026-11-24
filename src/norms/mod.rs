@@ -84,6 +84,9 @@ pub struct NormDef {
     /// is callable from a subclass): an edit is offered only when the
     /// repository holds neither the old name nor the new one outside the file.
     pub shared: bool,
+    /// Its style is a line's indentation, so code carried over re-indented
+    /// chooses it anew.
+    pub indents: bool,
 }
 
 /// The per-language seam: which files, which norms, how to observe them,

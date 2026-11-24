@@ -749,7 +749,10 @@ RuboCop's `Style/StringLiterals` (`single_quotes` or `double_quotes`). shapr
 infers each norm from the code itself and judges only new code against it.
 Deleting code chooses no style, and neither does code carried over
 unchanged or edited in place: an added observation matched by a removed one with
-the same text and style, or failing that the same style, is kept, not chosen.
+the same text and style, or failing that the same style, is kept, not chosen. So is code
+the change deletes anywhere and adds back, moved to another method or file:
+an observation whose every line the diff also deletes somewhere, ignoring
+indentation (the indentation norms keep it, as it is their style).
 
 Ruby's norms, named by the RuboCop cop whose setting configures them:
 
