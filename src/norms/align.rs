@@ -9,6 +9,7 @@ use super::{
     ScopeKind, count, edit, for_path, infer, pooled, skipped,
 };
 use crate::change::{Change, FileChange};
+use crate::classify::proof::{Outside, Search};
 use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
@@ -163,13 +164,14 @@ fn scope_name(scope: ScopeKind) -> &'static str {
 pub fn styles(
     change: &Change,
     snapshot: Option<&dyn Snapshot>,
+    outside: &dyn Outside,
     threshold: f64,
 ) -> Vec<Option<HunkStyle>> {
     let mut out = Vec::new();
     let directory = Directory::new(change);
     for file in &change.files {
         let hunks = &file.diff.hunks;
-        match file_styles(file, snapshot, &directory, threshold) {
+        match file_styles(file, snapshot, outside, &directory, threshold) {
             Some(styles) => out.extend(styles.into_iter().map(Some)),
             None => out.extend(hunks.iter().map(|_| None)),
         }
@@ -189,6 +191,7 @@ fn skipped_style(reason: &'static str) -> HunkStyle {
 fn file_styles(
     file: &FileChange,
     snapshot: Option<&dyn Snapshot>,
+    outside: &dyn Outside,
     directory: &Directory,
     threshold: f64,
 ) -> Option<Vec<HunkStyle>> {
@@ -221,6 +224,7 @@ fn file_styles(
     let file = File {
         path,
         old_path: file.diff.old_path.as_deref(),
+        outside,
         source: &trees.after.source,
         tree: &trees.after,
         before: &before,
@@ -382,6 +386,8 @@ struct File<'a> {
     path: &'a str,
     /// Where the file was before the change, which isn't its own neighbor.
     old_path: Option<&'a str>,
+    /// The repository beyond the change, for renames other files could see.
+    outside: &'a dyn Outside,
     source: &'a [u8],
     /// The after side, which a suggested edit must keep the same program.
     tree: &'a Tree,
@@ -463,6 +469,7 @@ impl File<'_> {
                         .filter(|(_, replaces)| {
                             edit::keeps(self.path, self.tree, replaces, def.renames)
                         })
+                        .filter(|(_, replaces)| !def.shared || self.unshared(replaces))
                         .and_then(|(_, replaces)| edit::unified(self.path, self.source, replaces)),
                 })
                 .collect(),
@@ -486,6 +493,29 @@ impl File<'_> {
             flagged: false,
             deviations,
         })
+    }
+
+    /// A rename's old and new names appear in no other file of the
+    /// repository: what the search can't settle counts as shared.
+    fn unshared(&self, replaces: &[Replace]) -> bool {
+        let Some(first) = replaces.first() else {
+            return false;
+        };
+        // The whole identifier: a rename keeps a leading `_` outside its span.
+        let start = self.source[..first.span.start]
+            .iter()
+            .rposition(|&b| b != b'_')
+            .map_or(0, |i| i + 1);
+        let prefix = String::from_utf8_lossy(&self.source[start..first.span.start]);
+        let old = String::from_utf8_lossy(&self.source[start..first.span.end]);
+        [old.into_owned(), format!("{prefix}{}", first.text)]
+            .iter()
+            .all(|word| match self.outside.uses(self.path, word) {
+                Search::Done {
+                    found, mentioned, ..
+                } => found.iter().all(|f| f == self.path) && mentioned.is_empty(),
+                Search::Capped | Search::Unavailable => false,
+            })
     }
 
     /// Every replacement lies in the hunk's changed region: a suggested edit

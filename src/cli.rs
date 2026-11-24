@@ -325,7 +325,7 @@ pub fn run() -> ExitCode {
     };
     let labels = classify::classify(&change, outside);
     let mut report = report::build(&change, &labels, claims, report::Meta::new(source));
-    let styles = crate::norms::styles(&change, snapshot, cli.norm_threshold);
+    let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     for ((hunk, style), label) in report
         .hunks
         .iter_mut()

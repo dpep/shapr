@@ -77,6 +77,10 @@ pub struct NormDef {
     /// Its suggested edits rename identifiers, so they change the program
     /// by design: they are held to parsing cleanly, not to the same tree.
     pub renames: bool,
+    /// Its renames reach a name other files can call (a private Ruby method
+    /// is callable from a subclass): an edit is offered only when the
+    /// repository holds neither the old name nor the new one outside the file.
+    pub shared: bool,
 }
 
 /// The per-language seam: which files, which norms, how to observe them,

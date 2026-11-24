@@ -31,7 +31,7 @@ First release.
 - Experimental: `.editorconfig` configures norms beside `.rubocop.yml`, which wins where both set one. The `Layout/TrailingWhitespace` norm, configured by `trim_trailing_whitespace`.
 - Experimental: the `Layout/TrailingEmptyLines` norm, how a file ends, configured by `insert_final_newline`. A suggested edit marks a last line with no line break as unified diffs do.
 - Experimental: the `Layout/IndentationWidth` norm, a body's indentation in spaces, configured by RuboCop's `Width` or `.editorconfig`'s `indent_size`.
-- Experimental: the `Naming/MethodName` norm, `snake_case` or `camelCase` method names; a rename is suggested only for a private method whose calls are all in the hunk.
+- Experimental: the `Naming/MethodName` norm, `snake_case` or `camelCase` method names; a rename is suggested only for a private method whose calls are all in the hunk, and only when no other file of the repository holds its name or the new one (a subclass elsewhere may call it; a method elsewhere by the new name would be overridden).
 - Experimental: the `Naming/VariableName` norm, `snake_case` or `camelCase` local variables, with a rename when every mention of the local is in the hunk.
 - Experimental: the `Layout/SpaceAroundOperators` norm, whitespace on both sides of binary operators and assignments; aligned operators count as spaced.
 - Experimental: the `Layout/EmptyLineBetweenDefs` norm, a blank line between adjacent method definitions or none.

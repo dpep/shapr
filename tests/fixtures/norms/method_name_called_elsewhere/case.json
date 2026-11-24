@@ -1,0 +1,44 @@
+{
+  "description": "a private camelCase method is reported with no rename when another file calls it (private methods are callable from subclasses) or defines its new name (the rename would override it)",
+  "norm": "Naming/MethodName",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Naming/MethodName",
+              "direction": "diverging",
+              "inferred": "snake_case",
+              "deviations": [
+                {
+                  "line": 16,
+                  "style": "camelCase",
+                  "edit": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Naming/MethodName",
+              "direction": "diverging",
+              "inferred": "snake_case",
+              "deviations": [
+                {
+                  "line": 18,
+                  "style": "camelCase",
+                  "edit": null
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
