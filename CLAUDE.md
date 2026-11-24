@@ -41,6 +41,17 @@ never edit an old one, mark it Superseded.
   object under `-j`/`-J`. The verdict is in the output; the exit code is 0
   on success, 2 on an operational error, 64 on a usage error.
 
+## Design rules
+
+- **The hunk is a reporting view.** The unit of proof is an operation (a rename, a move pair, an extract); the truth is lines. Parts never share a line.
+- **One alignment, one projection.** `classify/align.rs` aligns each file's trees once before the passes; a detector proposes operations over that alignment and maps them to lines through `classify/site.rs`. Never add a private aligner or projection.
+- **Every detector consults `hazard::blocks(op, hazard)`.** The table has no wildcard arms, so a new hazard or operation forces a decision for every pairing.
+- **The core never sniffs syntax.** Language facts arrive as roles, `Semantics`, node flags (scope boundaries included) or `Frontend` hooks; a third language needs a frontend and its fixtures, not core edits.
+- **Internal data is typed.** JSON exists only at the output edge; nothing reads its own `detail` back.
+- **Confidence is an ordinal within a kind**, not comparable across kinds. A part counts as proven only when its evidence carries no open assumption.
+- **shapr emits facts.** Judgement (intent, policy such as never-mix, exit-code gating) belongs downstream or is marked experimental.
+- **Measure before building.** `script/corpus.py sample` and `stats` decide which kind is worth building; `corpus.py diff` is the regression gate for any change that might move labels.
+
 ## Layout
 
 ```
@@ -67,12 +78,16 @@ src/
                     category (code, test, docs, config, manifest, generated, ...)
   classify/
     mod.rs          Kind, Method, Confidence, Part, Label (parts, residual, verdict), the pass pipeline
-    align.rs        a hunk's two covers aligned node for node: renamed names, differing code, kept code
-    site.rs         hunk → tree mapping: each side's significant span and cover
+    align.rs        each file's trees aligned once, before the passes, over one LCS: declarations
+                    (by name; what is left out, what is kept) and each hunk's covers (node for
+                    node: renamed names, differing code, kept code); sibling matching for extract
+    site.rs         hunk → tree mapping (each side's significant span and cover), and back:
+                    CodeLines says which changed lines a part's bytes explain
+    hazard.rs       blocks(op, hazard): which hazards stop which operations, one exhaustive table
     format.rs       the format_only / comment_only passes: a whole hunk first (tree or line
                     method), and last, the reformatted lines the other passes left
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
-    moves.rs        the move pass: unaligned declarations paired across files
+    moves.rs        the move pass: declarations the alignment left out, paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
     facets.rs       facets on the residual's lines (condition, signature, ...), from
                     Frontend::construct; runs after the passes and changes no part
@@ -111,9 +126,18 @@ Besides `Node::role`, a frontend may set `Tree::semantics`
 is a module: cross-file moves change owner), `scoped_drop` (locals drop at
 block end: extract risk `drop`), and `reserved` (method names the language
 calls without a visible call: rename refuses them, extract and inline call
-them a `collision`). `TreeBuilder::ignore(span)` marks a
+them a `collision`), and `spelling` (sigils, name suffixes, symbol and quote
+marks: how a name is spelled in source, for masking names and reading
+literals). `TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
 whitespace.
+
+`Node::flags` carries per-node facts that aren't a role: `SCOPE` (the node
+bounds the locals inside it: a method, class, module, impl or other namespace;
+`Tree::scope` reads it), `RECEIVER` (a `def self.x`, whose first child is the
+receiver), `ARGUMENTS` (a call's positional argument list) and `DIRECTIVE`
+(set by the builder for `directive`). The core never reads a node's `kind`
+string or source text to learn what the language means.
 
 | Role | Ruby | Rust | For |
 |---|---|---|---|
@@ -126,7 +150,7 @@ whitespace.
 | `Exposes` | none | an outer attribute that may read its item's name (`#[no_mangle]`, `#[pyfunction]`, `#[derive(Debug)]`; anything off the nameless lists) | rename: the item, or a method under an `impl` carrying one, isn't renamed |
 | `Annotation` | none | types, generics, where clauses, visibility | extract: skipped in a new method's signature; typed params are plain |
 | `Visibility(Visibility)` | `public`, `protected`, `private`, `module_function` with no receiver: bare, `private def x`, or `private :x` | none (per item, part of its text; a changed `pub` is logic) | move: a def crossing a visibility boundary |
-| `Jump(Jump)` | `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` (both forms), `block_given?`/`iterator?` and a blockless `proc`/`lambda`/`Proc.new` (`BlockGiven`); `binding`, `eval`, `local_variables`, a string `*_eval` (`Binding`); `__method__`, `caller`, `$~`, `$1` (`Frame`); `__LINE__` (`Line`); `__FILE__`, `__dir__`, `require_relative` (`File`) | `return`, `?`, `break`, `continue` (`Next`), `.await` (`Await`), `yield`, a macro outside std (`Macro`), and those keywords inside macro tokens; `line!`/`column!` (`Line`), `file!`/`module_path!` (`File`) | extract/inline: code that changes meaning in a new method (all but `File`, as B stays in the file); rename: `Binding` in a local's scope, `Frame` in a renamed method; move: `Line`, and `File` across files (context `position`). Block-parameter use is a `Reference` whose name matches a `Definition(BlockParameter)` |
+| `Hazard(Hazard)` | `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` (both forms), `block_given?`/`iterator?` and a blockless `proc`/`lambda`/`Proc.new` (`BlockGiven`); `binding`, `eval`, `local_variables`, a string `*_eval` (`Binding`); `__method__`, `caller`, `$~`, `$1` (`Frame`); `__LINE__` (`Line`); `__FILE__`, `__dir__`, `require_relative` (`File`) | `return`, `?`, `break`, `continue` (`Next`), `.await` (`Await`), `yield`, a macro outside std (`Macro`), and those keywords inside macro tokens; `line!`/`column!` (`Line`), `file!`/`module_path!` (`File`) | every operation, through `classify::hazard::blocks`: extract/inline stop at code that changes meaning in a new method (all but `File`, as B stays in the file); rename at `Binding` in a local's scope, `Frame` in a renamed method; move at `Line`, and `File` across files (context `position`). Block-parameter use is a `Reference` whose name matches a `Definition(BlockParameter)` |
 
 `NameKind` says what sort of name a definition or reference is, and so its
 scope and rename rules:
