@@ -168,17 +168,34 @@ impl Frontend for Ruby {
         ]
     }
 
-    /// A Rails application's controllers, mailers, jobs and channels: routes,
-    /// `deliver_later`, `perform_later` and clients reach their public methods
-    /// by name, and a template by the action's name.
-    fn called_by_name(&self, path: &str, exists: &dyn Fn(&str) -> bool) -> bool {
+    /// A Rails application's or engine's controllers, mailers, jobs and
+    /// channels: routes, `deliver_later`, `perform_later` and clients reach
+    /// their public methods by name, and a template by the action's name.
+    /// The Rails root is the directory holding `app/`, wherever it sits: an
+    /// application has `config/application.rb` there, an engine
+    /// `lib/**/engine.rb`.
+    fn called_by_name(&self, path: &str, paths: &[&str]) -> bool {
         const DIRS: &[&str] = &[
             "app/controllers/",
             "app/mailers/",
             "app/jobs/",
             "app/channels/",
         ];
-        DIRS.iter().any(|d| path.starts_with(d)) && exists("config/application.rb")
+        let rails = |root: &str| {
+            paths
+                .iter()
+                .filter_map(|p| p.strip_prefix(root))
+                .any(|rest| {
+                    rest == "config/application.rb"
+                        || rest
+                            .strip_prefix("lib/")
+                            .is_some_and(|r| r.ends_with("/engine.rb"))
+                })
+        };
+        (0..path.len())
+            .filter(|&i| i == 0 || path.as_bytes()[i - 1] == b'/')
+            .filter(|&i| DIRS.iter().any(|d| path[i..].starts_with(d)))
+            .any(|i| rails(&path[..i]))
     }
 
     /// A gem's code: under `lib/` beside a `*.gemspec`.

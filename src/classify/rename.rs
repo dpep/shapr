@@ -15,7 +15,6 @@ use super::proof::{self, Assumption, Search, Verified};
 use super::site::{self, CodeLines};
 use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
-use crate::frontend;
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -639,12 +638,9 @@ fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
 
 /// A renamed definition is a public method a framework calls by name.
 fn framework_calls(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
-    let exists = |path: &str| outside.read(path).is_some();
     facts.definitions.iter().any(|&(f, id)| {
         let file = &change.files[f];
-        let path = file.diff.path();
-        let called = frontend::for_path(path).is_some_and(|fe| fe.called_by_name(path, &exists));
-        called
+        outside.called_by_name(file.diff.path())
             && file
                 .trees
                 .as_ref()

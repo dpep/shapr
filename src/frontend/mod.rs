@@ -45,10 +45,10 @@ pub trait Frontend: Sync {
     fn library(&self, path: &str, files: &dyn Snapshot) -> bool;
 
     /// Whether a framework calls the public methods defined in the file at
-    /// `path` by their names, given which files the repository holds
-    /// (`exists`): a Rails application's controller and mailer actions, a
+    /// `path` by their names, given every file the repository holds
+    /// (`paths`): a Rails application's controller and mailer actions, a
     /// job's `perform`.
-    fn called_by_name(&self, path: &str, exists: &dyn Fn(&str) -> bool) -> bool;
+    fn called_by_name(&self, path: &str, paths: &[&str]) -> bool;
 
     /// How method definition `def` receives arguments, when every parameter
     /// is required, optional or a keyword (or a block): `None` for one that

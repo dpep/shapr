@@ -276,6 +276,14 @@ impl Outside for Repository<'_> {
         self.snapshot.read(path)
     }
 
+    fn called_by_name(&self, path: &str) -> bool {
+        let (Some(frontend), Some(files)) = (frontend::for_path(path), self.files()) else {
+            return false;
+        };
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        frontend.called_by_name(path, &paths)
+    }
+
     fn parse(&self, path: &str) -> Option<Rc<Tree>> {
         if let Some(tree) = self.parsed.borrow().get(path) {
             return tree.clone();
@@ -330,6 +338,10 @@ impl Outside for Union<'_, '_> {
 
     fn library(&self, path: &str) -> bool {
         self.0.iter().any(|r| r.library(path))
+    }
+
+    fn called_by_name(&self, path: &str) -> bool {
+        self.0.iter().any(|r| r.called_by_name(path))
     }
 
     /// The file's contents where the states agree; `None` where they differ,

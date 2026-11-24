@@ -81,6 +81,12 @@ pub trait Outside {
     /// The contents of the file at `path`.
     fn read(&self, path: &str) -> Option<Vec<u8>>;
 
+    /// A framework calls the public methods defined in the file at `path`
+    /// by their names ([`Frontend::called_by_name`]).
+    ///
+    /// [`Frontend::called_by_name`]: crate::frontend::Frontend::called_by_name
+    fn called_by_name(&self, path: &str) -> bool;
+
     /// The file at `path` parsed by its language's frontend; `None` for a
     /// file of no language shapr reads, or one it can't read.
     fn parse(&self, path: &str) -> Option<Rc<Tree>> {
@@ -103,6 +109,10 @@ impl Outside for Nowhere {
 
     fn read(&self, _: &str) -> Option<Vec<u8>> {
         None
+    }
+
+    fn called_by_name(&self, _: &str) -> bool {
+        false
     }
 }
 
@@ -277,6 +287,9 @@ mod tests {
             }
             fn read(&self, _: &str) -> Option<Vec<u8>> {
                 Some(b"x\n".to_vec())
+            }
+            fn called_by_name(&self, _: &str) -> bool {
+                false
             }
         }
         let covered = BTreeSet::from(["a.rb", "b.rb"]);
