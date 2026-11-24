@@ -460,11 +460,9 @@ fn defined(change: &Change, pair: &Pair, facts: &Facts, outside: &dyn Outside) -
     let Search::Done { found, .. } = outside.uses(change.files[home].diff.path(), word) else {
         return false;
     };
-    found.iter().any(|file| {
-        crate::frontend::for_path(file)
-            .zip(outside.read(file))
-            .is_some_and(|(frontend, source)| defines(&frontend.parse(source)))
-    })
+    found
+        .iter()
+        .any(|file| outside.parse(file).is_some_and(|tree| defines(&tree)))
 }
 
 fn parsed_after(change: &Change, f: usize) -> &Tree {
