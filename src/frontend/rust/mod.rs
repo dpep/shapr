@@ -146,8 +146,9 @@ impl Frontend for Rust {
         loop {
             let manifest = crate::norms::join(dir, "Cargo.toml");
             if files.list(dir).contains(&manifest) {
+                // Unread, its targets and `publish` are unknown: assume a library.
                 let Some(toml) = files.read(&manifest) else {
-                    return false;
+                    return true;
                 };
                 let toml = String::from_utf8_lossy(&toml);
                 let line = |want: &str| {
@@ -636,6 +637,28 @@ impl<'a> Walker<'a> {
 mod tests {
     use super::*;
     use crate::tree::{Hazard, NameKind::*, Receiver, Role};
+
+    /// Lists `Cargo.toml` and `src/lib.rs`, but reads nothing.
+    struct Unreadable;
+
+    impl Snapshot for Unreadable {
+        fn read(&self, _: &str) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn list(&self, dir: &str) -> Vec<String> {
+            match dir {
+                "" => vec!["Cargo.toml".into()],
+                "src" => vec!["src/lib.rs".into()],
+                _ => Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn an_unreadable_manifest_counts_as_a_library() {
+        assert!(Rust.library("src/lib.rs", &Unreadable));
+    }
 
     fn parse(src: &str) -> Tree {
         Rust.parse(src.as_bytes().to_vec())
