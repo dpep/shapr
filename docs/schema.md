@@ -33,7 +33,8 @@ Every field below is always present. Fields that can be `null` say so.
 - Line counts: a line *carries code* when it holds a non-whitespace byte
   outside any comment, and *carries a comment* when it holds comment text. A
   line can do both (`x = 1 # note`), and a blank line does neither. A magic
-  comment (`# frozen_string_literal: true`) is code. In a file shapr didn't
+  comment (`# frozen_string_literal: true`) and a first-line shebang
+  (`#!/usr/bin/env ruby`) are code. In a file shapr didn't
   parse, every changed line counts as code.
 
 ## Hunk kinds

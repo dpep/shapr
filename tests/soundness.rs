@@ -111,3 +111,19 @@ fn a_comment_edit_in_a_file_that_doesnt_parse_is_logic() {
     );
     assert_near(&report, "comment_only", None);
 }
+
+// Comments the language reads as code.
+
+#[test]
+fn a_shebang_is_code() {
+    let report = ruby(
+        "#!/usr/bin/env ruby\nputs 1\n",
+        "#!/usr/bin/env ruby -w\nputs 1\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+    let report = rust(
+        "#!/usr/bin/env run-cargo-script\nfn main() {}\n",
+        "#!/usr/bin/env rust-script\nfn main() {}\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+}

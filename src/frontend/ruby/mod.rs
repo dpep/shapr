@@ -62,7 +62,9 @@ impl Frontend for Ruby {
             .collect();
         for comment in result.comments() {
             let at = span(&comment.location());
-            if magic.iter().any(|m| at.contains(m)) || is_directive(comment.text()) {
+            // A shebang picks the interpreter and its flags.
+            let shebang = at.start == 0 && comment.text().starts_with(b"#!");
+            if shebang || magic.iter().any(|m| at.contains(m)) || is_directive(comment.text()) {
                 builder.directive(at);
             } else {
                 builder.comment(at);
