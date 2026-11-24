@@ -1,11 +1,11 @@
 {
-  "description": "o&.name -> o.name (restyle). Open: shapr: o&.name to o.name is logic; the author calls it restyle (it differs for nil, so the label may be wrong).",
+  "description": "o&.name -> o.name: different when o is nil (o.name raises), so it is logic; the toy repo mislabelled it restyle. Guards against a respelling that would be false structure.",
   "label": {
-    "judge": "author intent",
-    "label": "restyle",
+    "judge": "author intent, corrected after checking with ruby",
+    "label": "logic",
     "labeller": "llm",
     "by": "toy repo author",
-    "category": "restyle"
+    "category": "logic"
   },
   "source": {
     "repo": "shapr toy repo zoo-ruby",
@@ -13,17 +13,20 @@
   },
   "expect": {
     "summary": {
-      "verdict": "structure"
+      "verdict": {
+        "$not": "structure"
+      }
     },
     "hunks": {
-      "$some": {
+      "$every": {
         "parts": {
-          "$some": {
-            "kind": "restyle"
+          "$every": {
+            "kind": {
+              "$not": "restyle"
+            }
           }
         }
       }
     }
-  },
-  "open": true
+  }
 }

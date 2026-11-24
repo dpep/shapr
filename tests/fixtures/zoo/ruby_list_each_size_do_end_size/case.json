@@ -1,11 +1,11 @@
 {
-  "description": "list.each { }.size -> do end.size (logic). Open: shapr proves a block-delimiter restyle; the author says logic (do...end here still binds to each, so the label may be wrong).",
+  "description": "list.each { }.size -> list.each do end.size: the block binds to each either way (checked with ruby), so this is a block-delimiter restyle; the toy repo mislabelled it logic.",
   "label": {
-    "judge": "author intent",
-    "label": "logic",
+    "judge": "author intent, corrected after checking with ruby",
+    "label": "restyle",
     "labeller": "llm",
     "by": "toy repo author",
-    "category": "logic"
+    "category": "restyle"
   },
   "source": {
     "repo": "shapr toy repo zoo-ruby",
@@ -13,10 +13,16 @@
   },
   "expect": {
     "summary": {
-      "verdict": {
-        "$not": "structure"
+      "verdict": "structure"
+    },
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "restyle"
+          }
+        }
       }
     }
-  },
-  "open": true
+  }
 }
