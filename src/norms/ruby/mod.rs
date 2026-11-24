@@ -5,6 +5,7 @@ mod braces;
 mod commas;
 mod config;
 mod hash_syntax;
+mod indentation;
 mod strings;
 
 use super::{Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind};
@@ -39,6 +40,10 @@ static NORMS: &[NormDef] = &[
         id: hash_syntax::NORM,
         styles: hash_syntax::STYLES,
     },
+    NormDef {
+        id: indentation::NORM,
+        styles: indentation::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -49,6 +54,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     commas::see_hash,
     commas::see_arguments,
     hash_syntax::see,
+    indentation::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -101,6 +107,14 @@ static SETTINGS: &[Setting] = &[
             ("ruby19", "ruby19"),
             ("ruby19_no_mixed_keys", "ruby19"),
             ("hash_rockets", "hash_rockets"),
+        ],
+    },
+    Setting {
+        norm: indentation::NORM,
+        key: "EnforcedStyle",
+        values: &[
+            ("normal", "normal"),
+            ("indented_internal_methods", "indented_internal_methods"),
         ],
     },
 ];
