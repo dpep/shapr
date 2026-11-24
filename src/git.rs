@@ -799,7 +799,7 @@ impl Git {
     ) -> Result<Vec<String>> {
         let mut cmd = self.command();
         cmd.env("GIT_NO_LAZY_FETCH", "1")
-            .args(["grep", "--no-color", "-l", "-w", "-F", "--full-name"])
+            .args(["grep", "--no-color", "-l", "-z", "-w", "-F", "--full-name"])
             .arg(if binary { "--text" } else { "-I" });
         for word in words {
             cmd.args(["-e", word]);
@@ -823,8 +823,10 @@ impl Git {
         }
         let out = check(out)?;
         let prefix = rev.map(|r| format!("{r}:"));
+        // NUL-separated: `-l` alone C-quotes a name holding a tab, quote or newline.
         let mut found: Vec<String> = String::from_utf8_lossy(&out)
-            .lines()
+            .split('\0')
+            .filter(|name| !name.is_empty())
             .map(|line| match &prefix {
                 Some(p) => line.strip_prefix(p.as_str()).unwrap_or(line),
                 None => line,
