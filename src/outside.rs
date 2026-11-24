@@ -8,6 +8,7 @@ use crate::classify::proof::{Outside, Search};
 use crate::frontend::{self, Frontend};
 use crate::git::{Git, State};
 use crate::norms::Snapshot;
+use crate::tree::{Role, Tree, spells};
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeSet, HashMap};
 
@@ -24,7 +25,14 @@ pub struct Repository<'a> {
     /// Languages whose blobs are fetched (or failed to).
     prefetched: RefCell<HashMap<&'static str, bool>>,
     searches: RefCell<HashMap<(&'static str, String), Search>>,
+    /// Per language, the files that name a method computed at runtime.
+    computed: RefCell<HashMap<&'static str, Option<Computed>>>,
 }
+
+/// Files holding a name computed at runtime ([`Role::DynamicName`] with a
+/// `*`): such a file may use any name its pattern spells, with no literal
+/// word for `git grep` to find. Each with its patterns, suffixes trimmed.
+type Computed = Vec<(String, Vec<String>)>;
 
 impl<'a> Repository<'a> {
     pub fn new(git: &'a Git, state: State, snapshot: &'a dyn Snapshot) -> Self {
@@ -36,6 +44,7 @@ impl<'a> Repository<'a> {
             files: OnceCell::new(),
             prefetched: RefCell::default(),
             searches: RefCell::default(),
+            computed: RefCell::default(),
         }
     }
 
@@ -86,16 +95,72 @@ impl<'a> Repository<'a> {
                 return Search::Unavailable;
             }
         }
-        match self.git.grep(&self.state, word, &pathspecs(globs)) {
-            Ok(found) => Search::Done {
-                searched: candidates.len(),
-                found,
-            },
-            Err(error) => {
+        let found = self.git.grep(&self.state, word, &pathspecs(globs));
+        let mut computed = self.computed.borrow_mut();
+        let computed = computed
+            .entry(frontend.language())
+            .or_insert_with(|| self.computed_names(frontend, &candidates));
+        match (found, &*computed) {
+            (Ok(mut found), Some(computed)) => {
+                found.extend(
+                    (computed.iter())
+                        .filter(|(_, patterns)| patterns.iter().any(|p| spells(p, word)))
+                        .map(|(path, _)| path.clone()),
+                );
+                found.sort();
+                found.dedup();
+                Search::Done {
+                    searched: candidates.len(),
+                    found,
+                }
+            }
+            (Ok(_), None) => Search::Unavailable,
+            (Err(error), _) => {
                 crate::verbose!("can't search for {word}: {error:#}");
                 Search::Unavailable
             }
         }
+    }
+}
+
+impl Repository<'_> {
+    /// Parses every candidate file once for [`Computed`] names.
+    fn computed_names(
+        &self,
+        frontend: &dyn Frontend,
+        candidates: &[&(String, String)],
+    ) -> Option<Computed> {
+        let sources: Vec<Option<Vec<u8>>> = match self.state {
+            State::Worktree => candidates
+                .iter()
+                .map(|(path, _)| self.snapshot.read(path))
+                .collect(),
+            State::Revision(_) | State::Index => {
+                let ids: Vec<&str> = candidates.iter().map(|(_, id)| id.as_str()).collect();
+                match self.git.blobs(&ids) {
+                    Ok(sources) => sources,
+                    Err(error) => {
+                        crate::verbose!("can't read files for computed names: {error:#}");
+                        return None;
+                    }
+                }
+            }
+        };
+        let mut computed = Computed::new();
+        for ((path, _), source) in candidates.iter().zip(sources) {
+            let tree = frontend.parse(source.unwrap_or_default());
+            let suffixes = tree.semantics.spelling.suffixes;
+            let patterns: Vec<String> = (tree.descendants(Tree::ROOT))
+                .map(|id| tree.node(id))
+                .filter(|n| n.role == Role::DynamicName)
+                .filter_map(|n| n.name.as_deref().filter(|name| name.contains('*')))
+                .map(|name| name.trim_end_matches(|c| suffixes.contains(&c)).to_string())
+                .collect();
+            if !patterns.is_empty() {
+                computed.push((path.clone(), patterns));
+            }
+        }
+        Some(computed)
     }
 }
 

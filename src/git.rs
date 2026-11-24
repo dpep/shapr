@@ -341,6 +341,39 @@ impl Git {
         run_with_input(&mut fetch, &input).map(drop)
     }
 
+    /// The contents of the blobs IDS, in order, in one request; `None` for
+    /// one this repository lacks. Never fetches.
+    pub fn blobs(&self, ids: &[&str]) -> Result<Vec<Option<Vec<u8>>>> {
+        let mut input = ids.join("\n").into_bytes();
+        input.push(b'\n');
+        let mut cmd = self.command();
+        cmd.env("GIT_NO_LAZY_FETCH", "1")
+            .args(["cat-file", "--batch"]);
+        let out = run_with_input(&mut cmd, &input)?;
+        // Each `<id> blob <size>\n<contents>\n`, or `<id> missing\n`.
+        let mut rest = out.as_slice();
+        let mut found = Vec::with_capacity(ids.len());
+        for _ in ids {
+            let end = rest
+                .iter()
+                .position(|&b| b == b'\n')
+                .context("git cat-file: short output")?;
+            let header = String::from_utf8_lossy(&rest[..end]).into_owned();
+            rest = &rest[end + 1..];
+            match header
+                .rsplit_once(' ')
+                .and_then(|(_, n)| n.parse::<usize>().ok())
+            {
+                Some(size) if !header.ends_with(" missing") && rest.len() > size => {
+                    found.push(Some(rest[..size].to_vec()));
+                    rest = &rest[size + 1..];
+                }
+                _ => found.push(None),
+            }
+        }
+        Ok(found)
+    }
+
     /// The remote a partial clone fetches missing objects from.
     fn promisor(&self) -> Option<String> {
         let out = run(self.command().args([

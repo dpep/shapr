@@ -1,0 +1,7 @@
+{
+  "description": "a computed send in an unchanged file that could spell the old name blocks a method rename, as it does in the same file",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

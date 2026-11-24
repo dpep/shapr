@@ -168,9 +168,13 @@ The search reads the files a language's code can reach a name from (Ruby:
 by name, not resolved: a common name used for something else (another
 class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
-without its `?`, `!` or `=`. It can't see a name built at
-runtime (`send("get_" + n)`) in a file outside the change, code in other
-languages (YAML, JavaScript), or other repositories beyond `public_api`. In
+without its `?`, `!` or `=`. A file that reaches a method by a name built
+at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`) is read
+too, once per run (every file of the language is parsed for them), and held
+to the same rule as in the change: a computed name that could spell the old
+one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. It
+can't see code in other languages (YAML, JavaScript), or other repositories
+beyond `public_api`. In
 a partial clone (the GitHub cache) the language's blobs at the after
 revision are fetched in one request first.
 
