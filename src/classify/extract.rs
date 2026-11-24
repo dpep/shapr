@@ -133,6 +133,8 @@ struct Found {
     /// Where the refactoring's hunks may change code, before and after.
     regions: [Region; 2],
     outcome: Result<Stats, Risk>,
+    /// Which value doesn't flow, for a [`Risk::Wiring`] refusal's reason.
+    wiring: Option<String>,
     /// Files outside the change that already use the method's name.
     used_in: Vec<String>,
 }
@@ -259,7 +261,6 @@ fn find(
         .count();
     let arg_set: HashSet<&str> = args.iter().flatten().map(String::as_str).collect();
     let free: HashSet<&str> = flow.free.iter().map(String::as_str).collect();
-    let outflow: HashSet<&str> = flow.outflow.iter().map(String::as_str).collect();
     let assigned_set: HashSet<&str> = assigned.iter().map(String::as_str).collect();
     let block_params: HashSet<&str> = chunks
         .descendants(a_chunk)
@@ -270,6 +271,7 @@ fn find(
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
     let blocks = |op: Op, n: NodeId| chunks.node(n).role.hazard().is_some_and(|h| blocks(op, h));
+    let mut wiring = None;
     let outcome = if in_chunk().any(|n| blocks(Op::Extract, n))
         || chunks
             .descendants(a_chunk)
@@ -285,7 +287,8 @@ fn find(
                 .is_some_and(|n| block_params.contains(n))
     }) {
         Err(Risk::BlockParameter)
-    } else if exact.is_none() || free != arg_set || flow.clobbers || outflow != assigned_set {
+    } else if let Some(why) = miswired(exact.is_some() && free == arg_set, &flow, &assigned_set) {
+        wiring = Some(why);
         Err(Risk::Wiring)
     } else if chunks.semantics.scoped_drop && outlives(chunks, &chunk, assigned.as_deref(), &params)
     {
@@ -327,8 +330,34 @@ fn find(
             .to_string(),
         regions,
         outcome,
+        wiring,
         used_in: Vec::new(),
     })
+}
+
+/// Why values don't flow between the call and the statements the way they
+/// did, naming the local where one is to blame (`{caller}` stands for A's
+/// name): `None` when they do. `wired`: the arguments carry exactly the
+/// statements' free variables into B's parameters.
+fn miswired(wired: bool, flow: &Flow, assigned: &HashSet<&str>) -> Option<String> {
+    let first = |names: &mut dyn Iterator<Item = &str>| names.min().map(str::to_string);
+    if let Some(name) = first(&mut flow.clobbers.iter().map(String::as_str)) {
+        return Some(format!(
+            "the statements assign {name}, which {{caller}} also assigns"
+        ));
+    }
+    let outflow: HashSet<&str> = flow.outflow.iter().map(String::as_str).collect();
+    if let Some(name) = first(&mut outflow.difference(assigned).copied()) {
+        return Some(format!(
+            "{{caller}} reads {name} after the statements, but the call doesn't return it"
+        ));
+    }
+    if let Some(name) = first(&mut assigned.difference(&outflow).copied()) {
+        return Some(format!(
+            "the call's result is assigned to {name}, which the statements don't set for {{caller}}"
+        ));
+    }
+    (!wired).then(|| Risk::Wiring.reason().to_string())
 }
 
 /// Checks a proven candidate against the repository: a file outside the
@@ -462,7 +491,11 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
                     continue;
                 }
                 let residual = &mut label.residual;
-                residual.reason = format!("not an {near} of `{}`: {}", found.method, risk.reason());
+                let why = match &found.wiring {
+                    Some(why) => why.replace("{caller}", &found.caller),
+                    None => risk.reason().to_string(),
+                };
+                residual.reason = format!("not an {near} of `{}`: {why}", found.method);
                 if !found.used_in.is_empty() {
                     residual.reason += &format!(" in {}", proof::listing(&found.used_in));
                 }
@@ -699,8 +732,8 @@ fn outlives(tree: &Tree, chunk: &[NodeId], assigned: Option<&str>, params: &[Str
 struct Flow {
     /// Read in the chunk, defined outside it: they must arrive as arguments.
     free: HashSet<String>,
-    /// The chunk assigns a local A also defines outside it.
-    clobbers: bool,
+    /// Locals the chunk assigns that A also defines outside it.
+    clobbers: HashSet<String>,
     /// Defined in the chunk and read outside it: they must come back.
     outflow: HashSet<String>,
 }
@@ -743,7 +776,7 @@ impl Flow {
         }
         Flow {
             free: reads_in.difference(&defs_in).cloned().collect(),
-            clobbers: !defs_in.is_disjoint(&defs_out),
+            clobbers: defs_in.intersection(&defs_out).cloned().collect(),
             outflow: defs_in.intersection(&reads_out).cloned().collect(),
         }
     }

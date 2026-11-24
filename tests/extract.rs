@@ -492,3 +492,99 @@ end
     let report = ruby(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
+
+/// The refusal's `reason` text, from the first hunk's residual.
+fn reason(report: &Value) -> &str {
+    lead(&hunks(report)[0])["reason"].as_str().unwrap()
+}
+
+#[test]
+fn a_local_the_statements_reassign_is_named_in_the_reason() {
+    let before = "class C
+  def run(items)
+    total = 0
+    items.each { |i| total += i }
+    total
+  end
+end
+";
+    let after = "class C
+  def run(items)
+    total = 0
+    total = sum_items(items, total)
+    total
+  end
+
+  def sum_items(items, total)
+    items.each { |i| total += i }
+    total
+  end
+end
+";
+    let report = ruby(before, after);
+    assert_near(&report, "extract", "wiring");
+    assert_eq!(
+        reason(&report),
+        "not an extract of `sum_items`: the statements assign total, which run also assigns"
+    );
+}
+
+#[test]
+fn an_inline_reassigning_a_parameter_names_it_in_the_reason() {
+    let before = "class C
+  def run(a)
+    puts \"start\"
+    helper(a)
+    puts a
+  end
+
+  def helper(a)
+    a += 1
+    puts a
+    puts a * 2
+  end
+end
+";
+    let after = "class C
+  def run(a)
+    puts \"start\"
+    a += 1
+    puts a
+    puts a * 2
+    puts a
+  end
+end
+";
+    let report = ruby(before, after);
+    assert_near(&report, "inline", "wiring");
+    assert_eq!(
+        reason(&report),
+        "not an inline of `helper`: the statements assign a, which run also assigns"
+    );
+}
+
+#[test]
+fn a_local_read_after_the_statements_but_not_returned_is_named_in_the_reason() {
+    let before = "fn run(x: i32) -> i32 {
+    let a = x + 1;
+    let b = a * 2;
+    a + b
+}
+";
+    let after = "fn run(x: i32) -> i32 {
+    let b = calc(x);
+    a + b
+}
+
+fn calc(x: i32) -> i32 {
+    let a = x + 1;
+    a * 2
+}
+";
+    let report = rust(before, after);
+    assert_near(&report, "extract", "wiring");
+    assert_eq!(
+        reason(&report),
+        "not an extract of `calc`: run reads a after the statements, but the call doesn't return it"
+    );
+}
