@@ -1,0 +1,6 @@
+{
+  "description": "a macro outside std may match a trailing comma, so adding one is code",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

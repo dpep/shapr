@@ -1,0 +1,6 @@
+{
+  "description": "a braced use list importing another name is code, however sorted",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

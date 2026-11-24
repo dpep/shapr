@@ -236,6 +236,7 @@ Rust (tree-sitter), named by the rustfmt option or lint:
 |---|---|---|
 | `use_field_init_shorthand` | `S { a: a }`, `S { a }`, in an expression or a pattern | `S { a: b }`; `S { ref a }` |
 | `unused_parens` | `(e)`, `e` | `(s.f)()` (calls a field) vs `s.f()` (a method); `(e,)`, a one-element tuple |
+| `reorder_imports` | `use a::{x, y}`, `use a::{y, x}`, nested lists too | separate `use` items in another order |
 
 Not normalized, so `logic`: `x = x || y` vs `x ||= y`, `unless`/`else` vs
 swapped branches, `foo(**{a: 1})` vs `foo(a: 1)`, `elsif` vs `else if`,
@@ -462,7 +463,9 @@ are stated in Ruby's terms; for Rust:
   `logic`, and so is a doctest line the rename edits.
 - A trailing comma (before a closing bracket, or ending a match arm) never
   changes the parse, so adding or dropping one is formatting, as rustfmt
-  does when it reflows a list. A one-element tuple's comma is code.
+  does when it reflows a list. A one-element tuple's comma is code. In a
+  macro's arguments a trailing comma is code (the macro may match it),
+  except in `vec!`, which takes either.
 - A macro's arguments can't be parsed: each token is compared on its own
   (`a << b` and `a < < b` differ). A macro that may spell its tokens out
   (`stringify!`, `dbg!`, a message-less `assert!`, any macro outside std)

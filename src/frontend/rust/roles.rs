@@ -1,7 +1,7 @@
 //! Which Rust syntax plays which [`Role`], and what each node keeps in its
 //! own text (the name it declares or calls) instead of as a child.
 
-use super::{Walker, span};
+use super::{Walker, is_comment, kind, span, trailing};
 use crate::frontend::Construct;
 use crate::tree::{Canonical, Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
@@ -33,6 +33,7 @@ pub(super) enum Plan {
 /// that chooses among them.
 const FIELD_INIT_SHORTHAND: &str = "use_field_init_shorthand";
 const UNUSED_PARENS: &str = "unused_parens";
+const REORDER_IMPORTS: &str = "reorder_imports";
 
 /// Macros from std that expand to no control flow of their own.
 const PLAIN_MACROS: &[&str] = &[
@@ -461,6 +462,32 @@ impl Walker<'_> {
                 self.b.close();
             }
             (_, "call_expression") => self.call(n, attrs),
+            // Imports resolve by name, never by order: the canon reads the
+            // list's items sorted.
+            (_, "use_list") => {
+                self.open(&n, attrs, None, Role::Other);
+                self.b
+                    .respell(REORDER_IMPORTS, Canonical::Syntax(b"{}".to_vec()));
+                let mut c = n.walk();
+                let kids: Vec<_> = n.children(&mut c).map(|k| (None, k)).collect();
+                let mut items = Vec::new();
+                for (i, &(_, k)) in kids.iter().enumerate() {
+                    if is_comment(&k) {
+                        self.comment(&k);
+                    } else if k.is_missing() {
+                        self.b.error(span(&k));
+                    } else if k.kind() == "," && trailing(&n, &kids[i + 1..]) {
+                        self.b.ignore(span(&k));
+                    } else if k.is_named() {
+                        items.push(k);
+                    }
+                }
+                items.sort_by_cached_key(|k| use_key(*k, self.src));
+                for k in items {
+                    self.emit(k, mode, &[]);
+                }
+                self.b.close();
+            }
             (_, "macro_invocation") => {
                 let mac = field("macro");
                 let name = mac.map(|m| {
@@ -482,6 +509,10 @@ impl Walker<'_> {
                     self.b.flag(Flags::SPELLS);
                     self.b.verbatim(span(&tokens));
                 }
+                let mut skip: Vec<Node<'_>> = mac.into_iter().collect();
+                // `vec!` takes a trailing comma or none alike.
+                let vec = tokens.filter(|_| name == Some("vec"));
+                skip.extend(vec);
                 self.children_with(
                     n,
                     &mut |_, c| {
@@ -491,8 +522,21 @@ impl Walker<'_> {
                             Plan::Emit(Mode::Expr)
                         }
                     },
-                    &mac.into_iter().collect::<Vec<_>>(),
+                    &skip,
                 );
+                if let Some(tokens) = vec {
+                    self.b.open(kind(&tokens), span(&tokens), None, Role::Other);
+                    let mut c = tokens.walk();
+                    let kids: Vec<_> = tokens.children(&mut c).map(|k| (None, k)).collect();
+                    for (i, &(_, k)) in kids.iter().enumerate() {
+                        if k.kind() == "," && trailing(&tokens, &kids[i + 1..]) {
+                            self.b.ignore(span(&k));
+                        } else {
+                            self.token(k);
+                        }
+                    }
+                    self.b.close();
+                }
                 self.b.close();
             }
 
@@ -713,6 +757,25 @@ fn beyond(attrs: &[Node<'_>], src: &[u8], derives: &[&str]) -> bool {
         }
         !NAMELESS_ATTRIBUTES.contains(&head.as_str())
     })
+}
+
+/// A use-list item's text with whitespace dropped and every nested braced
+/// list sorted: equal for items that import the same names.
+fn use_key(n: Node<'_>, src: &[u8]) -> String {
+    let mut c = n.walk();
+    let kids = n.children(&mut c).filter(|k| !is_comment(k));
+    if n.kind() == "use_list" {
+        let mut keys: Vec<String> = kids
+            .filter(Node::is_named)
+            .map(|k| use_key(k, src))
+            .collect();
+        keys.sort();
+        return format!("{{{}}}", keys.join(","));
+    }
+    if n.child_count() == 0 {
+        return String::from_utf8_lossy(&src[span(&n)]).into_owned();
+    }
+    kids.map(|k| use_key(k, src)).collect()
 }
 
 /// Every name a pattern binds in function `f`, closures included and nested

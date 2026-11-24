@@ -1,0 +1,6 @@
+{
+  "description": "the order of a braced use list never matters, so rustfmt sorting it is a restyle",
+  "expect": {
+    "hunks": [{"kind": "restyle"}]
+  }
+}

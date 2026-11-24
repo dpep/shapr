@@ -592,7 +592,7 @@ impl Tree {
         let mut kept = Vec::new();
         self.walk_own(id, |piece| match piece {
             Piece::Text(s) => {
-                for at in s {
+                for at in s.filter(|&at| !self.ignored(at)) {
                     out.push(self.source[at]);
                     kept.push(self.verbatim(at));
                 }
@@ -615,6 +615,13 @@ impl Tree {
             .filter(keep)
             .map(|(b, _)| b)
             .collect()
+    }
+
+    /// Whether the byte at `at` is a separator the language ignores
+    /// ([`TreeBuilder::ignore`]), read like whitespace.
+    pub fn ignored(&self, at: usize) -> bool {
+        let i = self.ignored.partition_point(|s| s.end <= at);
+        self.ignored.get(i).is_some_and(|s| s.contains(&at))
     }
 
     /// Whether whitespace at `at` is code ([`TreeBuilder::verbatim`]).
@@ -1003,13 +1010,9 @@ fn hash_text(tree: &Tree, span: Span, h: &mut DefaultHasher) {
     if span.start >= span.end {
         return;
     }
-    let ignored = |at: usize| {
-        let i = tree.ignored.partition_point(|s| s.end <= at);
-        tree.ignored.get(i).is_some_and(|s| s.contains(&at))
-    };
     for at in span {
         let b = tree.source[at];
-        if (!b.is_ascii_whitespace() || tree.verbatim(at)) && !ignored(at) {
+        if (!b.is_ascii_whitespace() || tree.verbatim(at)) && !tree.ignored(at) {
             h.write_u8(b);
         }
     }

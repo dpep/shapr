@@ -1,0 +1,6 @@
+{
+  "description": "nested braced use lists sort as one set of imports",
+  "expect": {
+    "hunks": [{"kind": "restyle"}]
+  }
+}

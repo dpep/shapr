@@ -1,0 +1,6 @@
+{
+  "description": "a trailing comma alone on a changed line is formatting, as rustfmt adds it to a vertical list",
+  "expect": {
+    "hunks": [{"kind": "format_only"}]
+  }
+}

@@ -67,8 +67,9 @@ impl Side {
     }
 }
 
-/// Which bytes of a region matter: anything but whitespace, plus whitespace
-/// inside a leaf (string content, a comment), where it is part of the value.
+/// Which bytes of a region matter: anything but whitespace and separators the
+/// language ignores, plus whitespace inside a leaf (string content, a
+/// comment), where it is part of the value.
 pub struct Significance {
     region: Span,
     marks: Vec<bool>,
@@ -83,10 +84,9 @@ impl Significance {
             };
         };
         let region = tree.line_span(lines.start, last);
-        let mut marks: Vec<bool> = tree
-            .text(&region)
-            .iter()
-            .map(|b| !b.is_ascii_whitespace())
+        let mut marks: Vec<bool> = region
+            .clone()
+            .map(|at| !tree.source[at].is_ascii_whitespace() && !tree.ignored(at))
             .collect();
         // A node's extent holds its children's, so only nodes reaching into
         // the region can hold a leaf that does.

@@ -950,6 +950,8 @@ mod tests {
         // Macro tokens are compared one by one: `<<` is not `< <`.
         assert_ne!(root("m!(a << b);"), root("m!(a < < b);"));
         assert_eq!(root("vec!(a, b);"), root("vec!( a ,b );"));
+        assert_eq!(root("vec![a, b];"), root("vec![a, b,];"));
+        assert_ne!(root("m![a, b];"), root("m![a, b,];"));
         // A macro that may spell its tokens out reads their spacing too.
         assert_ne!(root("m!(a, b);"), root("m!( a ,b );"));
         assert_ne!(root("f(stringify!(a+b));"), root("f(stringify!(a + b));"));
