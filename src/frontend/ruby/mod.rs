@@ -423,6 +423,21 @@ mod tests {
     }
 
     #[test]
+    fn a_comment_in_a_modifier_form_skips_the_hash() {
+        // The condition comes before the body among the children.
+        for (a, b) in [
+            (
+                "begin\n  go # one\nend while c\n",
+                "begin\n  go # two\nend while c\n",
+            ),
+            ("go(1, # one\n  2) if c\n", "go(1, # two\n  2) if c\n"),
+        ] {
+            let root = |s: &str| parse(s).node(Tree::ROOT).hash;
+            assert_eq!(root(a), root(b), "{a}");
+        }
+    }
+
+    #[test]
     fn receivers_argument_lists_and_calls_on_self_are_marked() {
         use crate::tree::Flags;
         let tree = parse(

@@ -3,6 +3,7 @@
 //! errors); hashing, comment placement and per-line facts are computed here,
 //! once, so every frontend gets the same semantics.
 
+use std::borrow::Cow;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 
@@ -483,13 +484,19 @@ impl Tree {
             .collect()
     }
 
-    /// Walks `id`'s own span in child order, as the hash reads it: the
+    /// Walks `id`'s own span in source order, as the hash reads it: the
     /// stretch of text before, between and after the children, and each
     /// child. A child reaching back over text already read reads none twice.
     pub fn walk_own(&self, id: NodeId, mut visit: impl FnMut(Piece)) {
         let span = &self.node(id).span;
+        let start = |c: &NodeId| self.node(*c).extent.start;
+        let mut children = Cow::from(&self.node(id).children);
+        // A modifier form (`x if y`) lists its condition first.
+        if !children.is_sorted_by_key(start) {
+            children.to_mut().sort_by_key(start);
+        }
         let mut cursor = span.start;
-        for &c in &self.node(id).children {
+        for &c in children.iter() {
             let extent = &self.node(c).extent;
             let end = extent.start.min(span.end);
             if cursor < end {
