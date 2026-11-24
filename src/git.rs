@@ -7,21 +7,48 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
-/// Where git runs: the current directory, or the one `-C` names.
+/// Where git runs: the current directory, the one `-C` names, or a bare
+/// repository with no worktree.
 pub struct Git {
     dir: Option<PathBuf>,
+    bare: Option<Bare>,
+}
+
+/// A bare repository, and the commit whose `.gitattributes` apply.
+struct Bare {
+    git_dir: PathBuf,
+    attributes_from: String,
 }
 
 impl Git {
     pub fn new(dir: Option<PathBuf>) -> Self {
-        Git { dir }
+        Git { dir, bare: None }
+    }
+
+    /// Runs in the bare repository GIT_DIR, reading attributes from the
+    /// commit ATTRIBUTES_FROM.
+    pub fn bare(git_dir: PathBuf, attributes_from: String) -> Self {
+        Git {
+            dir: None,
+            bare: Some(Bare {
+                git_dir,
+                attributes_from,
+            }),
+        }
     }
 
     fn command(&self) -> Command {
         let mut cmd = Command::new("git");
         // Paths verbatim, whatever the user's quoting config.
         cmd.args(["-c", "core.quotePath=false"]);
-        if let Some(dir) = &self.dir {
+        if let Some(bare) = &self.bare {
+            // A partial clone fetches blobs on demand: fail, never prompt.
+            cmd.arg("--git-dir")
+                .arg(&bare.git_dir)
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .env("GIT_TERMINAL_PROMPT", "0");
+        } else if let Some(dir) = &self.dir {
             // `-C` names the repository; an inherited GIT_DIR would override it.
             cmd.current_dir(dir)
                 .env_remove("GIT_DIR")
@@ -93,6 +120,34 @@ impl Git {
         check(out).map(drop)
     }
 
+    /// ARG names revisions in this repository (read-only; false outside one).
+    pub fn resolves(&self, arg: &str) -> bool {
+        self.command()
+            .args(["rev-parse", "--quiet", arg, "--"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// Each remote's name and URL. Empty outside a repository.
+    pub fn remote_urls(&self) -> Vec<(String, String)> {
+        let Ok(out) = run(self
+            .command()
+            .args(["config", "--get-regexp", r"^remote\..*\.url$"]))
+        else {
+            return Vec::new();
+        };
+        String::from_utf8_lossy(&out)
+            .lines()
+            .filter_map(|line| {
+                let (key, url) = line.split_once(' ')?;
+                let name = key.strip_prefix("remote.")?.strip_suffix(".url")?;
+                Some((name.to_string(), url.to_string()))
+            })
+            .collect()
+    }
+
     fn toplevel(&self) -> Option<PathBuf> {
         let out = run(self.command().args(["rev-parse", "--show-toplevel"])).ok()?;
         Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
@@ -106,15 +161,28 @@ impl Git {
             input.extend_from_slice(path.as_bytes());
             input.push(0);
         }
-        let Some(toplevel) = self.toplevel() else {
-            return HashMap::new();
-        };
-        // check-attr reads paths against the cwd; the diff's are from the top.
         let mut cmd = self.command();
-        cmd.current_dir(toplevel)
-            .args(["check-attr", "-z", "--stdin", "linguist-generated"]);
-        let Ok(out) = run_with_input(&mut cmd, &input) else {
-            return HashMap::new();
+        if let Some(bare) = &self.bare {
+            cmd.args(["check-attr", "--source", &bare.attributes_from]);
+        } else {
+            let Some(toplevel) = self.toplevel() else {
+                return HashMap::new();
+            };
+            // check-attr reads paths against the cwd; the diff's are from the top.
+            cmd.current_dir(toplevel).arg("check-attr");
+        }
+        cmd.args(["-z", "--stdin", "linguist-generated"]);
+        let out = match run_with_input(&mut cmd, &input) {
+            Ok(out) => out,
+            Err(error) => {
+                // `check-attr --source` needs git 2.40.
+                if self.bare.is_some() {
+                    crate::verbose!(
+                        "can't read .gitattributes from the head commit ({error:#}): generated files by name only"
+                    );
+                }
+                return HashMap::new();
+            }
         };
         let out = String::from_utf8_lossy(&out);
         let fields: Vec<&str> = out.split('\0').collect();
@@ -133,7 +201,7 @@ impl Git {
     }
 }
 
-fn run(cmd: &mut Command) -> Result<Vec<u8>> {
+pub(crate) fn run(cmd: &mut Command) -> Result<Vec<u8>> {
     check(cmd.output().context("could not run git")?)
 }
 
