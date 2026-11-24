@@ -319,12 +319,118 @@ fn a_change_moves_toward_or_away_from_config() {
             "configured": "double_quotes",
             "before": {"checked": 3, "offenses": 1},
             "after": {"checked": 4, "offenses": 3},
+            "fixed": 0,
+            "added": 2,
             "direction": "away"
         }])
     );
     let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
     assert!(
-        text.contains("config Style/StringLiterals double_quotes: offenses 1 -> 3 (away)"),
+        text.contains(
+            "config Style/StringLiterals double_quotes: offenses 1 -> 3 (away: 0 fixed, 2 added)"
+        ),
+        "{text}"
+    );
+    // Opposite moves in two files net to level, and both still show.
+    let dir = repo(&[
+        &[(config, rule), ("a.rb", before), ("b.rb", before)],
+        &[
+            ("a.rb", "A = \"a\"\nB = \"b\"\nC = \"c\"\n"),
+            ("b.rb", "A = 'a'\nB = \"b\"\nC = 'c'\n"),
+        ],
+    ]);
+    let summary = &report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]))["summary"];
+    let t = &summary["config_trajectory"][0];
+    assert_eq!(
+        (&t["fixed"], &t["added"], &t["direction"]),
+        (
+            &serde_json::json!(1),
+            &serde_json::json!(1),
+            &serde_json::json!("level")
+        )
+    );
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("offenses 2 -> 2 (level: 1 fixed, 1 added)"),
+        "{text}"
+    );
+}
+
+/// Config shapr can't read (a gem's, a missing or remote file, lines that
+/// aren't YAML it reads) is named on stderr and in the summary, never
+/// silently dropped.
+#[test]
+fn config_it_cannot_read_is_named() {
+    let config = "inherit_gem:\n  rubocop-shopify: rubocop.yml\n\
+                  inherit_from:\n  - missing.yml\n  - https://example.com/rubocop.yml\n\
+                  Style/StringLiterals: [oops\n";
+    let dir = repo(&[
+        &[(".rubocop.yml", config), ("a.rb", "def a\n  'x'\nend\n")],
+        &[("a.rb", "def a\n  'y'\nend\n")],
+    ]);
+    let notes = [
+        ".rubocop.yml: line 6 not read",
+        "inherit_gem: rubocop-shopify",
+        "inherit_from: missing.yml (not found)",
+        "inherit_from: https://example.com/rubocop.yml (remote)",
+    ];
+    let out = shapr(dir.path(), &["norms", "-j", "a.rb"]);
+    assert_eq!(
+        report(&out)["summary"]["config_unread"],
+        serde_json::json!(notes)
+    );
+    for args in [vec!["norms", "a.rb"], vec!["HEAD~1..HEAD"]] {
+        let stderr = String::from_utf8(shapr(dir.path(), &args).stderr).unwrap();
+        for note in notes {
+            let line = format!("shapr: config not read, norms judge without it: {note}\n");
+            assert_eq!(stderr.matches(&line).count(), 1, "{args:?}: {stderr}");
+        }
+    }
+}
+
+/// Deviations config doesn't check (a `.rubocop_todo.yml` exclude) count as
+/// withheld, edit or not, read as withheld in the plan's text, and rank no
+/// hotspot.
+#[test]
+fn deviations_config_excludes_are_withheld_and_rank_no_hotspot() {
+    let snake = "class C\n  def a_b\n  end\n\n  def c_d\n  end\n\n  def e_f\n  end\n\n  def g_h\n  end\nend\n";
+    let dir = repo(&[&[
+        (".rubocop.yml", "inherit_from: .rubocop_todo.yml\n"),
+        (
+            ".rubocop_todo.yml",
+            "Naming/MethodName:\n  Exclude:\n    - 'lib/b.rb'\n",
+        ),
+        ("lib/a.rb", snake),
+        ("lib/c.rb", snake),
+        ("lib/e.rb", snake),
+        ("lib/b.rb", "class B\n  def doThing\n  end\nend\n"),
+        (
+            "lib/d.rb",
+            "class D\n  def run_it\n    goNow\n  end\n\n  private\n\n  def goNow\n  end\nend\n",
+        ),
+    ]]);
+    let report = norms_json(dir.path(), &[]);
+    let step = (report["steps"].as_array().unwrap().iter())
+        .find(|s| s["norm"] == "Naming/MethodName")
+        .expect("a step");
+    assert_eq!(
+        (step["fixes"].as_u64(), step["withheld"].as_u64()),
+        (Some(1), Some(1))
+    );
+    let hot: Vec<&str> = (report["hotspots"].as_array().unwrap().iter())
+        .map(|h| h["file"].as_str().unwrap())
+        .collect();
+    assert!(!hot.contains(&"lib/b.rb"), "{hot:?}");
+    let text = String::from_utf8(shapr(dir.path(), &["norms"]).stdout).unwrap();
+    assert!(
+        text.contains(", 1 withheld (config doesn't check them)"),
+        "{text}"
+    );
+    assert!(!text.contains("left without an edit"), "{text}");
+    assert!(
+        text.contains(
+            "lib/d.rb  1 norm, 1 deviation in 10 lines (10.0 per 100): Naming/MethodName"
+        ),
         "{text}"
     );
 }

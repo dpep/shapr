@@ -105,26 +105,26 @@ pub fn plan(sources: &[Source], pooled: &[Pooled], outside: &dyn Outside) -> Pla
             planned[n] = Err(Some("config_disagrees"));
             continue;
         };
-        let (mut unfixed, mut withheld, mut offered) = (0, 0, 0);
+        let (mut unfixed, mut withheld, mut total) = (0, 0, 0);
         let mut kept: Kept = vec![Vec::new(); sources.len()];
         for (f, o, expected) in p.deviations() {
+            total += 1;
             let source = &sources[f];
+            let check = checked(source, p.def, o);
+            if check.withheld {
+                withheld += 1;
+                unfixed += 1;
+                continue;
+            }
             let fix = (o.fix.iter())
                 .find(|(s, _)| s == expected)
                 .map(|(_, r)| edit::endings(&source.bytes, r));
-            let check = checked(source, p.def, o);
             // A file's own config setting another style isn't overridden.
             let fights = check.style.is_some_and(|s| s != expected);
             match fix {
-                Some(_) if check.withheld => withheld += 1,
-                Some(fix) if !fights => {
-                    offered += 1;
-                    kept[f].push(fix);
-                    continue;
-                }
-                _ => {}
+                Some(fix) if !fights => kept[f].push(fix),
+                _ => unfixed += 1,
             }
-            unfixed += 1;
         }
         // Each file's fixes, kept together when the whole is the same
         // program, else one by one as each keeps it.
@@ -161,7 +161,7 @@ pub fn plan(sources: &[Source], pooled: &[Pooled], outside: &dyn Outside) -> Pla
         }
         let fixed: usize = kept.iter().map(Vec::len).sum();
         if fixed == 0 {
-            planned[n] = Err(Some(if offered == 0 && withheld > 0 {
+            planned[n] = Err(Some(if withheld == total {
                 "withheld"
             } else {
                 "no_edit"

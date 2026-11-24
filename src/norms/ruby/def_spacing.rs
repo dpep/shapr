@@ -12,7 +12,8 @@ pub const NORM: &str = "Layout/EmptyLineBetweenDefs";
 pub const STYLES: &[&str] = &["empty_line", "no_empty_line"];
 
 /// The gap between two adjacent `def`s in a body: a blank line in it, or
-/// only comments (or nothing). A one-line def chooses nothing: beyond
+/// only comments (or nothing); blank lines both before and after a comment
+/// choose nothing, as RuboCop's `multiple_blank_lines_groups?`. A one-line def chooses nothing: beyond
 /// RuboCop, which allows two adjacent, it often sits tight against a
 /// longer one (`def version; 1 end`). Nor do defs sharing a line.
 pub fn see(w: &mut Walker, node: &Node) {
@@ -40,6 +41,11 @@ pub fn see(w: &mut Walker, node: &Node) {
         let blank: Vec<usize> = (gap.clone())
             .filter(|&l| line_text(l).iter().all(u8::is_ascii_whitespace))
             .collect();
+        // RuboCop skips a gap with a blank line after a comment line, so a
+        // blank around a comment block is never an offense.
+        if (gap.clone()).any(|l| !blank.contains(&l) && blank.iter().any(|&b| b > l)) {
+            continue;
+        }
         let comments: Vec<String> = (gap.clone())
             .filter(|l| !blank.contains(l))
             .map(|l| String::from_utf8_lossy(line_text(l)).trim().to_string())

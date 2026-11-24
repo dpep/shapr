@@ -1,0 +1,14 @@
+{
+  "description": "def, blank, comment block, blank, def isn't judged, as RuboCop's EmptyLineBetweenDefs skips a gap with blank lines on both sides of a comment",
+  "args": ["norms", "-j", "lib/a.rb"],
+  "norm": "Layout/EmptyLineBetweenDefs",
+  "expect": {
+    "norms": [
+      {
+        "inferred": "empty_line",
+        "counts": {"empty_line": 6},
+        "deviations": []
+      }
+    ]
+  }
+}

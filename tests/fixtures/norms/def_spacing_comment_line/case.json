@@ -1,0 +1,14 @@
+{
+  "description": "a section comment with a blank line on each side between defs isn't judged, nor blank lines between comments; a blank line before a def's comment is",
+  "args": ["norms", "-j", "lib/a.rb"],
+  "norm": "Layout/EmptyLineBetweenDefs",
+  "expect": {
+    "norms": [
+      {
+        "inferred": "empty_line",
+        "counts": {"empty_line": 5},
+        "deviations": []
+      }
+    ]
+  }
+}

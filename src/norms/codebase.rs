@@ -396,7 +396,8 @@ pub struct Hotspot {
     pub per_100_lines: f64,
 }
 
-/// Files, classes and methods holding deviations, each kind ranked by the
+/// Files, classes and methods holding deviations config doesn't withhold
+/// (where it does, the project chose not to check), each kind ranked by the
 /// norms it breaks, then deviations per line. A class counts its own lines
 /// and deviations, not a nested class's; a method is its innermost `def`.
 pub fn hotspots(sources: &[Source], pooled: &[Pooled]) -> Vec<Hotspot> {
@@ -404,7 +405,9 @@ pub fn hotspots(sources: &[Source], pooled: &[Pooled]) -> Vec<Hotspot> {
     let mut per_file: Vec<Vec<(usize, &'static str)>> = vec![Vec::new(); sources.len()];
     for p in pooled {
         for (f, o, _) in p.deviations() {
-            per_file[f].push((o.line, p.def.id));
+            if !checked(&sources[f], p.def, o).withheld {
+                per_file[f].push((o.line, p.def.id));
+            }
         }
     }
     let mut units: Vec<(Hotspot, usize)> = Vec::new();

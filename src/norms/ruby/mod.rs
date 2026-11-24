@@ -307,6 +307,7 @@ impl Language for Ruby {
                 ..Configured::default()
             };
         };
+        super::warn_unread(&config.unread);
         // A file RuboCop skips for a cop has no configured style there.
         let off: BTreeSet<&'static str> = (NORMS.iter())
             .map(|n| n.id)
@@ -344,7 +345,12 @@ impl Language for Ruby {
             .map(|n| n.id)
             .filter(|id| config.todo(id))
             .collect();
-        Configured { styles, off, todo }
+        Configured {
+            styles,
+            off,
+            todo,
+            unread: config.unread,
+        }
     }
 }
 

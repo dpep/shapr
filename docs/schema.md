@@ -852,8 +852,8 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 |---|---|---|
 | `Style/StringLiterals` | `single_quotes`, `double_quotes` | each quoted string that could take either quote with the same value, as RuboCop counts them |
 | `Layout/SpaceInsideHashLiteralBraces` | `space`, `no_space` | each non-empty hash literal with spaces inside both braces or neither; a brace beside a line break chooses nothing (RuboCop's `compact` reads as `space`) |
-| `Style/TrailingCommaInArrayLiteral`, `Style/TrailingCommaInHashLiteral` | `comma`, `no_comma` | each multiline `[]` or `{}` literal with every item on its own line, after the bracket's line, and the closing bracket on a line of its own (where RuboCop's `comma`, `consistent_comma` and `diff_comma` all read as `comma`); a heredoc body before the bracket chooses nothing |
-| `Style/TrailingCommaInArguments` | `comma`, `no_comma` | the same, for a call's arguments in `()` or `[]` (`Set[...]`), each keyword argument an item; a call ending in a `&block` argument, which can't take a comma, chooses nothing |
+| `Style/TrailingCommaInArrayLiteral`, `Style/TrailingCommaInHashLiteral` | `comma`, `no_comma`, `single_line_comma` | each multiline `[]` or `{}` literal with every item on its own line, after the bracket's line, and the closing bracket on a line of its own (where RuboCop's `comma`, `consistent_comma` and `diff_comma` all read as `comma`); a heredoc body before the bracket chooses nothing. A one-line literal with a trailing comma is `single_line_comma`, an offense under every RuboCop style, weighed only where seen; its edit removes the comma |
+| `Style/TrailingCommaInArguments` | `comma`, `no_comma`, `single_line_comma` | the same, for a call's arguments in `()` or `[]` (`Set[...]`), each keyword argument an item; a call ending in a `&block` argument, which can't take a comma, chooses nothing |
 | `Style/HashSyntax` | `ruby19`, `hash_rockets` | each pair of a hash or keyword arguments whose key is a symbol: `a: 1` or `:a => 1` where the symbol can be a label, a quoted label `"a-b": 1` as `ruby19`. As in RuboCop's `ruby19`, a rocket counts only when every key in its hash can be a label; a hash with an omitted value (`{a:}`) chooses nothing. `ruby19_no_mixed_keys` reads as `ruby19` |
 | `Layout/IndentationConsistency` | `normal`, `indented_internal_methods` | each method defined after a bare `private` or `protected` in a class or module body: at the modifier's column, or deeper. As in RuboCop, the method is measured from its modifier, outdented or not; `public` ends the section |
 | `Layout/TrailingWhitespace` | `no_trailing_whitespace`, `trailing_whitespace` | each non-empty line up to `__END__`, but not a line whose break is inside a string, heredoc, regexp or quoted symbol, where whitespace is data. `.rubocop.yml` configures it by enabling the cop; `.editorconfig` by `trim_trailing_whitespace = true` |
@@ -861,7 +861,7 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 | `Layout/IndentationWidth` | the width in spaces: `2`, `4`, ... | each body's first statement, when it starts its own line, against what opens the body: a `def`, `class`, `module` or block from the start of its line; `if`, `unless`, `while`, `until`, `case`/`when`, `else`, `begin`, `rescue` and `ensure` from their keyword when it starts its line (so `x = if` chooses nothing). Tab-indented lines choose nothing. No suggested edit: reindenting a body reaches past the line. RuboCop's `Width`, or `.editorconfig`'s `indent_size` (`tab_width` for `tab`) unless `indent_style = tab`, configures it |
 | `Naming/MethodName` | `snake_case`, `camelCase` | each `def` whose name has two or more words, ignoring a leading `_` and a trailing `?`, `!` or `=`: lowercase words joined by `_`, or a lowercase start with capitals and no `_`. A one-word name chooses nothing. A rename is suggested only for a private instance method (in a `private` section, or `private def`) whose every mention in the file is its `def` or a call with no receiver or `self`, and whose new name the file doesn't already use, and only when the repository's other files (searched as [Proof status](#proof-status) searches a rename's) hold neither name: a subclass elsewhere may call a private method, and a method elsewhere by the new name would be overridden; any other method is interface, reported with no edit |
 | `Naming/VariableName` | `snake_case`, `camelCase` | each local of two or more words, once per scope that declares it (program, class or module body, method, block), at its first mention; a keyword parameter is interface and chooses nothing. A rename covers the scope and is suggested when every mention of the name there is that local (not a method call, symbol, string, comment or `{name:}` key), the new name is unused there, and nothing in the scope reads locals by name (`binding`, `eval`, `local_variables`) |
-| `Layout/SpaceAroundOperators` | `space`, `no_space` | each binary operator call (`+`, `==`, `<<`, ...), `&&`, `\|\|`, and assignment (`=`, `+=`, `\|\|=`, attribute and index writes): whitespace of any width, line breaks included, on both sides is `space`, so aligned operators read as `space`; anything less is `no_space`. `**`, unary operators, `and`/`or` and default parameters (`a=1`) aren't observed. Only the edit to `space` is suggested: removing whitespace can change a parse (`a <<b`). `.rubocop.yml` configures it by enabling the cop |
+| `Layout/SpaceAroundOperators` | `space`, `no_space`, `extra_space` | each binary operator call (`+`, `==`, `<<`, ...), `&&`, `\|\|`, assignment (`=`, `+=`, `\|\|=`, attribute and index writes) and `=>` (a pair's or `rescue`'s): whitespace on both sides is `space`; anything less is `no_space`; two or more spaces after the operator, on its line, are `extra_space` unless they align the operand with a word on a nearby line, as RuboCop's `AllowForAlignment` reads it (`extra_space` weighs only where seen; its edit leaves one space). Extra space before an operator reads as `space`. `**`, unary operators, `and`/`or`, rational literals (`1/3r`) and default parameters (`a=1`) aren't observed. Only the edit to `space` is suggested: removing whitespace can change a parse (`a <<b`). `.rubocop.yml` configures it by enabling the cop |
 | `Layout/EmptyLineBetweenDefs` | `empty_line`, `empty_lines`, `no_empty_line` | the gap between two adjacent `def`s in a body: one blank line in it, two or more, or only comments or nothing (`empty_lines` weighs as a style only where some gap has it, as `Layout/IndentationWidth` counts its widths). The observation spans the first's last line to the second's first, so a line added on either side, or a deletion in the gap, judges it; a one-line def (RuboCop allows two adjacent; here one beside a longer def chooses nothing too) and defs sharing a line choose nothing. The edit to `empty_line` inserts a line break after the first `def`, inside the hunk when either side of the gap is, or removes the extra blank lines. `.rubocop.yml` configures it by enabling the cop, with `NumberOfEmptyLines` above 1 as `empty_lines` (a range sets no style) |
 
 The evidence is the unchanged code around the hunk, per scope from the
@@ -978,7 +978,7 @@ its own.
 | `matching`, `judged` | int | Observations held to the expected style (every one when a style is inferred; with only config, those config checks), and those in it. |
 | `config` | object or null | How far the code is from config, when `configured` is set. Below. |
 | `step` | int or null | The plan step that fixes the norm's deviations. |
-| `unplanned` | string or null | Why a norm with deviations has no step: `config_disagrees` (the inferred and configured styles differ; changing the code or the config is a person's call, so the plan does neither), `withheld` (every deviation with an edit is where config doesn't check the cop), `no_edit` (no deviation has an edit that keeps the program); `null` otherwise. |
+| `unplanned` | string or null | Why a norm with deviations has no step: `config_disagrees` (the inferred and configured styles differ; changing the code or the config is a person's call, so the plan does neither), `withheld` (every deviation is where config doesn't check the cop), `no_edit` (no deviation has an edit that keeps the program); `null` otherwise. |
 | `deviations` | array | Observations not in the style they're held to: `file`, `line`, `column`, `style`, `expected`. |
 
 `config`, the norm's trajectory against its config. It never lists
@@ -995,7 +995,9 @@ RuboCop's offenses line by line; it says how far apart code and config are:
 ### `hotspot` record
 
 Where the code is least like itself. Each kind is ranked on its own: by the
-norms it breaks, then deviations per line, then deviations.
+norms it breaks, then deviations per line, then deviations. A deviation
+where config doesn't check the norm's cop (`withheld`) isn't counted: the
+project chose not to check it there.
 
 | field | type | meaning |
 |---|---|---|
@@ -1033,7 +1035,7 @@ per tier, and each tier's change classifies as its `expect_kind`.
 | `norm`, `style` | string | The norm, and the style its edits apply. |
 | `fixes` | int | Deviations its edits fix. |
 | `unfixed` | int | The norm's deviations it leaves: no edit, an edit the guard refused, or `withheld`. |
-| `withheld` | int | Of `unfixed`, those where config doesn't check the cop. |
+| `withheld` | int | Of `unfixed`, those where config doesn't check the cop, with an edit or not. |
 | `adherence_before`, `adherence_after` | number 0–1 or null | The norm's adherence before and after the step, to 2 decimals. |
 | `files`, `lines_touched` | int | Files and lines its edits change. |
 | `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes. |
@@ -1043,8 +1045,12 @@ For a pull request per tier:
 
 `summary`: `files` (judged), `skipped` (per reason: `generated`, `vendored`,
 `docs`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
-style inferred), `deviations`, `hotspots`, `steps`, `fixes` and
-`lines_touched` (over the steps).
+style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
+`lines_touched` (over the steps) and `config_unread`: config the files fall
+under that shapr didn't read, one note each (`inherit_gem: NAME`,
+`inherit_from: PATH (not found)` or `(remote)`, `FILE: lines N not read`),
+so their norms were judged without it. Each note is also one stderr line,
+under `shapr norms` and a change's hunks alike.
 
 ## `summary` record
 
@@ -1069,7 +1075,7 @@ style inferred), `deviations`, `hotspots`, `steps`, `fixes` and
 | `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings, parts with assumptions) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts of hunks whose verdict is `structure` or `mixed`, over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
-| `config_trajectory` | array | *Experimental.* Per norm `.rubocop.yml` (or `.editorconfig`) sets in a changed file, whether the change moves the code toward it: `norm`, `configured`, `before` and `after` (each `checked`, the observations config checks in the changed files, and `offenses`, those not in the configured style), and `direction`, `toward` (fewer offenses), `away` (more) or `level`. Both sides are judged by the config as of the after side; unchanged files hold the same offenses on both sides, so the counts move as the file's, its directory's and the repository's do. Only norms whose counts move are listed. |
+| `config_trajectory` | array | *Experimental.* Per norm `.rubocop.yml` (or `.editorconfig`) sets in a changed file, whether the change moves the code toward it: `norm`, `configured`, `before` and `after` (each `checked`, the observations config checks in the changed files, and `offenses`, those not in the configured style), `fixed` and `added` (offenses only before, and only after, in a changed file, matched by content with the style taken out, so one carried over, or moved within its file, is neither), and `direction`, `toward` (fewer offenses), `away` (more) or `level`, which nets them. Both sides are judged by the config as of the after side; unchanged files hold the same offenses on both sides, so the counts move as the file's, its directory's and the repository's do. Only norms whose counts move, or with an offense fixed or added, are listed. |
 
 ## GitHub input
 

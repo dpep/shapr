@@ -2,7 +2,9 @@
 //! the local files it `inherit_from`s. Only the YAML RuboCop configs use is
 //! read: top-level cop names, their scalar settings, their `Include` and
 //! `Exclude` lists, and `inherit_from`. Gems (`inherit_gem`) and remote URLs
-//! are not followed.
+//! are not followed: a gem's config is whichever version this machine has
+//! installed, not the repository's, and a URL needs the network. What isn't
+//! read is listed in `Config::unread`.
 
 use crate::norms::snapshot::{Snapshot, join, parent, resolve};
 use std::collections::BTreeMap;
@@ -20,7 +22,12 @@ pub struct Config {
     /// regexp, an absolute path, ERB).
     lists: BTreeMap<String, BTreeMap<String, Vec<Option<String>>>>,
     /// Lines of the file that aren't YAML this reader understands, 1-based.
-    unread: Vec<usize>,
+    lines: Vec<usize>,
+    /// `inherit_gem` gems, by name.
+    gems: Vec<String>,
+    /// What the chain holds that wasn't read, one note each: a gem, a
+    /// missing or remote file, lines that aren't YAML this reader reads.
+    pub unread: Vec<String>,
     /// Cops a `.rubocop_todo.yml` in the chain lists: offenses the project
     /// has parked rather than fixed.
     todo: std::collections::BTreeSet<String>,
@@ -94,16 +101,20 @@ fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize)
         ""
     };
     let (inherits, own) = parse(&String::from_utf8_lossy(&text), base);
-    if !own.unread.is_empty() {
-        let lines: Vec<String> = own.unread.iter().map(usize::to_string).collect();
-        crate::verbose!(
-            "{path}: line(s) {} not read as YAML; settings there are ignored",
-            lines.join(", ")
-        );
+    if !own.lines.is_empty() {
+        let lines: Vec<String> = own.lines.iter().map(usize::to_string).collect();
+        let s = if lines.len() == 1 { "" } else { "s" };
+        (config.unread).push(format!("{path}: line{s} {} not read", lines.join(", ")));
     }
-    for file in inherits {
-        if let (false, Some(file)) = (file.contains("://"), resolve(parent(path), &file)) {
-            merge(&file, snapshot, config, depth + 1);
+    (config.unread).extend(own.gems.iter().map(|g| format!("inherit_gem: {g}")));
+    for entry in inherits {
+        let file = resolve(parent(path), &entry).filter(|f| snapshot.read(f).is_some());
+        match file {
+            _ if entry.contains("://") => {
+                (config.unread).push(format!("inherit_from: {entry} (remote)"));
+            }
+            Some(file) => merge(&file, snapshot, config, depth + 1),
+            None => (config.unread).push(format!("inherit_from: {entry} (not found)")),
         }
     }
     if name == TODO {
@@ -125,6 +136,7 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
     let mut config = Config::default();
     let mut cop: Option<String> = None;
     let mut in_inherit = false;
+    let mut in_gem = false;
     // The indentation of a cop's settings; deeper lines are nested values.
     let mut indent: Option<usize> = None;
     // The setting whose block list the following `- ` lines extend.
@@ -141,19 +153,20 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
             continue;
         }
         if !readable(trimmed) {
-            config.unread.push(n + 1);
+            config.lines.push(n + 1);
             continue;
         }
         let depth = line.len() - line.trim_start().len();
         if depth == 0 {
             let (key, value) = split(trimmed);
             in_inherit = key == "inherit_from";
+            in_gem = key == "inherit_gem";
             cop = None;
             indent = None;
             items = None;
             if in_inherit {
                 inherits.extend(list(value));
-            } else if value.is_empty() {
+            } else if value.is_empty() && !in_gem {
                 cop = Some(key.to_string());
             }
             continue;
@@ -162,6 +175,10 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
             if let Some(item) = trimmed.strip_prefix("- ") {
                 inherits.push(unquote(item).to_string());
             }
+            continue;
+        }
+        if in_gem {
+            config.gems.push(split(trimmed).0.to_string());
             continue;
         }
         let Some(cop) = &cop else { continue };
@@ -351,7 +368,7 @@ mod tests {
             "Style/StringLiterals: [oops\n  : :\nA:\n  B: c\nloose\n",
             "",
         );
-        assert_eq!(config.unread, [1, 2, 5]);
+        assert_eq!(config.lines, [1, 2, 5]);
     }
 
     #[test]
