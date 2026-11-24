@@ -14,6 +14,11 @@ const NAME: &str = ".editorconfig";
 /// matcher's work.
 const MAX_GLOB: usize = 1024;
 
+/// The most matching one file's properties may take, in glob characters
+/// times path characters over every section matched: far past a real
+/// config, and seconds short of what long globs against a deep path cost.
+const MAX_MATCH_WORK: usize = 1_000_000;
+
 /// What the `.editorconfig` files above a file set for it.
 #[derive(Default)]
 pub struct Properties {
@@ -51,23 +56,30 @@ pub fn properties(path: &str, snapshot: &dyn Snapshot) -> Properties {
         unread,
         ..Properties::default()
     };
+    let mut work = 0;
     for (dir, file) in files.iter().rev() {
         let relative = match dir.as_str() {
             "" => path,
             dir => &path[dir.len() + 1..],
         };
+        let name = join(dir, NAME);
         if !file.long.is_empty() {
-            let lines: Vec<String> = file.long.iter().map(usize::to_string).collect();
-            let s = if lines.len() == 1 { "" } else { "s" };
-            out.unread.push(format!(
-                "{}: line{s} {} not read (a section glob over {MAX_GLOB} characters)",
-                join(dir, NAME),
-                lines.join(", ")
+            out.unread.push(lines_unread(
+                &name,
+                &file.long,
+                &format!("a section glob over {MAX_GLOB} characters"),
             ));
         }
-        for (glob, props) in &file.sections {
-            if matches(glob, relative) {
-                for (key, value) in props {
+        let mut over = Vec::new();
+        for section in &file.sections {
+            let cost = section.glob.len().saturating_mul(relative.len());
+            if work + cost > MAX_MATCH_WORK {
+                over.push(section.line);
+                continue;
+            }
+            work += cost;
+            if matches(&section.glob, relative) {
+                for (key, value) in &section.props {
                     if value == "unset" {
                         out.values.remove(key);
                     } else {
@@ -76,16 +88,35 @@ pub fn properties(path: &str, snapshot: &dyn Snapshot) -> Properties {
                 }
             }
         }
+        if !over.is_empty() {
+            let why =
+                format!("matching its globs against a path this long passes {MAX_MATCH_WORK}");
+            out.unread.push(lines_unread(&name, &over, &why));
+        }
     }
     out
 }
 
+/// A note that NAME's LINES weren't read, and WHY.
+fn lines_unread(name: &str, lines: &[usize], why: &str) -> String {
+    let list: Vec<String> = lines.iter().map(usize::to_string).collect();
+    let s = if list.len() == 1 { "" } else { "s" };
+    format!("{name}: line{s} {} not read ({why})", list.join(", "))
+}
+
 struct File {
     root: bool,
-    sections: Vec<(String, Vec<(String, String)>)>,
+    sections: Vec<Section>,
     /// Lines of sections past [`MAX_GLOB`], 1-based: ignored with their
     /// properties.
     long: Vec<usize>,
+}
+
+struct Section {
+    /// 1-based.
+    line: usize,
+    glob: String,
+    props: Vec<(String, String)>,
 }
 
 fn parse(text: &str) -> File {
@@ -106,7 +137,11 @@ fn parse(text: &str) -> File {
             if skipping {
                 file.long.push(n + 1);
             } else {
-                file.sections.push((glob.to_string(), Vec::new()));
+                file.sections.push(Section {
+                    line: n + 1,
+                    glob: glob.to_string(),
+                    props: Vec::new(),
+                });
             }
             continue;
         }
@@ -116,7 +151,7 @@ fn parse(text: &str) -> File {
         let (key, value) = (key.trim().to_lowercase(), value.trim().to_lowercase());
         match file.sections.last_mut() {
             _ if skipping => {}
-            Some((_, props)) => props.push((key, value)),
+            Some(section) => section.props.push((key, value)),
             None if key == "root" => file.root = value == "true",
             None => {}
         }
@@ -402,6 +437,34 @@ mod tests {
             &format!("{}b", "a".repeat(64))
         ));
         assert!(!matches(&format!("{}b", "*a".repeat(16)), &"a".repeat(64)));
+    }
+
+    /// Many long globs against a deep path would take minutes: past the
+    /// budget a section isn't matched, and the note names its lines.
+    #[test]
+    fn matching_past_the_budget_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let glob = format!("**{}z", "*a".repeat(500));
+        let mut text = String::from("[*]\nindent_size = 4\n");
+        for _ in 0..400 {
+            text.push_str(&format!("[{glob}]\nindent_size = 8\n"));
+        }
+        text.push_str("[*.rb]\ntrim_trailing_whitespace = true\n");
+        std::fs::write(dir.path().join(".editorconfig"), text).unwrap();
+        let snapshot = Worktree(dir.path().to_path_buf());
+        let deep = format!("{}a.rb", format!("{}/", "a".repeat(200)).repeat(6));
+        let started = std::time::Instant::now();
+        let found = properties(&deep, &snapshot);
+        assert!(started.elapsed().as_secs() < 2, "{:?}", started.elapsed());
+        let values = &found.values;
+        assert_eq!(values.get("indent_size").map(String::as_str), Some("4"));
+        assert!(values.contains_key("trim_trailing_whitespace"));
+        assert_eq!(found.unread.len(), 1, "{:?}", found.unread);
+        assert!(
+            found.unread[0].contains("lines 3, 5,"),
+            "{:?}",
+            found.unread
+        );
     }
 
     #[test]
