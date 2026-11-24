@@ -753,7 +753,7 @@ impl Cache {
 
 /// git on a cache clone, never prompting for credentials.
 fn cache_git(git_dir: &Path) -> Command {
-    let mut cmd = Command::new("git");
+    let mut cmd = git::command();
     cmd.arg("--git-dir")
         .arg(git_dir)
         .env_remove("GIT_WORK_TREE")
@@ -779,7 +779,7 @@ fn create(path: &Path) -> Result<()> {
     std::fs::create_dir_all(parent)?;
     let staging = tempfile_dir(parent)?;
     git::run(
-        Command::new("git")
+        git::command()
             .args(["init", "--quiet", "--bare"])
             .arg(&staging)
             .env_remove("GIT_DIR")

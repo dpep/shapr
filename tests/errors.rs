@@ -240,3 +240,41 @@ fn a_usage_error_keeps_the_whole_message() {
     let message = report(&out)["error"].as_str().unwrap().to_string();
     assert!(message.contains("--top <N>"), "{message}");
 }
+
+// Untrusted repositories: content and config a pull request controls.
+
+/// A repository whose config names programs git would run, and the marker
+/// file they'd leave.
+fn armed() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    write(
+        dir.path(),
+        &[("a.rb", "def greet(other)\n  \"hi #{other}\"\nend\n")],
+    );
+    let marker = dir.path().join(".git/ran");
+    let script = dir.path().join(".git/run.sh");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let script = script.to_str().unwrap();
+    git(dir.path(), &["config", "core.fsmonitor", script]);
+    let hooks = dir.path().join(".git/hooks");
+    for hook in ["reference-transaction", "post-index-change"] {
+        std::fs::copy(script, hooks.join(hook)).unwrap();
+    }
+    (dir, marker)
+}
+
+#[test]
+fn a_repositorys_config_runs_no_program() {
+    let (dir, marker) = armed();
+    for args in [&["-J", "."][..], &["-J", "HEAD"], &["-J", "--staged"]] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?} {out:?}");
+        assert!(!marker.exists(), "{args:?} ran the repository's program");
+    }
+}

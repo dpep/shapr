@@ -64,7 +64,7 @@ impl Git {
     }
 
     fn command(&self) -> Command {
-        let mut cmd = Command::new("git");
+        let mut cmd = command();
         // Paths verbatim, whatever the user's quoting config.
         cmd.args(["-c", "core.quotePath=false"]);
         if let Some(bare) = &self.bare {
@@ -793,6 +793,20 @@ impl Git {
     }
 }
 
+/// `git`, kept from running any program a repository's config or hooks
+/// name: a checkout under review is untrusted. Every git shapr runs starts
+/// here. System and global config still apply (credential helpers).
+pub fn command() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+    ]);
+    cmd
+}
+
 /// Why a merge's combined diff isn't read, and what to run instead.
 pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
 
@@ -1015,6 +1029,42 @@ mod tests {
         assert_eq!(git.show("HEAD", "nope.rb"), None);
         assert_eq!(git.show("HEAD", "a\nb"), None);
         assert_eq!(git.show("HEAD", "gen.rb").unwrap(), b"y\n");
+    }
+
+    /// Every git shapr runs is built by `command()`. Test code may spawn its own.
+    #[test]
+    fn every_git_starts_from_command() {
+        // The norms lane moves its `ls-files` onto `command()`.
+        let pending = ["src/norms/codebase.rs"];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut dirs = vec![root.join("src")];
+        let mut offenders = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                let code = text.split("#[cfg(test)]").next().unwrap();
+                let name = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let allowed = usize::from(name == "src/git.rs");
+                if code.matches("Command::new(\"git\")").count() > allowed
+                    && !pending.contains(&name.as_str())
+                {
+                    offenders.push(name);
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "spawn git through git::command(): {offenders:?}"
+        );
     }
 
     #[test]
