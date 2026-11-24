@@ -1318,3 +1318,21 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         "{text}"
     );
 }
+
+#[test]
+fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n"), ("b.rb", "def g(\n")],
+        &[("a.rb", "def f\n  2\nend\n"), ("b.rb", "def h(\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    let lines: Vec<&str> = text.lines().take(2).collect();
+    assert_eq!(
+        lines,
+        [
+            "a.rb:2  logic             1.00  [literal_only]",
+            "b.rb:1  logic             0.00  syntax error on both sides; compared line by line",
+        ],
+        "{text}"
+    );
+}

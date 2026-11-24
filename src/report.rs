@@ -667,24 +667,27 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         // One line per part; the place names the hunk on its first.
         for (i, part) in hunk.parts.iter().enumerate() {
             let facets: Vec<&str> = part.facets.iter().map(|f| f.as_str()).collect();
-            writeln!(
-                out,
-                "{:width$}  {:<17} {:.2}  {}{}{}",
+            // The kind already says it: classify/format.rs's plain logic reason.
+            let reason = match part.reason.strip_prefix(PLAIN_LOGIC) {
+                Some(rest) => rest.trim_start_matches("; "),
+                None => &part.reason,
+            };
+            let mut detail = vec![reason.to_string()];
+            if !facets.is_empty() {
+                detail.push(format!("[{}]", facets.join(", ")));
+            }
+            if !hunk.verdict.counted() && i == 0 {
+                detail.push(format!("({}: outside the verdict)", hunk.category.as_str()));
+            }
+            detail.retain(|d| !d.is_empty());
+            let line = format!(
+                "{:width$}  {:<17} {:.2}  {}",
                 if i == 0 { place(hunk) } else { String::new() },
                 part.kind.as_str(),
                 part.confidence.get(),
-                part.reason,
-                if facets.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", facets.join(", "))
-                },
-                if !hunk.verdict.counted() && i == 0 {
-                    format!(" ({}: outside the verdict)", hunk.category.as_str())
-                } else {
-                    String::new()
-                },
-            )?;
+                detail.join(" "),
+            );
+            writeln!(out, "{}", line.trim_end())?;
         }
         for line in hunk.style.iter().flat_map(crate::norms::text) {
             writeln!(out, "{:width$}  {line}", "")?;
@@ -803,6 +806,8 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
     }
     Ok(())
 }
+
+const PLAIN_LOGIC: &str = "code differs beyond whitespace and comments";
 
 /// A hunk in a file shapr didn't compare, by its category alone: `docs
 /// change`, `unknown file`. `None` for code or tests, whose reason says why.

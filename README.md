@@ -90,14 +90,14 @@ Text output, for a commit that reformats one method's signature and changes anot
 
 ```
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
-lib/greeter.rb:11  logic             1.00  code differs beyond whitespace and comments [literal_only]
+lib/greeter.rb:11  logic             1.00  [literal_only]
                    style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
 claims: refactor in 1 of 1 message
 unproven: claims refactor; 1 hunk not shown structural
 commit 1a2b3c4: mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
 ```
 
-Each line is a part: its place, kind, confidence and reason, with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
+Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
 
 `shapr norms` text output, for a directory where one method breaks the quote style:
 
