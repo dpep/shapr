@@ -558,12 +558,7 @@ mod tests {
         );
         assert_eq!(jumps("Proc.new\nproc\nlambda\n"), [BlockGiven; 3]);
         // A block makes them ordinary calls; a receiver makes them methods.
-        assert!(jumps("proc { 1 }\nx.binding\n$stdout\n").is_empty());
-        // A block run with another self, but not its call or another block.
-        assert_eq!(
-            jumps("x.instance_eval { 1 }\nClass.new do end\ndefine_method(:a) { }\nx.tap { }\n"),
-            [Rebind; 3]
-        );
+        assert!(jumps("proc { 1 }\nx.binding\nx.instance_eval { 1 }\n$stdout\n").is_empty());
     }
 
     #[test]

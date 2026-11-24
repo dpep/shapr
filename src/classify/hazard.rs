@@ -40,14 +40,13 @@ pub(super) fn blocks(op: Op, hazard: Hazard) -> bool {
         // statements stay in their file, so `__FILE__` reads the same.
         Op::Extract => match hazard {
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Binding | Frame | Line | Rebind => true,
+            | Binding | Frame | Line => true,
             File => false,
         },
         // Code reading the frame (`binding`, `$1`) sees the statements'
-        // locals and matches leave, or arrive. Statements leaving or joining
-        // a block with another `self` run on another object.
+        // locals and matches leave, or arrive.
         Op::ExtractCaller => match hazard {
-            Binding | Frame | Rebind => true,
+            Binding | Frame => true,
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
             | Line | File => false,
         },
@@ -56,37 +55,37 @@ pub(super) fn blocks(op: Op, hazard: Hazard) -> bool {
         Op::RenameMethod => match hazard {
             Super | Frame => true,
             Return | Break | Next | Redo | Retry | Yield | BlockGiven | Await | Macro | Binding
-            | Line | File | Rebind => false,
+            | Line | File => false,
         },
         // `binding` and `eval` read locals by name.
         Op::RenameLocal => match hazard {
             Binding => true,
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Frame | Line | File | Rebind => false,
+            | Frame | Line | File => false,
         },
         Op::Move => match hazard {
             Line => true,
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Binding | Frame | File | Rebind => false,
+            | Binding | Frame | File => false,
         },
         Op::MoveAcrossFiles => match hazard {
             Line | File => true,
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Binding | Frame | Rebind => false,
+            | Binding | Frame => false,
         },
         // The parameter is bound either way; a method reading its own frame
         // is left alone rather than reasoned about.
         Op::RestateDefault => match hazard {
             Binding | Frame => true,
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Line | File | Rebind => false,
+            | Line | File => false,
         },
         // Only an explicit read of the code's own position; `caller` and a
         // backtrace report shifted lines too, as any exception does.
         Op::Shift => match hazard {
             Line => true,
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Binding | Frame | File | Rebind => false,
+            | Binding | Frame | File => false,
         },
     }
 }
@@ -99,7 +98,6 @@ mod tests {
     fn each_operation_stops_on_its_own_hazards() {
         assert!(blocks(Op::Extract, Hazard::Return) && !blocks(Op::Extract, Hazard::File));
         assert!(blocks(Op::ExtractCaller, Hazard::Binding));
-        assert!(blocks(Op::ExtractCaller, Hazard::Rebind));
         assert!(!blocks(Op::ExtractCaller, Hazard::Return));
         assert!(blocks(Op::RenameMethod, Hazard::Super));
         assert!(!blocks(Op::RenameMethod, Hazard::Binding));

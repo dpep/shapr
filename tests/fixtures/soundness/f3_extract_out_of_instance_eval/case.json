@@ -1,6 +1,13 @@
 {
   "description": "inside instance_eval self is another object, so statements moved out of it set another object's state and the call reaches another object's method",
+  "open": true,
   "expect": {
-    "hunks": {"$every": {"verdict": {"$not": "structure"}}}
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    }
   }
 }

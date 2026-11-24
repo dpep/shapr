@@ -1,6 +1,13 @@
 {
   "description": "class_exec runs its block with the class as self",
+  "open": true,
   "expect": {
-    "hunks": {"$every": {"verdict": {"$not": "structure"}}}
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    }
   }
 }

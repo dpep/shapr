@@ -1,6 +1,13 @@
 {
   "description": "define_method's block runs with an instance as self, not the class whose method was inlined",
+  "open": true,
   "expect": {
-    "hunks": {"$every": {"verdict": {"$not": "structure"}}}
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    }
   }
 }

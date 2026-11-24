@@ -160,10 +160,6 @@ pub enum Hazard {
     /// Reads its own file (`__FILE__`, `file!()`): moving the code to
     /// another file changes the value.
     File,
-    /// A block run with another object as `self` (`instance_eval`,
-    /// `class_exec`, `define_method`, `Class.new`): code moved into or out
-    /// of it calls methods on, and sets the state of, another object.
-    Rebind,
 }
 
 /// Facts a frontend marks on a node beside its role. Not in the hash or the
