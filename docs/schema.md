@@ -978,7 +978,7 @@ its own.
 | `matching`, `judged` | int | Observations held to the expected style (every one when a style is inferred; with only config, those config checks), and those in it. |
 | `config` | object or null | How far the code is from config, when `configured` is set. Below. |
 | `step` | int or null | The plan step that fixes the norm's deviations. |
-| `unplanned` | string or null | Why a norm with deviations has no step: `config_disagrees` (the inferred and configured styles differ; changing the code or the config is a person's call, so the plan does neither), `withheld` (every deviation with an edit is where config doesn't check the cop), `no_edit` (no deviation has an edit that keeps the program); `null` otherwise. |
+| `unplanned` | string or null | Why a norm with deviations has no step: `config_disagrees` (the inferred and configured styles differ; changing the code or the config is a person's call, so the plan does neither), `withheld` (every deviation is where config doesn't check the cop), `no_edit` (no deviation has an edit that keeps the program); `null` otherwise. |
 | `deviations` | array | Observations not in the style they're held to: `file`, `line`, `column`, `style`, `expected`. |
 
 `config`, the norm's trajectory against its config. It never lists
@@ -995,7 +995,9 @@ RuboCop's offenses line by line; it says how far apart code and config are:
 ### `hotspot` record
 
 Where the code is least like itself. Each kind is ranked on its own: by the
-norms it breaks, then deviations per line, then deviations.
+norms it breaks, then deviations per line, then deviations. A deviation
+where config doesn't check the norm's cop (`withheld`) isn't counted: the
+project chose not to check it there.
 
 | field | type | meaning |
 |---|---|---|
@@ -1033,7 +1035,7 @@ per tier, and each tier's change classifies as its `expect_kind`.
 | `norm`, `style` | string | The norm, and the style its edits apply. |
 | `fixes` | int | Deviations its edits fix. |
 | `unfixed` | int | The norm's deviations it leaves: no edit, an edit the guard refused, or `withheld`. |
-| `withheld` | int | Of `unfixed`, those where config doesn't check the cop. |
+| `withheld` | int | Of `unfixed`, those where config doesn't check the cop, with an edit or not. |
 | `adherence_before`, `adherence_after` | number 0–1 or null | The norm's adherence before and after the step, to 2 decimals. |
 | `files`, `lines_touched` | int | Files and lines its edits change. |
 | `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes. |

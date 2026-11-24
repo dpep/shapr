@@ -462,7 +462,7 @@ fn text(
         let pct = |a: Option<f64>| a.map_or("-".to_string(), |a| format!("{:.0}%", a * 100.0));
         writeln!(
             out,
-            "  {}. tier {} {}  {} -> {}: {} fix{} on {} line{} in {} file{} ({} -> {}{}), a {} change",
+            "  {}. tier {} {}  {} -> {}: {} fix{} on {} line{} in {} file{} ({} -> {}{}{}), a {} change",
             step.step,
             step.tier,
             step.risk,
@@ -476,9 +476,13 @@ fn text(
             if step.files == 1 { "" } else { "s" },
             pct(step.adherence_before),
             pct(step.adherence_after),
-            match step.unfixed {
+            match step.unfixed - step.withheld {
                 0 => String::new(),
                 n => format!(", {n} left without an edit"),
+            },
+            match step.withheld {
+                0 => String::new(),
+                n => format!(", {n} withheld (config doesn't check them)"),
             },
             step.expect_kind
         )?;

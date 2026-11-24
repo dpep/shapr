@@ -360,3 +360,44 @@ fn config_it_cannot_read_is_named() {
         }
     }
 }
+
+/// Deviations config doesn't check (a `.rubocop_todo.yml` exclude) count as
+/// withheld, edit or not, read as withheld in the plan's text, and rank no
+/// hotspot.
+#[test]
+fn deviations_config_excludes_are_withheld_and_rank_no_hotspot() {
+    let snake = "class C\n  def a_b\n  end\n\n  def c_d\n  end\n\n  def e_f\n  end\n\n  def g_h\n  end\nend\n";
+    let dir = repo(&[&[
+        (".rubocop.yml", "inherit_from: .rubocop_todo.yml\n"),
+        (
+            ".rubocop_todo.yml",
+            "Naming/MethodName:\n  Exclude:\n    - 'lib/b.rb'\n",
+        ),
+        ("lib/a.rb", snake),
+        ("lib/c.rb", snake),
+        ("lib/e.rb", snake),
+        ("lib/b.rb", "class B\n  def doThing\n  end\nend\n"),
+        (
+            "lib/d.rb",
+            "class D\n  def run_it\n    goNow\n  end\n\n  private\n\n  def goNow\n  end\nend\n",
+        ),
+    ]]);
+    let report = norms_json(dir.path(), &[]);
+    let step = (report["steps"].as_array().unwrap().iter())
+        .find(|s| s["norm"] == "Naming/MethodName")
+        .expect("a step");
+    assert_eq!(
+        (step["fixes"].as_u64(), step["withheld"].as_u64()),
+        (Some(1), Some(1))
+    );
+    let hot: Vec<&str> = (report["hotspots"].as_array().unwrap().iter())
+        .map(|h| h["file"].as_str().unwrap())
+        .collect();
+    assert!(!hot.contains(&"lib/b.rb"), "{hot:?}");
+    let text = String::from_utf8(shapr(dir.path(), &["norms"]).stdout).unwrap();
+    assert!(
+        text.contains(", 1 withheld (config doesn't check them)"),
+        "{text}"
+    );
+    assert!(!text.contains("left without an edit"), "{text}");
+}
