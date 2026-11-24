@@ -37,9 +37,10 @@ design.
 ```
 src/
   main.rs, lib.rs   entry; lib exposes the modules to the integration tests
-  cli.rs            clap, input selection (range or stdin), exit codes, after-help
+  cli.rs            clap, input selection (range or stdin, -C), exit codes, after-help
   log.rs            -v telemetry (the verbose! macro)
-  git.rs            `git diff RANGE`, blob reads (worktree fallback)
+  git.rs            the git calls, run in -C's directory: `git diff RANGE`, blob reads
+                    (worktree fallback), linguist-generated attributes
   diff.rs           unified diff parser: FileDiff, Hunk (narrowed to its changed region), Lines
   tree.rs           the language-neutral Tree and the TreeBuilder that normalizes it
                     (extents, comment placement, whitespace-insensitive hashes, per-line facts)
@@ -48,13 +49,18 @@ src/
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
-  change.rs         assembles a Change: per file, both trees and a Site per hunk
+  change.rs         assembles a Change: per file, both trees, a Site per hunk, and whether
+                    it is generated (lockfiles, minified assets, linguist-generated)
   classify/
     mod.rs          Kind, Method, Confidence, Label, the pass pipeline
     site.rs         hunk → tree mapping: each side's significant span and cover
     format.rs       the format_only / comment_only pass (tree or line method)
-  report.rs         output records, summary metrics, text/JSON/NDJSON rendering
-tests/cli.rs        end to end against throwaway git repos
+    rename.rs       the rename pass: aligned sides differing only in names, checked per scope
+    moves.rs        the move / move_with_changes pass: unaligned declarations paired across files
+    extract.rs      the extract / inline pass: a chunk of statements swapped for a call
+  report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
+tests/              end to end against throwaway git repos: cli.rs (input, output,
+                    size measures), and one file per detector
 ```
 
 ### The language seam
@@ -71,12 +77,25 @@ the identifier in `Node::name`. Roles are not in the hash or the output.
 
 | Role | Ruby | For |
 |---|---|---|
-| `Definition(NameKind)` | `def`, `class`, `module`, constant and variable writes, parameters (`BlockParameter` for `&block`) | rename: what a name declares. move: `Role::is_declaration()` is true for method, class, module and constant definitions, the statements whose order doesn't change behavior |
-| `Reference(NameKind)` | variable reads, constant reads and paths (`Variable`, `Constant`) | rename: every use of a name |
+| `Definition(NameKind)` | `def`, `class`, `module`, constant and variable writes, parameters | rename: what a name declares. move: `Role::is_declaration()` is true for method, class, module and constant definitions, the statements whose order doesn't change behavior |
+| `Reference(NameKind)` | variable reads, constant reads and paths | rename: every use of a name |
 | `Call(Receiver)` | a method call; `Implicit` (`go`), `SelfRef` (`self.go`), `Explicit` (receiver is the first child) | extract/inline: a call to the new method replacing the statements |
 | `DynamicName` | a string or symbol argument to `send`, `public_send`, `__send__`, `method`, `define_method`, `respond_to?`, `instance_variable_get`/`set`, `const_get`, `alias_method`, `attr*`, a visibility call, and both names of `alias`; `name` is the literal's value | rename: an old name still mentioned here lowers confidence |
 | `Visibility(Visibility)` | `public`, `protected`, `private`, `module_function` with no receiver: bare, `private def x`, or `private :x` | move: a def crossing a visibility boundary |
 | `Jump(Jump)` | `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` (both forms), `block_given?`/`iterator?` | extract/inline: control flow that changes meaning in a new method; block-parameter use is a `Reference` whose name matches a `Definition(BlockParameter)` |
+
+`NameKind` says what sort of name a definition or reference is, and so its
+scope and rename rules:
+
+| NameKind | Ruby |
+|---|---|
+| `Method`, `Class`, `Module`, `Constant` | `def`; `class`/`module`; constant writes, reads and paths |
+| `Variable` | locals only: `x = 1`, `x` |
+| `Field` | instance and class variables: `@x`, `@@x` |
+| `Global` | `$x` |
+| `Parameter` | `x`, `x = 1`, `*rest`, `**opts`; read back as `Reference(Variable)` |
+| `KeywordParameter` | `key:` and `key: 1`; callers pass it by name, so it is interface |
+| `BlockParameter` | `&block` |
 
 Walk a subtree with `Tree::descendants(id)` and filter on `role`. A
 frontend's mapping is unit-tested through `Frontend::parse`.
