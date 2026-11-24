@@ -61,6 +61,7 @@ nothing proven is one `logic` part.
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic unless they are a run of their own (see [Runs](#runs)). |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `restyle` | yes | The same program spelled another way: the code differs only in spellings the language's frontend proves equivalent (quote style, hash syntax, block delimiters, redundant parentheses, ...). See [Restyle](#restyle). |
+| `default_argument` | yes, unless it has `assumptions` | A call drops or adds an argument that restates its parameter's literal default, and the method it calls is the only one the call can reach. See [Default arguments](#default-arguments). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
 | `extract` | yes, unless it has `assumptions` | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
@@ -155,7 +156,7 @@ What the search can't settle stays on the part:
 |---|---|
 | `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), or holds the name in a file shapr can't parse for a use (YAML, JavaScript; see below), so code outside the change may still use the name. |
 | `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
-| `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. |
+| `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
 
 A part with assumptions is reported with `structure: false` and its lines
@@ -236,6 +237,56 @@ lambda delimiters, and Rust `use` trees, derive order and literal suffixes.
 `detail.variants` lists the variants of the respelled syntax on either side
 of the part's code, sorted; `evidence.respelled` counts its respelled
 subtrees.
+
+## Default arguments
+
+A `default_argument` part holds changed lines where a call drops an
+argument that restates its parameter's default, or adds one:
+`fetch(x, retries: 3)` and `fetch(x)` where `fetch` is
+`def fetch(key, retries: 3)`. Either way the method binds the same value.
+Ruby only; Rust has no default arguments.
+
+The hunk's code, around its changed region, is the same on both sides but
+for calls that differ by one keyword argument, the others kept in order, or
+by the last positional argument where the method takes no keywords. Each
+call is proven to reach one definition:
+
+- The call has no receiver, or `self`, and sits in a method with no block,
+  lambda or other body between them (`instance_eval` can run a block with
+  another `self`); that method is defined directly in a class or module
+  body, not at the top level, in a block or in `class << self`.
+- The method called is defined exactly once in the repository at the change's
+  after revision (searched as for a rename: `git grep -w`, then parsed), in
+  the same class or module, the same way nested, on the same receiver (both
+  `def x` or both `def self.x`), in a class or module body. Nothing else may
+  name it: no `send`, `define_method`, `alias`, `attr_*` or a computed name
+  that could spell it, and no plain literal such as `:fetch` (a delegation or
+  a memoizer). A file shapr can't parse that names it counts against it.
+- Its parameters are the same on both sides, it takes no rest
+  (`*args`, `**opts`, `**nil`, `...`) and no required parameter after an
+  optional one, and its own body doesn't read its frame (`binding`,
+  `local_variables`, `__method__`, `caller`).
+- The argument and the default are the same plain literal by their
+  canonical form ([Restyle](#restyle): `','` and `","` agree): an integer,
+  float, symbol, string with no interpolation, `nil`, `true`, `false`, or an
+  empty `{}` or `[]`, a new object either way. A default that is any other
+  expression can differ from the argument at runtime. The files of the call
+  and the method, on both sides, carry the same magic comments, which
+  decide a literal's encoding and whether a string is frozen.
+- The call passes no splat, `**`, or `...`, and names each keyword once
+  with a plain symbol.
+
+What the search can't settle is an assumption, as for a rename; a method
+in a gem's `lib/` is `public_api` even when private, since a subclass
+outside the repository may override it. A subclass or prepended module in
+another package of an application isn't seen. Calls with another receiver
+(`stub.to_return(status: 200)`) reach a method shapr can't name, so they
+stay `logic`.
+
+`detail.restated` lists each argument, in the hunk's order: `method`, the
+method called; `parameter`, `name:` or `argument N` (1-based); `value`, the
+argument's source; and `added`, true when the change adds it. `evidence`
+holds `restated`, how many, and `searched`, as for an extract.
 
 ## Renames
 
@@ -470,7 +521,7 @@ Each part:
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
-| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `rename` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
+| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
 
 ## Evidence
 
@@ -479,6 +530,7 @@ Each part:
 | `comparison` | string | always | `"ast"`: both sides parsed cleanly and their trees were compared. `"line"`: a side has a syntax error, so the region's text was compared, whitespace and comments aside. `"none"`: nothing was compared (no frontend for the file, a binary file, or content that couldn't be read). |
 | `code_similarity` | number 0–1 | `comparison` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
 | `respelled` | int | a `restyle` part | Aligned subtrees the part respells. |
+| `restated` | int | a `default_argument` part | Arguments restating a default the part drops or adds. |
 
 ## Extract and inline
 

@@ -11,6 +11,7 @@ pub mod proof;
 pub mod site;
 
 mod align;
+mod defaults;
 mod extract;
 mod format;
 mod hazard;
@@ -36,6 +37,7 @@ pub enum Kind {
     FormatOnly,
     CommentOnly,
     Restyle,
+    DefaultArgument,
     Rename,
     Move,
     Extract,
@@ -44,10 +46,11 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 8] = [
+    pub const ALL: [Kind; 9] = [
         Kind::FormatOnly,
         Kind::CommentOnly,
         Kind::Restyle,
+        Kind::DefaultArgument,
         Kind::Rename,
         Kind::Move,
         Kind::Extract,
@@ -65,6 +68,7 @@ impl Kind {
             Kind::FormatOnly => "format_only",
             Kind::CommentOnly => "comment_only",
             Kind::Restyle => "restyle",
+            Kind::DefaultArgument => "default_argument",
             Kind::Rename => "rename",
             Kind::Move => "move",
             Kind::Extract => "extract",
@@ -309,6 +313,7 @@ const PASSES: &[Pass] = &[
     moves::run,
     extract::run,
     restyle::run,
+    defaults::run,
     format::rest,
 ];
 

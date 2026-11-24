@@ -1,0 +1,17 @@
+{
+  "description": "a singleton method's call does not reach an instance method",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

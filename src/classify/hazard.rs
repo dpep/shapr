@@ -23,6 +23,9 @@ pub(super) enum Op {
     Move,
     /// A declaration moved to another file.
     MoveAcrossFiles,
+    /// An argument restating a default dropped or added: the hazard is in
+    /// the called method's own body.
+    RestateDefault,
 }
 
 /// Whether `hazard` in the code `op` touches makes it something other than
@@ -67,6 +70,13 @@ pub(super) fn blocks(op: Op, hazard: Hazard) -> bool {
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
             | Binding | Frame => false,
         },
+        // The parameter is bound either way; a method reading its own frame
+        // is left alone rather than reasoned about.
+        Op::RestateDefault => match hazard {
+            Binding | Frame => true,
+            Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
+            | Line | File => false,
+        },
     }
 }
 
@@ -85,5 +95,7 @@ mod tests {
         assert!(!blocks(Op::RenameLocal, Hazard::Frame));
         assert!(blocks(Op::Move, Hazard::Line) && !blocks(Op::Move, Hazard::File));
         assert!(blocks(Op::MoveAcrossFiles, Hazard::File));
+        assert!(blocks(Op::RestateDefault, Hazard::Binding));
+        assert!(!blocks(Op::RestateDefault, Hazard::Super));
     }
 }

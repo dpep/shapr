@@ -1,0 +1,17 @@
+{
+  "description": "a callee taking *args after the optional parameter",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

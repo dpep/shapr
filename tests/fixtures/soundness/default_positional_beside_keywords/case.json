@@ -1,0 +1,17 @@
+{
+  "description": "a positional default dropped where the callee also takes keywords stays logic",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

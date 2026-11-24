@@ -1,0 +1,17 @@
+{
+  "description": "a callee reading its binding: kept logic",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

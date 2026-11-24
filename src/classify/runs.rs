@@ -57,7 +57,11 @@ pub(super) fn refine(change: &Change, outside: &dyn Outside, labels: &mut Labels
 /// holds only when the run's code kept its nesting.
 fn same_place(kind: Kind) -> bool {
     match kind {
-        Kind::FormatOnly | Kind::CommentOnly | Kind::Restyle | Kind::Rename => true,
+        Kind::FormatOnly
+        | Kind::CommentOnly
+        | Kind::Restyle
+        | Kind::DefaultArgument
+        | Kind::Rename => true,
         Kind::Move | Kind::Extract | Kind::Inline | Kind::Logic => false,
     }
 }

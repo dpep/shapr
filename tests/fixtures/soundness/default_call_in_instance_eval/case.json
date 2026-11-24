@@ -1,0 +1,17 @@
+{
+  "description": "a call inside instance_eval runs with the block's receiver as self",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

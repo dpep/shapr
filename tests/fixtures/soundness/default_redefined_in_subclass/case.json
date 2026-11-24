@@ -1,0 +1,17 @@
+{
+  "description": "a subclass defines the method again with another default: the call may reach either",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

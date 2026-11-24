@@ -1,0 +1,17 @@
+{
+  "description": "a send naming the method elsewhere stays logic: its name is used where shapr can't follow it",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

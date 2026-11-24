@@ -1,0 +1,20 @@
+{
+  "description": "in a gem, a subclass outside the repository may override the method with another default: public_api",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "default_argument",
+            "structure": false,
+            "assumptions": [
+              "public_api"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

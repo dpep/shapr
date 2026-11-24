@@ -1,0 +1,21 @@
+{
+  "description": "the call whose result is assigned drops a defaulted keyword",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "default_argument",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "default_argument",
+            "structure": true,
+            "assumptions": []
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}

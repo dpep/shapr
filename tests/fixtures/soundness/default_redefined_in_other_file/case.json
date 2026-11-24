@@ -1,0 +1,17 @@
+{
+  "description": "a subclass in an unchanged file defines the method with another default",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

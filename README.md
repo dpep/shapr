@@ -17,6 +17,7 @@ Each hunk is a list of parts. A part is one proven change of these kinds, with t
 | `format_only` | structure | `def area(x)` becomes `def area( x )` | 0 |
 | `comment_only` | structure | `/// Area in m2.` becomes `/// Area in square metres.` | 0 |
 | `restyle` | structure | `{:a => 'x'}` becomes `{a: "x"}`, or `S { a: a }` becomes `S { a }` | 0 |
+| `default_argument` | structure; behavior when the method is a gem's (a subclass outside may override it) | `fetch(x, retries: 3)` becomes `fetch(x)` where `fetch` declares `retries: 3` | 0; all code lines when not proven |
 | `rename` | structure; behavior when it renames a library's public API | parameter `x` becomes `side`, with every use | 0; all code lines when not proven |
 | `move` | structure; behavior when it lands among different code (another class, past a `private`) | two methods of a class swap places | 0; the definition's first line when it lands among different code |
 | `extract` | structure | statements become a new method, replaced by a call to it | all code lines |

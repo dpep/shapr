@@ -2,7 +2,7 @@
 
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
 says which structural changes it holds (`format_only`, `comment_only`,
-`restyle`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
+`restyle`, `default_argument`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
 explains, and the residual `logic` lines no part explains; it gives each hunk
 and the whole change a verdict: structure, behavior, or mixed (structure and
 behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
@@ -72,6 +72,7 @@ src/
     mod.rs          the Frontend trait and the registry (for_path)
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
+    ruby/signature.rs  a def's parameters and a call's arguments, for default_argument
     ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
                     ids from here
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
@@ -93,6 +94,8 @@ src/
     restyle.rs      the restyle pass: aligned subtrees whose canons agree (Node::canon, from
                     the frontend's TreeBuilder::respell), their changed lines where nothing else differs
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
+    defaults.rs     the default_argument pass: a call drops or adds an argument restating its
+                    callee's literal default, the callee tied to one definition through the search
     moves.rs        the move pass: declarations the alignment left out, paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
     runs.rs         after the passes, a hunk left with logic re-run per run of changed lines;
@@ -124,8 +127,10 @@ A frontend implements `Frontend` (`language`, `handles`, `parse`,
 `construct`: which nodes are a branch, comparison, literal, error construct,
 parameter list or test item, for facets; `search_globs`: the files a name of
 the language can be used from; `dispatch_words`: the method names a call
-can reach a method by a computed name through; and `library`: whether a path is library code
-other packages depend on, from the repository's layout) and reports
+can reach a method by a computed name through; `library`: whether a path is library code
+other packages depend on, from the repository's layout; and for `default_argument`, `signature`,
+`arguments`, `plain_literal` and `rebinds_self`: a def's parameters, a call's arguments, a
+literal with no shared identity, a node whose code may run with another `self`) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
 language reads as code), `error`. The builder computes everything the core

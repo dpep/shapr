@@ -1,0 +1,17 @@
+{
+  "description": "a call inside a block may run with another self (instance_exec)",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

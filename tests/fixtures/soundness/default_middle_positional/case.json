@@ -1,0 +1,17 @@
+{
+  "description": "dropping a positional argument that isn't the last shifts the others",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}

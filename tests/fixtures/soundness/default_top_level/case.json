@@ -1,0 +1,17 @@
+{
+  "description": "a top-level method is private on every object: the call's self may be anything",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "default_argument"
+            }
+          }
+        }
+      }
+    }
+  }
+}
