@@ -43,7 +43,7 @@ pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels
                 if defs.get(&key(calls, b)) == Some(&1) {
                     continue;
                 }
-                match find(change, calls, chunks, &sites, b, dir) {
+                match find(change, calls, chunks, f, &sites, b, dir) {
                     Ok(mut found) => {
                         reach(change, outside, f, calls, b, &mut found);
                         apply(trees, &file.ids, &found, &mut labels[f]);
@@ -118,7 +118,9 @@ impl Risk {
 
     fn reason(self) -> &'static str {
         match self {
-            Risk::Jump => "the statements hold control flow bound to their method",
+            Risk::Jump => {
+                "the statements hold control flow bound to their method, or run with another `self`"
+            }
             Risk::BlockParameter => "the statements use the caller's block parameter",
             Risk::Wiring => "the arguments don't match the statements' free variables",
             Risk::Drop => "values the statements hold would be dropped at another point",
@@ -194,6 +196,7 @@ fn find(
     change: &Change,
     calls: &Tree,
     chunks: &Tree,
+    file: usize,
     sites: &HashMap<&str, Vec<NodeId>>,
     b: NodeId,
     dir: Dir,
@@ -267,6 +270,15 @@ fn find(
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
     let blocks = |op: Op, n: NodeId| chunks.node(n).role.hazard().is_some_and(|h| blocks(op, h));
+    // `self` inside a block may be another object (`instance_eval`, a DSL):
+    // the chunk and the call must each run with their method's `self`.
+    let frontend = crate::frontend::for_path(change.files[file].diff.path());
+    let own_self = |tree: &Tree, id: NodeId, def: NodeId| {
+        let rebinds = |p: &NodeId| frontend.is_some_and(|fe| fe.rebinds_self(tree, *p));
+        tree.ancestors(id).find(rebinds).is_none_or(|p| p == def)
+    };
+    let rebound =
+        !own_self(calls, call, a_call) || chunk.iter().any(|&s| !own_self(chunks, s, a_chunk));
     let mut wiring = None;
     let outcome = if in_chunk().any(|n| blocks(Op::Extract, n))
         || chunks
@@ -283,6 +295,8 @@ fn find(
                 .is_some_and(|n| block_params.contains(n))
     }) {
         Err(Risk::BlockParameter)
+    } else if rebound {
+        Err(Risk::Jump)
     } else if let Some(why) = miswired(exact.is_some() && free == arg_set, &flow, &assigned_set) {
         wiring = Some(why);
         Err(Risk::Wiring)
