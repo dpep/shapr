@@ -319,12 +319,39 @@ fn a_change_moves_toward_or_away_from_config() {
             "configured": "double_quotes",
             "before": {"checked": 3, "offenses": 1},
             "after": {"checked": 4, "offenses": 3},
+            "fixed": 0,
+            "added": 2,
             "direction": "away"
         }])
     );
     let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
     assert!(
-        text.contains("config Style/StringLiterals double_quotes: offenses 1 -> 3 (away)"),
+        text.contains(
+            "config Style/StringLiterals double_quotes: offenses 1 -> 3 (away: 0 fixed, 2 added)"
+        ),
+        "{text}"
+    );
+    // Opposite moves in two files net to level, and both still show.
+    let dir = repo(&[
+        &[(config, rule), ("a.rb", before), ("b.rb", before)],
+        &[
+            ("a.rb", "A = \"a\"\nB = \"b\"\nC = \"c\"\n"),
+            ("b.rb", "A = 'a'\nB = \"b\"\nC = 'c'\n"),
+        ],
+    ]);
+    let summary = &report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]))["summary"];
+    let t = &summary["config_trajectory"][0];
+    assert_eq!(
+        (&t["fixed"], &t["added"], &t["direction"]),
+        (
+            &serde_json::json!(1),
+            &serde_json::json!(1),
+            &serde_json::json!("level")
+        )
+    );
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("offenses 2 -> 2 (level: 1 fixed, 1 added)"),
         "{text}"
     );
 }
@@ -400,4 +427,10 @@ fn deviations_config_excludes_are_withheld_and_rank_no_hotspot() {
         "{text}"
     );
     assert!(!text.contains("left without an edit"), "{text}");
+    assert!(
+        text.contains(
+            "lib/d.rb  1 norm, 1 deviation in 10 lines (10.0 per 100): Naming/MethodName"
+        ),
+        "{text}"
+    );
 }

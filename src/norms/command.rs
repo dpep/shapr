@@ -419,7 +419,10 @@ fn text(
         writeln!(out)?;
     }
     if !report.hotspots.is_empty() {
-        writeln!(out, "hotspots (deviations per 100 lines; norms broken)")?;
+        writeln!(
+            out,
+            "hotspots (ranked by norms broken, then deviations per 100 lines)"
+        )?;
     }
     let mut more = 0;
     for (kind, title) in [
@@ -437,13 +440,17 @@ fn text(
                 Some(name) => format!("{}:{} {name}", h.file, h.lines.start),
                 None => h.file.clone(),
             };
+            let plural = |n: usize| if n == 1 { "" } else { "s" };
             writeln!(
                 out,
-                "    {place}  {:.1} ({} in {} line{}; {})",
-                h.per_100_lines,
+                "    {place}  {} norm{}, {} deviation{} in {} line{} ({:.1} per 100): {}",
+                h.norms.len(),
+                plural(h.norms.len()),
                 h.deviations,
+                plural(h.deviations),
                 h.lines.count,
-                if h.lines.count == 1 { "" } else { "s" },
+                plural(h.lines.count),
+                h.per_100_lines,
                 h.norms.join(", ")
             )?;
         }
@@ -459,7 +466,13 @@ fn text(
         writeln!(out, "plan (apply in order; diffs under -j)")?;
     }
     for step in &report.steps {
-        let pct = |a: Option<f64>| a.map_or("-".to_string(), |a| format!("{:.0}%", a * 100.0));
+        let (before, after) = report
+            .norms
+            .iter()
+            .find(|n| n.norm == step.norm)
+            .map_or(("-".to_string(), "-".to_string()), |n| {
+                percents(n.matching, n.matching + step.fixes, n.judged)
+            });
         writeln!(
             out,
             "  {}. tier {} {}  {} -> {}: {} fix{} on {} line{} in {} file{} ({} -> {}{}{}), a {} change",
@@ -474,8 +487,8 @@ fn text(
             if step.lines_touched == 1 { "" } else { "s" },
             step.files,
             if step.files == 1 { "" } else { "s" },
-            pct(step.adherence_before),
-            pct(step.adherence_after),
+            before,
+            after,
             match step.unfixed - step.withheld {
                 0 => String::new(),
                 n => format!(", {n} left without an edit"),
@@ -501,4 +514,45 @@ fn text(
         writeln!(out, "  not planned: {}", unplanned.join("; "))?;
     }
     Ok(())
+}
+
+/// Adherence before and after a step as percentages: whole numbers, or one
+/// decimal for a gain under a point; never 100 short of all, nor 0 above none.
+fn percents(before: usize, after: usize, judged: usize) -> (String, String) {
+    if judged == 0 {
+        return ("-".to_string(), "-".to_string());
+    }
+    let show = |k: usize, places: usize| {
+        let scale = 10f64.powi(places as i32);
+        let floor = 1.0 / scale;
+        let pct = (k as f64 * 100.0 / judged as f64 * scale).round() / scale;
+        let pct = match k {
+            0 => 0.0,
+            k if k == judged => 100.0,
+            _ => pct.clamp(floor, 100.0 - floor),
+        };
+        format!("{pct:.places$}%")
+    };
+    let places = match (after - before) * 100 < judged {
+        true => 1,
+        false => 0,
+    };
+    (show(before, places), show(after, places))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percents;
+
+    #[test]
+    fn percents_show_a_decimal_when_whole_numbers_would_match() {
+        let p = |b, a, n| {
+            let (b, a) = percents(b, a, n);
+            format!("{b} -> {a}")
+        };
+        assert_eq!(p(80, 90, 100), "80% -> 90%");
+        assert_eq!(p(990, 994, 1000), "99.0% -> 99.4%");
+        assert_eq!(p(9998, 10000, 10000), "99.9% -> 100.0%");
+        assert_eq!(p(1, 2, 2000), "0.1% -> 0.1%");
+    }
 }

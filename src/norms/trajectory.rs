@@ -22,6 +22,9 @@ pub struct Trajectory {
     pub configured: String,
     pub before: Side,
     pub after: Side,
+    /// Offenses the change fixes and adds, which `direction` nets.
+    pub fixed: usize,
+    pub added: usize,
     /// `toward` (fewer offenses), `away` (more) or `level`.
     pub direction: &'static str,
 }
@@ -34,6 +37,7 @@ pub fn trajectory(change: &Change, snapshot: Option<&dyn Snapshot>) -> Vec<Traje
         return Vec::new();
     };
     let mut sides: BTreeMap<(&'static str, String), [Side; 2]> = BTreeMap::new();
+    let mut moved: BTreeMap<(&'static str, String), [usize; 2]> = BTreeMap::new();
     for file in &change.files {
         let path = file.diff.path();
         let (Some(language), Ok(trees)) = (for_path(path), &file.trees) else {
@@ -52,22 +56,34 @@ pub fn trajectory(change: &Change, snapshot: Option<&dyn Snapshot>) -> Vec<Traje
             for (side, analysis) in entry.iter_mut().zip(&analyses) {
                 count(side, analysis, norm, style);
             }
+            let [fixed, added] = moved.entry((*norm, style.clone())).or_default();
+            let (f, a) = offenses_moved(&analyses, norm, style);
+            *fixed += f;
+            *added += a;
         }
     }
     sides
         .into_iter()
-        .filter(|(_, [before, after])| before != after)
-        .map(|((norm, configured), [before, after])| Trajectory {
-            norm,
-            configured,
-            before,
-            after,
-            direction: match after.offenses.cmp(&before.offenses) {
-                std::cmp::Ordering::Less => "toward",
-                std::cmp::Ordering::Greater => "away",
-                std::cmp::Ordering::Equal => "level",
-            },
+        .map(|(key, sides)| {
+            let [fixed, added] = moved.get(&key).copied().unwrap_or_default();
+            (key, sides, fixed, added)
         })
+        .filter(|(_, [before, after], fixed, added)| before != after || fixed + added > 0)
+        .map(
+            |((norm, configured), [before, after], fixed, added)| Trajectory {
+                norm,
+                configured,
+                before,
+                after,
+                fixed,
+                added,
+                direction: match after.offenses.cmp(&before.offenses) {
+                    std::cmp::Ordering::Less => "toward",
+                    std::cmp::Ordering::Greater => "away",
+                    std::cmp::Ordering::Equal => "level",
+                },
+            },
+        )
         .collect()
 }
 
@@ -80,14 +96,41 @@ fn count(side: &mut Side, analysis: &Analysis, norm: &str, style: &str) {
     }
 }
 
+/// One file's offenses only before (fixed) and only after (added), matched
+/// by their content with the style taken out, so an offense carried over
+/// unchanged or moved is neither.
+fn offenses_moved(analyses: &[Analysis; 2], norm: &str, style: &str) -> (usize, usize) {
+    let mut net: BTreeMap<&str, isize> = BTreeMap::new();
+    for (analysis, sign) in analyses.iter().zip([1, -1]) {
+        for o in analysis.observations.iter().filter(|o| o.norm == norm) {
+            if o.style != style && !analysis.disabled(norm, o.line) {
+                *net.entry(o.key.as_str()).or_default() += sign;
+            }
+        }
+    }
+    let total = |positive: bool| -> usize {
+        (net.values())
+            .filter(|n| (**n > 0) == positive && **n != 0)
+            .map(|n| n.unsigned_abs())
+            .sum()
+    };
+    (total(true), total(false))
+}
+
 /// Text lines: one per norm whose offenses moved.
 pub fn text(trajectories: &[Trajectory]) -> Vec<String> {
     (trajectories.iter())
-        .filter(|t| t.direction != "level")
+        .filter(|t| t.fixed + t.added > 0)
         .map(|t| {
             format!(
-                "config {} {}: offenses {} -> {} ({})",
-                t.norm, t.configured, t.before.offenses, t.after.offenses, t.direction
+                "config {} {}: offenses {} -> {} ({}: {} fixed, {} added)",
+                t.norm,
+                t.configured,
+                t.before.offenses,
+                t.after.offenses,
+                t.direction,
+                t.fixed,
+                t.added
             )
         })
         .collect()
