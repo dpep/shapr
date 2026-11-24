@@ -495,20 +495,14 @@ fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
 }
 
 /// A class, module or constant's name, which the tree also holds as a
-/// reference under the declaration (its first child).
+/// reference under the declaration.
 fn is_name_node(tree: &Tree, id: NodeId) -> bool {
-    let node = tree.node(id);
-    let Some(parent) = node.parent.map(|p| tree.node(p)) else {
-        return false;
-    };
-    matches!(
-        node.role,
-        Role::Reference(NameKind::Class | NameKind::Module | NameKind::Constant)
-    ) && matches!(
-        parent.role,
-        Role::Definition(NameKind::Class | NameKind::Module | NameKind::Constant)
-    ) && parent.name == node.name
-        && parent.children.iter().find(|&&c| !tree.node(c).comment) == Some(&id)
+    tree.node(id).parent.is_some_and(|p| {
+        matches!(
+            tree.node(p).role,
+            Role::Definition(NameKind::Class | NameKind::Module | NameKind::Constant)
+        ) && tree.name_child(p) == Some(id)
+    })
 }
 
 /// The method, class or module enclosing `id`: where a local lives.

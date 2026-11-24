@@ -338,3 +338,21 @@ fn extracting_statements_holding_an_unknown_macro_is_logic() {
     let report = change(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
+
+#[test]
+fn editing_a_type_in_place_is_not_a_move() {
+    let report = change(
+        "enum Key {\n    Name(u64),\n    Code(u64),\n    Path(Vec<String>),\n    Pair(u32, u32),\n}\n",
+        "enum Key<'t> {\n    Name(u64),\n    Code(u64),\n    Path(Vec<String>),\n    Pair(u32, u32),\n    Declaration(&'t str),\n}\n",
+    );
+    assert_kinds(&report, &["logic"]);
+}
+
+#[test]
+fn a_function_moved_between_same_named_cfg_modules_is_logic() {
+    let f = "    pub fn open(x: u32) -> u32 {\n        let y = x * 2;\n        y + 1\n    }\n";
+    let before = format!("#[cfg(unix)]\nmod imp {{\n{f}}}\n\n#[cfg(windows)]\nmod imp {{\n}}\n");
+    let after = format!("#[cfg(unix)]\nmod imp {{\n}}\n\n#[cfg(windows)]\nmod imp {{\n{f}}}\n");
+    let report = change(&before, &after);
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+}

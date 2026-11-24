@@ -1,7 +1,7 @@
 //! Which Rust syntax plays which [`Role`], and what each node keeps in its
 //! own text (the name it declares or calls) instead of as a child.
 
-use super::{Walker, kind, span};
+use super::{Walker, span};
 use crate::tree::{Jump, NameKind, Receiver, Role};
 use std::collections::HashSet;
 use tree_sitter::Node;
@@ -20,6 +20,10 @@ pub(super) enum Mode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Plan {
     Emit(Mode),
+    /// A leaf carrying its text as its name, in this role.
+    Name(Role),
+    /// Its children stand in its place (a body's braces fold into the item).
+    Splice,
     /// Wrapped in an `annotation` node: a type.
     Annotate,
 }
@@ -507,44 +511,24 @@ impl Walker<'_> {
         self.b.close();
     }
 
-    /// A struct, enum, union, trait or module. Its first child is its header
-    /// (attributes, visibility, name, generics), which also names it, so two
-    /// namespaces are the same one exactly when their headers are equal.
+    /// A struct, enum, union, trait or module. Its name is a child, a
+    /// reference to it as the core expects (`class A` in Ruby); a module's
+    /// or impl's braces fold into it, so its items are its children.
     fn namespace(&mut self, n: Node<'_>, attrs: &[Node<'_>], name_kind: NameKind) {
         let name = n.child_by_field_name("name");
         let label = name.map(|x| self.text(&x));
-        let body = n.child_by_field_name("body");
-        let start = attrs.first().map_or(n.start_byte(), |a| a.start_byte());
-        let end = body.map_or(n.end_byte(), |b| b.start_byte());
-        self.b.open(
-            kind(&n),
-            start..n.end_byte(),
-            label.map(str::as_bytes),
-            Role::Definition(name_kind),
+        self.open(&n, attrs, label, Role::Definition(name_kind));
+        let opaque = std::mem::replace(&mut self.opaque_members, names_observed(attrs, self.src));
+        self.children_with(
+            n,
+            &mut |f, c| match f {
+                Some("name") => Plan::Name(Role::Reference(name_kind)),
+                Some("body") if c.kind() == "declaration_list" => Plan::Splice,
+                _ => Plan::Emit(Mode::Expr),
+            },
+            &[],
         );
-        self.b.open(
-            "header",
-            start..end,
-            label.map(str::as_bytes),
-            Role::Reference(name_kind),
-        );
-        for attr in attrs {
-            self.emit(*attr, Mode::Expr, &[]);
-        }
-        let mut skip: Vec<Node<'_>> = name.into_iter().collect();
-        skip.extend(body);
-        self.children(n, Mode::Expr, &skip);
-        self.b.close();
-        if let Some(body) = body {
-            let opaque =
-                std::mem::replace(&mut self.opaque_members, names_observed(attrs, self.src));
-            if body.kind() == "declaration_list" {
-                self.children(body, Mode::Expr, &[]);
-            } else {
-                self.emit(body, Mode::Expr, &[]);
-            }
-            self.opaque_members = opaque;
-        }
+        self.opaque_members = opaque;
         self.b.close();
     }
 

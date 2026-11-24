@@ -293,15 +293,37 @@ fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     Key::Code(node.hash)
 }
 
-/// The first child is a namespace's name (`A::B`); its hash tells `A::B`
-/// from `C::B`.
+/// What tells one namespace from another: its name child's hash (`A::B`
+/// from `C::B`), together with any code before it (a Rust attribute:
+/// `#[cfg(unix)] mod imp` from `#[cfg(windows)] mod imp`) but not
+/// annotations (visibility). A namespace without a name stands by its first
+/// child (a Rust `impl`'s header).
 fn namespace_name(tree: &Tree, id: NodeId) -> Option<u64> {
-    let name = tree
+    let code: Vec<NodeId> = tree
         .node(id)
         .children
         .iter()
-        .find(|&&c| !tree.node(c).comment)?;
-    Some(tree.node(*name).hash)
+        .copied()
+        .filter(|&c| !tree.node(c).comment)
+        .collect();
+    let Some(name) = tree.name_child(id) else {
+        return code.first().map(|&c| tree.node(c).hash);
+    };
+    let ids: Vec<u64> = code
+        .iter()
+        .take_while(|&&c| c != name)
+        .filter(|&&c| tree.node(c).role != Role::Annotation)
+        .chain([&name])
+        .map(|&c| tree.node(c).hash)
+        .collect();
+    match ids[..] {
+        [only] => Some(only),
+        _ => {
+            let mut h = std::hash::DefaultHasher::new();
+            std::hash::Hash::hash(&ids, &mut h);
+            Some(std::hash::Hasher::finish(&h))
+        }
+    }
 }
 
 /// Index pairs of the heaviest common subsequence, each element of `a`

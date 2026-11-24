@@ -3,8 +3,8 @@
 //! The concrete syntax tree is mapped onto the shape the core expects:
 //! punctuation stays in its parent's own text, a statement's `;` wrapper and
 //! a module or impl body's braces fold into the enclosing node, attributes
-//! become the first children of the item they precede, and a namespace's
-//! header (attributes, name, generics) is its first child. A macro's token
+//! become the first children of the item they precede, and an impl's
+//! header (attributes, generics, trait, type) is its first child. A macro's token
 //! tree can't be parsed, so every token in it is a leaf and every identifier
 //! is [`crate::tree::Role::Opaque`].
 
@@ -142,6 +142,11 @@ impl<'a> Walker<'a> {
             let held = std::mem::take(&mut attrs);
             match chosen {
                 Plan::Emit(mode) => self.emit(child, mode, &held),
+                Plan::Name(role) => {
+                    let name = self.text(&child);
+                    self.leaf(&child, Some(name), role);
+                }
+                Plan::Splice => self.children(child, Mode::Expr, &[]),
                 Plan::Annotate => {
                     self.b.open(
                         "annotation",

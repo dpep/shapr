@@ -255,6 +255,23 @@ impl Tree {
         })
     }
 
+    /// The child naming definition `id`, as `A::B` does in Ruby's
+    /// `class A::B`: its first code child referring to the definition's own
+    /// name.
+    pub fn name_child(&self, id: NodeId) -> Option<NodeId> {
+        let def = self.node(id);
+        def.name.as_ref()?;
+        def.children.iter().copied().find(|&c| {
+            let child = self.node(c);
+            !child.comment
+                && child.name == def.name
+                && matches!(
+                    child.role,
+                    Role::Reference(NameKind::Class | NameKind::Module | NameKind::Constant)
+                )
+        })
+    }
+
     /// Comment nodes under `id`, itself included, in source order.
     pub fn comments_under(&self, id: NodeId) -> Vec<NodeId> {
         self.descendants(id)
