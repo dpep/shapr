@@ -11,7 +11,8 @@
 //! (`move_with_changes`). A pair is a move only when the code around it means
 //! the same in both places: the same owner, the same visibility section, the
 //! same order relative to statements that name it at load time and, across
-//! files, the same file-level directives. Otherwise both halves stay `logic`.
+//! files, the same file-level directives, in a language whose files aren't
+//! modules of their own. Otherwise both halves stay `logic`.
 //!
 //! A hunk is labeled from the trees, not from git's line placement: it is a
 //! move when every changed code line lies in a paired unit or in a node the
@@ -502,6 +503,9 @@ fn claim(
 /// Why the unit means something else in its new place, if it does.
 fn check(change: &Change, from: &Unit, to: &Unit) -> Option<String> {
     let (tb, ta) = (from.tree(change), to.tree(change));
+    if from.file != to.file && (tb.semantics.file_scoped || ta.semantics.file_scoped) {
+        return Some("its file is its module, so its owner changes".into());
+    }
     if owner(tb, from.node) != owner(ta, to.node) {
         return Some("its owner (class or module) changes".into());
     }
@@ -589,9 +593,7 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
 
 fn declared_name(tree: &Tree, node: NodeId) -> Option<&str> {
     let n = tree.node(node);
-    matches!(n.role, Role::Definition(_))
-        .then_some(n.name.as_deref())
-        .flatten()
+    n.role.defines().and(n.name.as_deref())
 }
 
 /// Names the subtree uses when it runs: references, calls, dynamic names,

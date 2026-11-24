@@ -52,8 +52,8 @@ impl Roles {
                     target.and_then(|t| owned(t.name())),
                 );
             }
-            Node::LocalVariableWriteNode { .. }
-            | Node::LocalVariableOperatorWriteNode { .. }
+            Node::LocalVariableWriteNode { .. } => Role::Bind,
+            Node::LocalVariableOperatorWriteNode { .. }
             | Node::LocalVariableAndWriteNode { .. }
             | Node::LocalVariableOrWriteNode { .. }
             | Node::LocalVariableTargetNode { .. }

@@ -22,6 +22,10 @@ pub enum Role {
     Other,
     /// Declares `name`.
     Definition(NameKind),
+    /// A plain assignment: binds the local `name` to the node's only code
+    /// child, its value, and does nothing else (Ruby's `v = x`, Rust's
+    /// `let v = x;`). A local definition everywhere else.
+    Bind,
     /// Reads a variable or constant called `name`.
     Reference(NameKind),
     /// Calls the method `name`.
@@ -34,6 +38,12 @@ pub enum Role {
     /// Control flow bound to the enclosing method or block: it means
     /// something else once moved into a new method.
     Jump(Jump),
+    /// An identifier the parser can't resolve, as in a Rust macro's token
+    /// tree: it may name anything in scope, locals included.
+    Opaque,
+    /// Syntax that only states types or visibility (a parameter's type, a
+    /// return type, generics): no code runs there.
+    Annotation,
 }
 
 impl Role {
@@ -47,6 +57,15 @@ impl Role {
             )
         )
     }
+
+    /// The kind of name the node declares, a [`Role::Bind`] included.
+    pub fn defines(self) -> Option<NameKind> {
+        match self {
+            Role::Definition(kind) => Some(kind),
+            Role::Bind => Some(NameKind::Variable),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +78,9 @@ pub enum NameKind {
     Variable,
     /// An instance or class variable: state kept on an object or class.
     Field,
+    /// A named member of a type that any file can reach through a value (a
+    /// Rust struct field), unlike a [`NameKind::Field`].
+    Member,
     Global,
     Parameter,
     /// A parameter callers name at the call site (`key:`), so its name is
@@ -66,6 +88,11 @@ pub enum NameKind {
     KeywordParameter,
     /// The parameter receiving the method's block (`&block`).
     BlockParameter,
+    /// The parameter bound to the receiver (Rust's `self`): passed by the
+    /// call's receiver, not its arguments.
+    SelfParameter,
+    /// A macro: expanded at compile time, so where it's defined can matter.
+    Macro,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +126,24 @@ pub enum Jump {
     Super,
     /// Asks whether the enclosing method was given a block.
     BlockGiven,
+    /// Suspends the enclosing async function (`.await`).
+    Await,
+    /// A macro the frontend can't see into, which may expand to any of the
+    /// above (Rust's `bail!`).
+    Macro,
+}
+
+/// Facts about a language's semantics that the core acts on, set by the
+/// frontend. The default is Ruby's: neither holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Semantics {
+    /// Each file is its own namespace (a Rust module): a definition moved to
+    /// another file is reached by another path, and the names inside it
+    /// resolve against another file.
+    pub file_scoped: bool,
+    /// A local's value is destroyed, observably, when its block ends (Rust's
+    /// `Drop`): a binding moved into a new function dies sooner.
+    pub scoped_drop: bool,
 }
 
 #[derive(Debug)]
@@ -130,6 +175,7 @@ pub struct Tree {
     pub nodes: Vec<Node>,
     /// Spans the parser reported as syntax errors.
     pub errors: Vec<Span>,
+    pub semantics: Semantics,
     line_starts: Vec<usize>,
     lines: Vec<LineFacts>,
 }
@@ -232,6 +278,7 @@ pub struct TreeBuilder {
     /// Comment spans, each flagged when the language reads it as code.
     comments: Vec<(Span, bool)>,
     errors: Vec<Span>,
+    semantics: Semantics,
 }
 
 impl TreeBuilder {
@@ -245,6 +292,7 @@ impl TreeBuilder {
             stack: Vec::new(),
             comments: Vec::new(),
             errors: Vec::new(),
+            semantics: Semantics::default(),
         };
         builder.push("root", 0..len, None, Role::Other, false);
         builder.stack.push(Tree::ROOT);
@@ -285,6 +333,10 @@ impl TreeBuilder {
 
     pub fn error(&mut self, span: Span) {
         self.errors.push(span);
+    }
+
+    pub fn semantics(&mut self, semantics: Semantics) {
+        self.semantics = semantics;
     }
 
     fn push(
@@ -335,6 +387,7 @@ impl TreeBuilder {
             source: self.source,
             nodes: self.nodes,
             errors: self.errors,
+            semantics: self.semantics,
         };
         for i in (0..tree.nodes.len()).rev() {
             tree.nodes[i].hash = hash(&tree, i, self.leaf[i]);

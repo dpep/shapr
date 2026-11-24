@@ -87,6 +87,10 @@ enum Risk {
     /// The call's arguments don't carry exactly the chunk's free variables
     /// into B's parameters, or values don't flow back the way they left.
     Wiring,
+    /// Code follows the chunk in its block, and a value the chunk binds or
+    /// is passed would be destroyed at another point: the language runs
+    /// destructors when a block ends.
+    Drop,
     /// B's name is already used, so defining or removing it reaches code
     /// beyond this change.
     Collision,
@@ -100,6 +104,7 @@ impl Risk {
             Risk::Jump => "jump",
             Risk::BlockParameter => "block_parameter",
             Risk::Wiring => "wiring",
+            Risk::Drop => "drop",
             Risk::Collision => "collision",
             Risk::Tiny => "tiny",
         }
@@ -110,6 +115,7 @@ impl Risk {
             Risk::Jump => "the statements hold control flow bound to their method",
             Risk::BlockParameter => "the statements use the caller's block parameter",
             Risk::Wiring => "the arguments don't match the statements' free variables",
+            Risk::Drop => "values the statements hold would be dropped at another point",
             Risk::Collision => "the method's name is already in use",
             Risk::Tiny => "too few statements to be evidence",
         }
@@ -261,6 +267,9 @@ fn find(
         Err(Risk::BlockParameter)
     } else if exact.is_none() || free != arg_set || flow.clobbers || outflow != assigned_set {
         Err(Risk::Wiring)
+    } else if chunks.semantics.scoped_drop && outlives(chunks, &chunk, assigned.as_deref(), &params)
+    {
+        Err(Risk::Drop)
     } else if mentioned(change, &method, dir, calls, b) {
         Err(Risk::Collision)
     } else if nodes < FLOOR {
@@ -417,7 +426,8 @@ fn enclosing_def(tree: &Tree, id: NodeId) -> Option<NodeId> {
 fn receiver(tree: &Tree, def: NodeId) -> Option<u64> {
     let first = *code_children(tree, def).first()?;
     let end = tree.node(first).extent.end;
-    // Only a receiver is followed by the `.` before the method's name.
+    // Only a receiver is followed by the `.` before the method's name
+    // (Ruby's `def self.name`); no other frontend's def has one.
     let next = tree.source[end..]
         .iter()
         .find(|b| !b.is_ascii_whitespace())?;
@@ -425,15 +435,25 @@ fn receiver(tree: &Tree, def: NodeId) -> Option<u64> {
 }
 
 /// Where a method sits: its ancestors' kinds and names, its own, and its
-/// receiver.
-type Key<'t> = (Vec<(&'static str, Option<&'t str>)>, Option<u64>);
+/// receiver. A namespace with no name (a Rust `impl`) stands by its header.
+type Key<'t> = (
+    Vec<(&'static str, Option<&'t str>, Option<u64>)>,
+    Option<u64>,
+);
 
 fn key(tree: &Tree, def: NodeId) -> Key<'_> {
     let mut path = Vec::new();
     let mut at = Some(def);
     while let Some(id) = at {
         let node = tree.node(id);
-        path.push((node.kind, node.name.as_deref()));
+        let header = (node.name.is_none()
+            && matches!(
+                node.role,
+                Role::Definition(NameKind::Class | NameKind::Module)
+            ))
+        .then(|| code_children(tree, id).first().map(|&h| tree.node(h).hash))
+        .flatten();
+        path.push((node.kind, node.name.as_deref(), header));
         at = node.parent;
     }
     (path, receiver(tree, def))
@@ -527,9 +547,8 @@ fn statement(tree: &Tree, call: NodeId) -> (NodeId, Option<String>) {
     if let Some(parent) = tree.node(call).parent {
         let node = tree.node(parent);
         if let Some(name) = local_name(node)
-            && node.role == Role::Definition(NameKind::Variable)
+            && node.role == Role::Bind
             && code_children(tree, parent) == [call]
-            && unmarked(own(tree, parent, Some(name))) == b"="
         {
             return (parent, Some(name.to_string()));
         }
@@ -538,35 +557,46 @@ fn statement(tree: &Tree, call: NodeId) -> (NodeId, Option<String>) {
 }
 
 /// B's parameter names and body, when every parameter is a plain required
-/// positional one.
+/// positional one. Annotations (types, generics, visibility) run no code
+/// and are passed over; a receiver parameter (`self`) is the call's receiver,
+/// not one of its arguments.
 fn method_body(tree: &Tree, def: NodeId) -> Option<(Vec<String>, NodeId)> {
     let mut children = code_children(tree, def);
     if receiver(tree, def).is_some() {
         children.remove(0);
     }
-    let is_params = |id: NodeId| {
-        let kids = code_children(tree, id);
-        !kids.is_empty()
-            && kids.iter().all(|&k| {
-                matches!(
-                    tree.node(k).role,
-                    Role::Definition(
-                        NameKind::Parameter | NameKind::KeywordParameter | NameKind::BlockParameter
-                    )
-                )
-            })
+    children.retain(|&c| tree.node(c).role != Role::Annotation);
+    let is_param = |k: NodeId| {
+        matches!(
+            tree.node(k).role,
+            Role::Definition(
+                NameKind::Parameter
+                    | NameKind::KeywordParameter
+                    | NameKind::BlockParameter
+                    | NameKind::SelfParameter
+            )
+        )
     };
+    let is_params = |id: NodeId| code_children(tree, id).into_iter().all(is_param);
     let (params, body) = match children[..] {
-        [body] if !is_params(body) => (Vec::new(), body),
+        [body] if code_children(tree, body).is_empty() || !is_params(body) => (Vec::new(), body),
         [params, body] if is_params(params) => {
             let mut names = Vec::new();
             for p in code_children(tree, params) {
                 let node = tree.node(p);
+                if node.role == Role::Definition(NameKind::SelfParameter) {
+                    continue;
+                }
                 let name = node.name.as_deref()?;
-                // Defaults, splats and keywords all add text beside the name.
+                // Defaults, splats and keywords all add text or code beside
+                // the name; a type annotation (`x: T`) adds neither.
+                let typed = code_children(tree, p)
+                    .iter()
+                    .all(|&c| tree.node(c).role == Role::Annotation);
+                let text = unmarked(own(tree, p, Some(name)));
                 if node.role != Role::Definition(NameKind::Parameter)
-                    || !node.children.is_empty()
-                    || unmarked(own(tree, p, None)) != name.as_bytes()
+                    || !typed
+                    || !(text.is_empty() || (text == b":" && !node.children.is_empty()))
                 {
                     return None;
                 }
@@ -580,26 +610,28 @@ fn method_body(tree: &Tree, def: NodeId) -> Option<(Vec<String>, NodeId)> {
 }
 
 /// The call's arguments, when each is a plain local variable and nothing
-/// else (a block, a splat, a keyword) rides along.
+/// else (a block, a splat, a keyword) rides along: the call's own text is its
+/// name, optionally after a member access (`.`, `::`) and before empty
+/// parentheses, and its argument list holds only parentheses and commas.
 fn arguments(tree: &Tree, call: NodeId, method: &str) -> Option<Vec<String>> {
     let mut children = code_children(tree, call);
     if tree.node(call).role == Role::Call(Receiver::SelfRef) {
         children.remove(0);
     }
     let text = unmarked(own(tree, call, None));
-    let forms = [
-        method.to_string(),
-        format!("{method}()"),
-        format!(".{method}"),
-        format!(".{method}()"),
-    ];
-    if !forms.iter().any(|f| f.as_bytes() == text) {
+    let rest = [&b""[..], b".", b"::"]
+        .iter()
+        .find_map(|access| text.strip_prefix(*access)?.strip_prefix(method.as_bytes()))?;
+    if !(rest.is_empty() || rest == b"()") {
         return None;
     }
     match children[..] {
         [] => Some(Vec::new()),
         [args] => {
-            if unmarked(own(tree, args, None)).iter().any(|&b| b != b',') {
+            if unmarked(own(tree, args, None))
+                .iter()
+                .any(|b| !b"(),".contains(b))
+            {
                 return None;
             }
             code_children(tree, args)
@@ -639,7 +671,7 @@ fn splice(
     for &child in &path[1..] {
         let (cx, cy) = (code_children(calls, x), code_children(chunks, y));
         if calls.node(x).kind != chunks.node(y).kind
-            || unmarked(own(calls, x, None)) != unmarked(own(chunks, y, None))
+            || (child != stmt && unmarked(own(calls, x, None)) != unmarked(own(chunks, y, None)))
         {
             return None;
         }
@@ -657,8 +689,11 @@ fn splice(
             }
             let tail = cx.len() - i - 1;
             let end = cy.len() - tail;
-            return (same(&cx[..i], &cy[..i]) && same(&cx[i + 1..], &cy[end..]))
-                .then(|| cy[i..end].to_vec());
+            // Separators between the chunk's statements go into B with them.
+            return (same(&cx[..i], &cy[..i])
+                && same(&cx[i + 1..], &cy[end..])
+                && outside(calls, x, stmt, stmt) == outside(chunks, y, cy[i], cy[end - 1]))
+            .then(|| cy[i..end].to_vec());
         }
         if cx.len() != cy.len() || !same(&cx[..i], &cy[..i]) || !same(&cx[i + 1..], &cy[i + 1..]) {
             return None;
@@ -667,6 +702,53 @@ fn splice(
         y = cy[i];
     }
     None
+}
+
+/// A container's own text, as [`own`] reads it, with the run of children
+/// `first..=last` and everything between them standing as one child.
+fn outside(tree: &Tree, id: NodeId, first: NodeId, last: NodeId) -> Vec<u8> {
+    let node = tree.node(id);
+    let region = tree.node(first).extent.start..tree.node(last).extent.end;
+    let mut out = Vec::new();
+    let mut cursor = node.span.start;
+    let push = |from: usize, to: usize, out: &mut Vec<u8>| {
+        let bytes = tree.source.get(from..to.max(from)).unwrap_or_default();
+        out.extend(
+            (from..)
+                .zip(bytes)
+                .filter(|(at, b)| !b.is_ascii_whitespace() && !region.contains(at))
+                .map(|(_, b)| *b),
+        );
+    };
+    for &child in &node.children {
+        let c = tree.node(child);
+        push(cursor, c.extent.start.min(node.span.end), &mut out);
+        cursor = cursor.max(c.extent.end);
+        if !c.comment && (child == first || !region.contains(&c.extent.start)) {
+            out.push(MARK);
+        }
+    }
+    push(cursor, node.span.end, &mut out);
+    out
+}
+
+/// Whether something the chunk holds lives to the end of its block in one
+/// version and to the end of B in the other: code follows the chunk, and it
+/// binds a local (other than the value returned) or takes arguments, which a
+/// call moves into B.
+fn outlives(tree: &Tree, chunk: &[NodeId], assigned: Option<&str>, params: &[String]) -> bool {
+    let Some((&last, _)) = chunk.split_last() else {
+        return false;
+    };
+    let follows = tree
+        .node(last)
+        .parent
+        .is_some_and(|block| code_children(tree, block).last() != Some(&last));
+    let binds = chunk.iter().flat_map(|&s| tree.descendants(s)).any(|id| {
+        let node = tree.node(id);
+        node.role.defines() == Some(NameKind::Variable) && node.name.as_deref() != assigned
+    });
+    follows && (binds || !params.is_empty())
 }
 
 /// Local variables around the chunk, in the chunk side's A.
@@ -702,6 +784,19 @@ impl Flow {
                 (_, false) => defs_out.insert(name),
             };
         }
+        // An opaque name (in a macro's tokens) spelling a local may read it.
+        for id in tree.descendants(a) {
+            let node = tree.node(id);
+            let Some(name) = node.name.as_deref().filter(|_| node.role == Role::Opaque) else {
+                continue;
+            };
+            if defs_in.contains(name) || defs_out.contains(name) {
+                match inside.contains(&id) {
+                    true => reads_in.insert(name.to_string()),
+                    false => reads_out.insert(name.to_string()),
+                };
+            }
+        }
         Flow {
             free: reads_in.difference(&defs_in).cloned().collect(),
             clobbers: !defs_in.is_disjoint(&defs_out),
@@ -718,6 +813,7 @@ fn local_name(node: &crate::tree::Node) -> Option<&str> {
     let local = matches!(
         node.role,
         Role::Reference(Variable)
+            | Role::Bind
             | Role::Definition(Variable | Parameter | KeywordParameter | BlockParameter)
     );
     node.name.as_deref().filter(|_| local)
@@ -740,6 +836,22 @@ impl Names {
             .zip(args)
             .all(|(p, a)| names.pair(p, a))
             .then_some(names)
+    }
+
+    /// Two opaque names correspond when the renaming already pairs them,
+    /// or neither is renamed and they're equal. Opaque names never start a
+    /// pairing: what they mean is unknown.
+    fn opaque(&self, b: Option<&str>, chunk: Option<&str>, renamed: &mut usize) -> bool {
+        let (Some(b), Some(chunk)) = (b, chunk) else {
+            return b == chunk;
+        };
+        let ok = match (self.forward.get(b), self.back.get(chunk)) {
+            (Some(x), _) => x == chunk,
+            (None, Some(_)) => false,
+            (None, None) => b == chunk,
+        };
+        *renamed += usize::from(ok && b != chunk);
+        ok
     }
 
     fn pair(&mut self, b: &str, chunk: &str) -> bool {
@@ -814,6 +926,11 @@ impl<'t> Matcher<'t> {
         if nx.kind != ny.kind {
             return false;
         }
+        if nx.role == Role::Opaque && ny.role == Role::Opaque {
+            return self
+                .names
+                .opaque(nx.name.as_deref(), ny.name.as_deref(), &mut self.renamed);
+        }
         let (lx, ly) = (local_name(nx), local_name(ny));
         match (lx, ly) {
             (Some(p), Some(q)) => {
@@ -840,11 +957,7 @@ impl<'t> Matcher<'t> {
 fn statement_value(tree: &Tree, stmt: NodeId, v: &str) -> Option<NodeId> {
     let node = tree.node(stmt);
     let kids = code_children(tree, stmt);
-    (node.role == Role::Definition(NameKind::Variable)
-        && local_name(node) == Some(v)
-        && kids.len() == 1
-        && unmarked(own(tree, stmt, Some(v))) == b"=")
-        .then(|| kids[0])
+    (node.role == Role::Bind && local_name(node) == Some(v) && kids.len() == 1).then(|| kids[0])
 }
 
 /// B's name already means something: used on the side where B doesn't
@@ -864,7 +977,11 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
                 named(chunks, id)
                     && matches!(
                         chunks.node(id).role,
-                        Role::Definition(NameKind::Method) | Role::Call(_) | Role::DynamicName
+                        Role::Definition(NameKind::Method)
+                            | Role::Reference(NameKind::Method)
+                            | Role::Call(_)
+                            | Role::DynamicName
+                            | Role::Opaque
                     )
             }) || ids(calls).any(|id| {
                 named(calls, id)
@@ -876,7 +993,8 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
 
 /// What the tree's hash reads of a node's own text: its non-whitespace bytes
 /// between children, a marker where each non-comment child sits. A local's
-/// leading name is dropped, so renamed locals compare equal.
+/// name is dropped, so renamed locals compare equal: the leading name, or for
+/// a [`Role::Bind`] (`let v = …`) the first whole-token one.
 fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
     let node = tree.node(id);
     let span = &node.span;
@@ -884,11 +1002,7 @@ fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
     let mut cursor = span.start;
     let push = |from: usize, to: usize, out: &mut Vec<u8>| {
         if from < to {
-            out.extend(
-                tree.source[from..to]
-                    .iter()
-                    .filter(|b| !b.is_ascii_whitespace()),
-            );
+            out.extend_from_slice(&tree.source[from..to]);
         }
     };
     for &child in &node.children {
@@ -901,6 +1015,13 @@ fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
     }
     push(cursor, span.end, &mut out);
     if let Some(name) = name
+        && node.role == Role::Bind
+    {
+        super::rename::mask(&mut out, name.as_bytes());
+    }
+    out.retain(|b| !b.is_ascii_whitespace());
+    if let Some(name) = name
+        && node.role != Role::Bind
         && out.starts_with(name.as_bytes())
     {
         out.drain(..name.len());

@@ -265,7 +265,7 @@ mod tests {
             (Role::Definition(Field), "@items"),
             (Role::Definition(Global), "$seen"),
             (Role::Reference(Field), "@@count"),
-            (Role::Definition(Variable), "total"),
+            (Role::Bind, "total"),
             (Role::Reference(Variable), "item"),
             (Role::Reference(Constant), "LIMIT"),
             (Role::Reference(Constant), "Cart"),

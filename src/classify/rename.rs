@@ -3,9 +3,10 @@
 //! and the new name wasn't there before.
 //!
 //! A local's scope is its enclosing method, class or module; a field's, its
-//! file; a method's or constant's, every file of the change. Fields, methods
-//! and constants can be used in code shapr never sees, so their confidence
-//! is graded down.
+//! file; a member's (a field any file reaches), a method's or a constant's,
+//! every file of the change. These can be used in code shapr never sees, so
+//! their confidence is graded down. An opaque name (in a macro's tokens) may
+//! be any of them.
 
 use super::{Confidence, Kind, Labels};
 use crate::change::{Change, Trees};
@@ -17,6 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 enum Scope {
     Local,
     Field,
+    /// A field any file can reach: scoped like a method.
+    Member,
     Method,
     Constant,
 }
@@ -25,12 +28,16 @@ impl Scope {
     fn of(role: Role) -> Option<Scope> {
         use NameKind::*;
         match role {
-            Role::Definition(Variable | Parameter | KeywordParameter | BlockParameter)
+            Role::Bind
+            | Role::Definition(Variable | Parameter | KeywordParameter | BlockParameter)
             | Role::Reference(Variable | Parameter | KeywordParameter | BlockParameter) => {
                 Some(Scope::Local)
             }
             Role::Definition(Field) | Role::Reference(Field) => Some(Scope::Field),
-            Role::Definition(Method) | Role::Call(_) => Some(Scope::Method),
+            Role::Definition(Member) | Role::Reference(Member) => Some(Scope::Member),
+            Role::Definition(Method) | Role::Reference(Method) | Role::Call(_) => {
+                Some(Scope::Method)
+            }
             Role::Definition(Class | Module | Constant)
             | Role::Reference(Class | Module | Constant) => Some(Scope::Constant),
             _ => None,
@@ -40,7 +47,7 @@ impl Scope {
     fn as_str(self) -> &'static str {
         match self {
             Scope::Local => "local",
-            Scope::Field => "field",
+            Scope::Field | Scope::Member => "field",
             Scope::Method => "method",
             Scope::Constant => "constant",
         }
@@ -116,7 +123,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let entry = facts.entry(pair).or_default();
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
-            entry.defined |= matches!(role, Role::Definition(_));
+            entry.defined |= role.defines().is_some();
             entry.calls_super |=
                 role == Role::Definition(NameKind::Method) && calls_super(&t.before, diff.before);
             entry.after_gates.insert(gate(&t.after, diff.after));
@@ -218,7 +225,8 @@ fn align(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, diffs: &mut Vec<Diff>) -> b
         return false;
     }
     if bn.name != an.name {
-        let renamable = Scope::of(bn.role).is_some() || bn.role == Role::DynamicName;
+        let renamable =
+            Scope::of(bn.role).is_some() || matches!(bn.role, Role::DynamicName | Role::Opaque);
         let names = [&bn.name, &an.name].map(|n| n.as_deref().is_some_and(is_identifier));
         if !renamable || names.contains(&false) {
             return false;
@@ -262,7 +270,7 @@ fn own_text(tree: &Tree, id: NodeId) -> Vec<u8> {
 }
 
 /// Replaces the first occurrence of `name` that stands as a whole token.
-fn mask(text: &mut Vec<u8>, name: &[u8]) {
+pub(super) fn mask(text: &mut Vec<u8>, name: &[u8]) {
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
     let suffixed = name.last().is_some_and(|b| b"?!=".contains(b));
     let at = (0..text.len()).find(|&i| {
@@ -321,15 +329,22 @@ fn hunk_pairs<'v>(
     let mut pairs = BTreeMap::new();
     for diff in &hunk.diffs {
         let node = trees.before.node(diff.before);
-        let (pair, verdict) = if node.role == Role::DynamicName {
-            // Accepted when it follows a rename made elsewhere in the change.
+        let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
+            // Accepted when it follows a rename made elsewhere in the change;
+            // an opaque name may follow a local's, in the same scope.
             let from = node.name.as_deref().unwrap_or_default();
             let to = trees.after.node(diff.after).name.as_deref();
+            let local = Space {
+                scope: Scope::Local,
+                file: Some(hunk.file),
+                gate: Some(gate(&trees.before, diff.before)),
+            };
             let backing = verdicts.iter().find(|(p, v)| {
-                p.space.scope != Scope::Local
-                    && p.from == from
-                    && Some(p.to.as_str()) == to
-                    && v.is_ok()
+                let reaches = match p.space.scope {
+                    Scope::Local => node.role == Role::Opaque && p.space == local,
+                    _ => true,
+                };
+                reaches && p.from == from && Some(p.to.as_str()) == to && v.is_ok()
             });
             let Some((pair, verdict)) = backing else {
                 return Err(format!(
@@ -458,6 +473,7 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
         match n.role {
             Role::DynamicName if scope == Scope::Field => bare(found) == bare(name),
             Role::DynamicName => scope != Scope::Local && found == name,
+            Role::Opaque => found == name,
             Role::Call(crate::tree::Receiver::Implicit) if scope == Scope::Local => found == name,
             role => found == name && Scope::of(role) == Some(scope),
         }
@@ -479,18 +495,19 @@ fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
 }
 
 /// A class, module or constant's name, which the tree also holds as a
-/// constant reference under the declaration.
+/// reference under the declaration (its first child).
 fn is_name_node(tree: &Tree, id: NodeId) -> bool {
     let node = tree.node(id);
     let Some(parent) = node.parent.map(|p| tree.node(p)) else {
         return false;
     };
-    node.role == Role::Reference(NameKind::Constant)
-        && matches!(
-            parent.role,
-            Role::Definition(NameKind::Class | NameKind::Module | NameKind::Constant)
-        )
-        && parent.name == node.name
+    matches!(
+        node.role,
+        Role::Reference(NameKind::Class | NameKind::Module | NameKind::Constant)
+    ) && matches!(
+        parent.role,
+        Role::Definition(NameKind::Class | NameKind::Module | NameKind::Constant)
+    ) && parent.name == node.name
         && parent.children.iter().find(|&&c| !tree.node(c).comment) == Some(&id)
 }
 
