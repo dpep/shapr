@@ -1505,3 +1505,20 @@ fn a_file_too_big_to_compare_is_unknown_and_says_why() {
     assert!(reason.contains("too big to compare"), "{reason}");
     assert_eq!(report["summary"]["verdict"], "unknown");
 }
+
+/// A file only added has no removed-by-added pairs, but its declarations
+/// are compared with each other: its lines count against the same cap.
+#[test]
+fn a_file_added_too_big_to_compare_is_unknown() {
+    let big: String = (0..8001).map(|i| format!("def m{i}; end\n")).collect();
+    let report = classify(
+        &[("lib/a.rb", "x = 1\n")],
+        &[("lib/a.rb", "x = 1\n"), ("lib/b.rb", &big)],
+    );
+    let hunk = hunks(&report)
+        .iter()
+        .find(|h| h["file"] == "lib/b.rb")
+        .unwrap();
+    let reason = lead(hunk)["reason"].as_str().unwrap();
+    assert!(reason.contains("too big to compare"), "{reason}");
+}

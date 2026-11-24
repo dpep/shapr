@@ -52,23 +52,27 @@ impl FileChange {
 /// The passes recurse once per level.
 pub const MAX_DEPTH: usize = 10_000;
 
-/// Most removed-by-added line pairs one file may hold and be compared: the
-/// passes grow with the pairs (a 4,000-line file shuffled takes seconds; the
-/// largest a corpus commit holds is under a fifth of this).
-pub const MAX_PAIRS: usize = 16_000_000;
+/// Most changed lines (removed plus added) one file may hold and be
+/// compared. The passes grow with their square: removed lines paired with
+/// added ones, and a file only added has its declarations compared with
+/// each other (a 4,000-line file shuffled, or 8,000 one-line methods added,
+/// take seconds).
+pub const MAX_LINES: usize = 8_000;
 
-/// Most pairs one change compares, over all its files; files past it aren't.
-pub const MAX_CHANGE_PAIRS: usize = 4 * MAX_PAIRS;
+/// Most work one change compares: the sum of its files' changed lines
+/// squared. Files past it aren't compared.
+pub const MAX_CHANGE_WORK: usize = 4 * MAX_LINES * MAX_LINES;
 
-/// Why a file holding PAIRS isn't compared after SPENT pairs; `None` when it is.
-fn too_big(pairs: usize, spent: usize) -> Option<String> {
-    if pairs > MAX_PAIRS {
+/// Why a file of LINES changed lines isn't compared after SPENT work;
+/// `None` when it is.
+fn too_big(lines: usize, spent: usize) -> Option<String> {
+    if lines > MAX_LINES {
         Some(format!(
-            "too big to compare: {pairs} removed-by-added line pairs, past {MAX_PAIRS}"
+            "too big to compare: {lines} changed lines, past {MAX_LINES}"
         ))
-    } else if spent + pairs > MAX_CHANGE_PAIRS {
+    } else if spent + lines * lines > MAX_CHANGE_WORK {
         Some(format!(
-            "too big to compare: the change's files hold more than {MAX_CHANGE_PAIRS} removed-by-added line pairs"
+            "too big to compare: the change's files' changed lines, squared, pass {MAX_CHANGE_WORK}"
         ))
     } else {
         None
@@ -180,14 +184,16 @@ fn file_change(
     } else if category == Category::Fixture {
         Err("test data, not classified".to_string())
     } else {
-        let removed: usize = diff.hunks.iter().map(|h| h.removed.len()).sum();
-        let added: usize = diff.hunks.iter().map(|h| h.added.len()).sum();
-        let pairs = removed.saturating_mul(added);
+        let lines: usize = diff
+            .hunks
+            .iter()
+            .map(|h| h.removed.len() + h.added.len())
+            .sum();
         match frontend::for_path(diff.path()) {
             None => Err(format!("no frontend for {}", diff.path())),
-            Some(_) if let Some(why) = too_big(pairs, *spent) => Err(why),
+            Some(_) if let Some(why) = too_big(lines, *spent) => Err(why),
             Some(frontend) => before.and_then(|before| {
-                *spent += pairs;
+                *spent += lines * lines;
                 let after = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())?;
                 let before = frontend.parse(before);
                 let after = frontend.parse(after);
@@ -511,12 +517,13 @@ mod tests {
     }
 
     #[test]
-    fn a_file_or_a_change_past_its_pairs_isnt_compared() {
-        assert_eq!(too_big(MAX_PAIRS, 0), None);
-        assert!(too_big(MAX_PAIRS + 1, 0).unwrap().contains("past"));
-        assert_eq!(too_big(MAX_PAIRS, MAX_CHANGE_PAIRS - MAX_PAIRS), None);
+    fn a_file_or_a_change_past_its_lines_isnt_compared() {
+        assert_eq!(too_big(MAX_LINES, 0), None);
+        assert!(too_big(MAX_LINES + 1, 0).unwrap().contains("past"));
+        let rest = MAX_CHANGE_WORK - MAX_LINES * MAX_LINES;
+        assert_eq!(too_big(MAX_LINES, rest), None);
         assert!(
-            too_big(1, MAX_CHANGE_PAIRS)
+            too_big(MAX_LINES, rest + 1)
                 .unwrap()
                 .contains("the change's")
         );

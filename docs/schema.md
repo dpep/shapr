@@ -483,11 +483,13 @@ tree-sitter). Any other file is `null` and its hunks `logic`.
 
 A parsed file isn't compared, and its hunks are `unknown` with
 `parsed: false` and a reason saying why, when its code nests deeper than
-10,000 levels, or when it is too big to compare: its removed lines times its
-added lines pass 16,000,000 (4,000 lines rewritten in place; the largest a
-corpus commit holds, 2,842 by 937, is under a fifth of it), or the change's
-compared files together pass 64,000,000, in diff order. Comparison grows
-with those pairs: a 4,000-line file shuffled takes seconds.
+10,000 levels, or when it is too big to compare: its changed lines (removed
+plus added) pass 8,000 (4,000 lines rewritten in place, or 8,000 added),
+or the change's compared files' changed lines, squared and summed, pass
+256,000,000, in diff order. Comparison grows with the square of the changed
+lines: removed lines are paired with added ones, and a file only added has
+its declarations compared with each other; a 4,000-line file shuffled, or
+8,000 one-line methods added, take seconds.
 
 The rules above
 are stated in Ruby's terms; for Rust:
