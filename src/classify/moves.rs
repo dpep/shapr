@@ -665,12 +665,21 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     out
 }
 
-/// A statement that runs no code another could depend on: a declaration, or
-/// a bare visibility statement (`private`), which only marks a section.
+/// A statement that runs no code another could depend on: a declaration
+/// (but not a constant whose value calls something, as `X = Counter.next`
+/// does), or a bare visibility statement (`private`), which only marks a
+/// section.
 fn inert(tree: &Tree, node: NodeId) -> bool {
     let n = tree.node(node);
-    n.role.is_declaration()
-        || matches!(n.role, Role::Visibility(_)) && n.children.iter().all(|&c| tree.node(c).comment)
+    let calls = || {
+        tree.descendants(node)
+            .any(|d| matches!(tree.node(d).role, Role::Call(_) | Role::Jump(_)))
+    };
+    match n.role {
+        Role::Definition(NameKind::Constant) => !calls(),
+        Role::Visibility(_) => n.children.iter().all(|&c| tree.node(c).comment),
+        role => role.is_declaration(),
+    }
 }
 
 fn declared_name(tree: &Tree, node: NodeId) -> Option<&str> {

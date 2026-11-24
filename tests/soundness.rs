@@ -179,3 +179,29 @@ fn a_doc_moved_to_another_item_is_not_format_only() {
     );
     assert_eq!(kinds(&report), ["comment_only"]);
 }
+/// No hunk is structural.
+fn assert_not_structure(report: &Value) {
+    assert!(
+        kinds(report)
+            .iter()
+            .all(|k| matches!(*k, "logic" | "move_with_changes")),
+        "{report:#}"
+    );
+}
+
+// Moves: a definition's place can matter.
+
+#[test]
+fn constants_whose_values_run_code_keep_their_order() {
+    let report = ruby(
+        "class A\n  X = Counter.next\n  Y = Counter.next\nend\n",
+        "class A\n  Y = Counter.next\n  X = Counter.next\nend\n",
+    );
+    assert_not_structure(&report);
+    // Literal values run nothing: reordering them is a move.
+    let report = ruby(
+        "class A\n  X = [1]\n  Y = [2, 3, 4]\nend\n",
+        "class A\n  Y = [2, 3, 4]\n  X = [1]\nend\n",
+    );
+    assert_eq!(kinds(&report), ["move"]);
+}
