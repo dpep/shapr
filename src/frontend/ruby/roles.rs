@@ -6,8 +6,9 @@ use crate::tree::{Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree, Visibil
 use ruby_prism::Node;
 use std::collections::{HashMap, HashSet};
 
-/// Calls whose string or symbol arguments name code resolved at runtime.
-const DYNAMIC: &[&str] = &[
+/// Calls whose string or symbol arguments name code resolved at runtime,
+/// the four visibility calls last; only these yield a `DynamicName`.
+pub(super) const DISPATCH_WORDS: &[&str] = &[
     "send",
     "public_send",
     "__send__",
@@ -22,7 +23,14 @@ const DYNAMIC: &[&str] = &[
     "attr_reader",
     "attr_writer",
     "attr_accessor",
+    "public",
+    "protected",
+    "private",
+    "module_function",
 ];
+
+/// The calls of [`DISPATCH_WORDS`] that aren't visibility calls.
+const DYNAMIC: &[&str] = DISPATCH_WORDS.split_at(DISPATCH_WORDS.len() - 4).0;
 
 /// Dynamic calls whose first argument is the name of the method they reach.
 const SENDERS: &[&str] = &[

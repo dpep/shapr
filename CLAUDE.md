@@ -123,7 +123,8 @@ tests/              end to end against throwaway git repos: cli.rs (input, outpu
 A frontend implements `Frontend` (`language`, `handles`, `parse`,
 `construct`: which nodes are a branch, comparison, literal, error construct,
 parameter list or test item, for facets; `search_globs`: the files a name of
-the language can be used from; and `library`: whether a path is library code
+the language can be used from; `dispatch_words`: the method names a call
+can reach a method by a computed name through; and `library`: whether a path is library code
 other packages depend on, from the repository's layout) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the

@@ -96,6 +96,10 @@ impl Frontend for Ruby {
         builder.finish()
     }
 
+    fn dispatch_words(&self) -> &'static [&'static str] {
+        roles::DISPATCH_WORDS
+    }
+
     /// Templates call helpers and models by name too.
     fn search_globs(&self) -> &'static [&'static str] {
         &[
@@ -329,6 +333,20 @@ mod tests {
         assert_eq!(kinds(&tree, true), ["comment", "comment"]);
         assert!(tree.line(1).code && !tree.line(1).comment);
         assert!(tree.line(2).comment && !tree.line(2).code);
+    }
+
+    #[test]
+    fn only_dispatch_words_reach_a_method_by_a_computed_name() {
+        let computed = |call: &str| {
+            parse(&format!("{call}(\"get_#{{n}}\")\n"))
+                .nodes
+                .iter()
+                .any(|n| n.role == Role::DynamicName && n.name.as_deref() == Some("get_*"))
+        };
+        for word in Ruby.dispatch_words() {
+            assert!(computed(word), "{word}");
+        }
+        assert!(!computed("puts"));
     }
 
     #[test]

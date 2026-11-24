@@ -133,6 +133,11 @@ impl Frontend for Rust {
         builder.finish()
     }
 
+    /// Rust has no call by a computed name.
+    fn dispatch_words(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     fn search_globs(&self) -> &'static [&'static str] {
         &["*.rs"]
     }

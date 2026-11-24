@@ -34,6 +34,11 @@ pub trait Frontend: Sync {
     /// file name: where uses of a renamed or removed name are searched.
     fn search_globs(&self) -> &'static [&'static str];
 
+    /// Method names a call can reach another method through by a computed
+    /// name (a `DynamicName` pattern: Ruby's `send(n)`): a file whose text
+    /// holds none of them as a word holds no such call.
+    fn dispatch_words(&self) -> &'static [&'static str];
+
     /// Whether the file at `path` is library code another package can depend
     /// on, judged from the repository's layout at the after revision.
     fn library(&self, path: &str, files: &dyn Snapshot) -> bool;
