@@ -273,6 +273,47 @@ Facets describe; they don't judge intent. A fix and a feature both change
 conditions. Claims about intent come from messages, kept apart from the code's
 facts.
 
+## Claims
+
+`summary.claims` holds what the messages around the change *claim*: the
+commit messages of the range (`git log` over the commits `git diff RANGE`
+spans: `A..B` and `A...B` read the commits in B and not A, a single revision
+`R` reads `R..HEAD`) and the description given with `--message FILE` (a PR
+body; `-` reads stdin when a RANGE is given). A piped diff has no commit
+messages. Claims are read by fixed rules, never change a hunk's `kind`,
+`facets` or the verdict, and carry their source, so a consumer can weigh them
+against the code rather than instead of it.
+
+| field | type | meaning |
+|---|---|---|
+| `messages` | int | Messages read: one per commit, plus one for `--message`. |
+| `hints` | array | Each hint, in message order, once per message. Below. |
+| `categories` | object | Messages carrying at least one hint of each category, every category present: `fix`, `feature`, `refactor`, `perf`, `test`, `docs`, `chore`, `revert`. |
+| `conflicts` | array | Claims the code doesn't bear out. Below. |
+
+Each hint:
+
+| key | type | meaning |
+|---|---|---|
+| `hint` | string | `type`: a conventional-commit type (`fix:`, `feat(api):`, known types only). `keyword`: a purpose word in the subject (`fix`, `bug`, `regression`, `crash`, `hotfix`; `add`, `introduce`, `support`, `implement`, `allow`; `refactor`, `rename`, `move`, `extract`, `tidy`, `cleanup`, `simplify`; `perf`, `faster`, `optimize`; `test`, `spec`, `coverage`; `docs`, `readme`, `typo`, `changelog`; `chore`, `bump`, `deps`, `upgrade`, `release`, `lint`; `revert`). `revert`: a git revert's `Revert "subject"` (the quoted subject, whose own words are not read as claims) or its `This reverts commit <id>`. `issue`: `#12`, `KEY-12` (standards such as `UTF-8` aside), or an issue or pull URL (as `#12`). `breaking`: `type!:` or a `BREAKING CHANGE:` footer. `no_behavior_change`: "no behavior change", "no functional change", "no logic change", "behavior preserving", "pure refactor" (any case, hyphens as spaces) or the word `NFC`. |
+| `value` | string | What matched, lowercased for types and keywords. |
+| `category` | string or null | The category the hint claims: `feat` is `feature`, `style` is `refactor`, `build` and `ci` are `chore`, `no_behavior_change` is `refactor`, an issue after `fix`/`fixes`/`fixed` is `fix`; `null` for `breaking` and other issues. |
+| `source` | string | `commit` or `message` (`--message`). |
+| `commit` | string or null | The commit's id, 12 hex digits; `null` for `message`. |
+| `field` | string | `subject` (the first non-empty line) or `body`. Purpose words are read only in the subject, where they summarize; a body mentions too much in passing. |
+
+Each conflict is a count of what the code shows, not a verdict on the author:
+
+| key | type | meaning |
+|---|---|---|
+| `claim` | string | The claimed category. |
+| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` compared hunks structural. `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks without the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and every hunk is structure. |
+| `count` | int | Behavior hunks behind the finding (0 for `no_behavior_hunks`). Hunks in files shapr didn't compare (`evidence.method` `"none"`) aren't counted: their `logic` is unknown, not evidence. |
+
+"Couldn't prove structural" is not "changes behavior": a `refactor` claim with
+behavior hunks may be a refactoring shapr can't recognize. The conflict says
+where to look.
+
 ## Confidence
 
 Confidence is computed from the evidence, not assigned per kind.
@@ -368,6 +409,7 @@ enough to match by chance, and when several units could be its other half.
 | `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated. |
 | `behavior_lines` | int | `review_lines` summed over hunks of behavior kinds (`logic`, `move_with_changes`): the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structural hunks over all changed lines, generated hunks left out; 0 when nothing changed. |
+| `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
 
 ## Exit codes
 

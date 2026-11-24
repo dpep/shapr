@@ -1,0 +1,511 @@
+//! What the messages around a change claim about it: commit messages in the
+//! range and a description (a PR body). Claims are read deterministically and
+//! reported beside the code's facts, never folded into a hunk's kind or
+//! facets: shapr reads the code first and doesn't take the message's word.
+
+use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// A message and where it came from.
+pub struct Message {
+    pub source: Source,
+    /// The commit id, for a commit message.
+    pub commit: Option<String>,
+    pub text: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Commit,
+    /// The description given with `--message`.
+    Message,
+}
+
+/// What a claim says the change is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Category {
+    Fix,
+    Feature,
+    Refactor,
+    Perf,
+    Test,
+    Docs,
+    Chore,
+    Revert,
+}
+
+impl Category {
+    pub const ALL: [Category; 8] = [
+        Category::Fix,
+        Category::Feature,
+        Category::Refactor,
+        Category::Perf,
+        Category::Test,
+        Category::Docs,
+        Category::Chore,
+        Category::Revert,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Category::Fix => "fix",
+            Category::Feature => "feature",
+            Category::Refactor => "refactor",
+            Category::Perf => "perf",
+            Category::Test => "test",
+            Category::Docs => "docs",
+            Category::Chore => "chore",
+            Category::Revert => "revert",
+        }
+    }
+
+    /// Claims the change alters behavior.
+    fn behavior(self) -> bool {
+        matches!(self, Category::Fix | Category::Feature | Category::Perf)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HintKind {
+    /// A conventional-commit type (`fix:`, `feat(api):`).
+    Type,
+    /// A word naming a purpose (`fix`, `regression`, `add`, `refactor`).
+    Keyword,
+    /// `Revert "subject"`, or `This reverts commit <id>`.
+    Revert,
+    /// `#12`, `PROJ-34`, an issue or pull URL.
+    Issue,
+    /// `type!:` or a `BREAKING CHANGE:` footer.
+    Breaking,
+    /// "No behavior change", "no functional change", "NFC".
+    NoBehaviorChange,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Hint {
+    pub hint: HintKind,
+    pub value: String,
+    pub category: Option<Category>,
+    pub source: Source,
+    pub commit: Option<String>,
+    pub field: Field,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Field {
+    Subject,
+    Body,
+}
+
+/// A claim the code doesn't bear out, stated as a count of what it shows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Conflict {
+    pub claim: Category,
+    pub finding: Finding,
+    pub count: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Finding {
+    /// Hunks shapr compared and couldn't prove structural.
+    BehaviorHunks,
+    /// The same, outside test code.
+    NonTestBehaviorHunks,
+    /// Every hunk is structure.
+    NoBehaviorHunks,
+}
+
+#[derive(Serialize)]
+pub struct Claims {
+    pub messages: usize,
+    pub hints: Vec<Hint>,
+    /// Messages carrying a hint of each category, every category present.
+    pub categories: BTreeMap<&'static str, usize>,
+    pub conflicts: Vec<Conflict>,
+}
+
+/// What the code shows, for checking claims against it.
+pub struct CodeFacts {
+    /// Every hunk is structure (and there is at least one).
+    pub structure: bool,
+    /// Behavior hunks shapr compared (`evidence.method` not `none`).
+    pub behavior: usize,
+    /// Of those, the ones outside test code.
+    pub non_test_behavior: usize,
+}
+
+impl Claims {
+    pub fn read(messages: &[Message]) -> Claims {
+        let mut hints = Vec::new();
+        let mut categories: BTreeMap<&'static str, usize> =
+            Category::ALL.iter().map(|c| (c.as_str(), 0)).collect();
+        for message in messages {
+            let found = hints_in(message);
+            let claimed: BTreeSet<Category> = found.iter().filter_map(|h| h.category).collect();
+            for category in claimed {
+                *categories.entry(category.as_str()).or_default() += 1;
+            }
+            hints.extend(found);
+        }
+        Claims {
+            messages: messages.len(),
+            hints,
+            categories,
+            conflicts: Vec::new(),
+        }
+    }
+
+    /// Records each claim the code doesn't bear out. A purpose claim (refactor,
+    /// docs, test) conflicts only when no message also claims a behavior
+    /// change; hunks shapr couldn't compare are unknown, not evidence.
+    pub fn check(&mut self, code: &CodeFacts) {
+        let claimed = |c: Category| self.categories[c.as_str()] > 0;
+        let behavior = Category::ALL.iter().any(|&c| c.behavior() && claimed(c));
+        let mut conflicts = Vec::new();
+        let mut conflict = |claim, finding, count| {
+            conflicts.push(Conflict {
+                claim,
+                finding,
+                count,
+            })
+        };
+        if !behavior {
+            for claim in [Category::Refactor, Category::Docs] {
+                if claimed(claim) && code.behavior > 0 {
+                    conflict(claim, Finding::BehaviorHunks, code.behavior);
+                }
+            }
+            if claimed(Category::Test) && code.non_test_behavior > 0 {
+                conflict(
+                    Category::Test,
+                    Finding::NonTestBehaviorHunks,
+                    code.non_test_behavior,
+                );
+            }
+        }
+        if code.structure {
+            for claim in Category::ALL.into_iter().filter(|&c| c.behavior()) {
+                if claimed(claim) {
+                    conflict(claim, Finding::NoBehaviorHunks, 0);
+                }
+            }
+        }
+        self.conflicts = conflicts;
+    }
+}
+
+/// Conventional-commit types and what each claims.
+const TYPES: &[(&str, Category)] = &[
+    ("fix", Category::Fix),
+    ("feat", Category::Feature),
+    ("refactor", Category::Refactor),
+    ("style", Category::Refactor),
+    ("perf", Category::Perf),
+    ("test", Category::Test),
+    ("docs", Category::Docs),
+    ("chore", Category::Chore),
+    ("build", Category::Chore),
+    ("ci", Category::Chore),
+    ("revert", Category::Revert),
+];
+
+/// Subject words that name a purpose.
+const KEYWORDS: &[(&str, Category)] = &[
+    ("fix", Category::Fix),
+    ("fixes", Category::Fix),
+    ("fixed", Category::Fix),
+    ("fixing", Category::Fix),
+    ("bug", Category::Fix),
+    ("bugfix", Category::Fix),
+    ("regression", Category::Fix),
+    ("crash", Category::Fix),
+    ("crashes", Category::Fix),
+    ("hotfix", Category::Fix),
+    ("broken", Category::Fix),
+    ("add", Category::Feature),
+    ("adds", Category::Feature),
+    ("added", Category::Feature),
+    ("introduce", Category::Feature),
+    ("introduces", Category::Feature),
+    ("support", Category::Feature),
+    ("supports", Category::Feature),
+    ("implement", Category::Feature),
+    ("implements", Category::Feature),
+    ("allow", Category::Feature),
+    ("allows", Category::Feature),
+    ("refactor", Category::Refactor),
+    ("refactors", Category::Refactor),
+    ("refactoring", Category::Refactor),
+    ("rename", Category::Refactor),
+    ("renames", Category::Refactor),
+    ("move", Category::Refactor),
+    ("moves", Category::Refactor),
+    ("extract", Category::Refactor),
+    ("extracts", Category::Refactor),
+    ("tidy", Category::Refactor),
+    ("cleanup", Category::Refactor),
+    ("simplify", Category::Refactor),
+    ("simplifies", Category::Refactor),
+    ("restructure", Category::Refactor),
+    ("perf", Category::Perf),
+    ("performance", Category::Perf),
+    ("faster", Category::Perf),
+    ("optimize", Category::Perf),
+    ("optimise", Category::Perf),
+    ("test", Category::Test),
+    ("tests", Category::Test),
+    ("spec", Category::Test),
+    ("specs", Category::Test),
+    ("coverage", Category::Test),
+    ("docs", Category::Docs),
+    ("doc", Category::Docs),
+    ("documentation", Category::Docs),
+    ("readme", Category::Docs),
+    ("typo", Category::Docs),
+    ("changelog", Category::Docs),
+    ("chore", Category::Chore),
+    ("bump", Category::Chore),
+    ("bumps", Category::Chore),
+    ("deps", Category::Chore),
+    ("dependency", Category::Chore),
+    ("dependencies", Category::Chore),
+    ("upgrade", Category::Chore),
+    ("release", Category::Chore),
+    ("lint", Category::Chore),
+    ("revert", Category::Revert),
+    ("reverts", Category::Revert),
+];
+
+/// Phrases claiming behavior stays the same, matched lowercase with hyphens
+/// as spaces.
+const NO_BEHAVIOR_CHANGE: &[&str] = &[
+    "no behavior change",
+    "no behaviour change",
+    "no functional change",
+    "no logic change",
+    "behavior preserving",
+    "behaviour preserving",
+    "pure refactor",
+];
+
+/// Words before an issue reference that say it was a bug.
+const FIXING: &[&str] = &["fix", "fixes", "fixed"];
+
+/// Look like `KEY-12` issue keys but are standards.
+const NOT_ISSUE_KEYS: &[&str] = &["UTF", "SHA", "ISO", "RFC", "PEP", "MD", "CVE"];
+
+/// Hints in one message, in order, each once. The first non-empty line is
+/// the subject. Purpose words count only there (a body says too much in
+/// passing); a body adds reverts, issues, breaking footers and phrases.
+fn hints_in(message: &Message) -> Vec<Hint> {
+    let mut lines = message.text.lines().skip_while(|l| l.trim().is_empty());
+    let subject = lines.next().unwrap_or_default().trim();
+    let body: Vec<&str> = lines.collect();
+    let body = body.join("\n");
+    let mut hints: Vec<Hint> = Vec::new();
+    let mut add = |hint: HintKind, value: &str, category: Option<Category>, field: Field| {
+        let new = Hint {
+            hint,
+            value: value.to_string(),
+            category,
+            source: message.source,
+            commit: message.commit.clone(),
+            field,
+        };
+        if !hints
+            .iter()
+            .any(|h| h.hint == hint && h.value == new.value && h.field == field)
+        {
+            hints.push(new);
+        }
+    };
+
+    // A revert quotes the reverted subject; its words are that commit's claims.
+    if let Some(quoted) = subject
+        .strip_prefix("Revert \"")
+        .map(|s| s.strip_suffix('"').unwrap_or(s))
+    {
+        add(
+            HintKind::Revert,
+            quoted,
+            Some(Category::Revert),
+            Field::Subject,
+        );
+    } else {
+        let mut words = subject;
+        if let Some((kind, breaking, rest)) = conventional(subject) {
+            let category = TYPES.iter().find(|(t, _)| *t == kind).map(|(_, c)| *c);
+            add(HintKind::Type, &kind, category, Field::Subject);
+            if breaking {
+                add(HintKind::Breaking, "!", None, Field::Subject);
+            }
+            words = rest;
+        }
+        for word in tokens(words) {
+            let word = word.to_ascii_lowercase();
+            if let Some((_, category)) = KEYWORDS.iter().find(|(k, _)| *k == word) {
+                add(HintKind::Keyword, &word, Some(*category), Field::Subject);
+            }
+        }
+    }
+    for line in body.lines() {
+        if let Some(rest) = line.trim().strip_prefix("This reverts commit ") {
+            let id: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
+            if !id.is_empty() {
+                add(HintKind::Revert, &id, Some(Category::Revert), Field::Body);
+            }
+        }
+        if line.starts_with("BREAKING CHANGE:") || line.starts_with("BREAKING-CHANGE:") {
+            add(HintKind::Breaking, "BREAKING CHANGE", None, Field::Body);
+        }
+    }
+    for (field, text) in [(Field::Subject, subject), (Field::Body, body.as_str())] {
+        let mut previous = String::new();
+        for word in text.split_whitespace() {
+            let token = word.trim_matches(|c: char| ",.;:()[]{}<>!?'\"".contains(c));
+            if let Some(issue) = issue(token) {
+                let category = FIXING.contains(&previous.as_str()).then_some(Category::Fix);
+                add(HintKind::Issue, &issue, category, field);
+            }
+            previous = token.to_ascii_lowercase();
+        }
+        let normal = normalize(text);
+        for phrase in NO_BEHAVIOR_CHANGE {
+            if normal.contains(phrase) {
+                add(
+                    HintKind::NoBehaviorChange,
+                    phrase,
+                    Some(Category::Refactor),
+                    field,
+                );
+            }
+        }
+        if tokens(text).any(|w| w == "NFC") {
+            add(
+                HintKind::NoBehaviorChange,
+                "nfc",
+                Some(Category::Refactor),
+                field,
+            );
+        }
+    }
+    hints
+}
+
+/// `type(scope)!: rest` as (type, breaking, rest), for a known type.
+fn conventional(subject: &str) -> Option<(String, bool, &str)> {
+    let (head, rest) = subject.split_once(':')?;
+    let (head, breaking) = match head.strip_suffix('!') {
+        Some(h) => (h, true),
+        None => (head, false),
+    };
+    let kind = match head.split_once('(') {
+        Some((kind, scope)) if scope.ends_with(')') => kind,
+        Some(_) => return None,
+        None => head,
+    };
+    let kind = kind.to_ascii_lowercase();
+    TYPES
+        .iter()
+        .any(|(t, _)| *t == kind)
+        .then_some((kind, breaking, rest))
+}
+
+fn tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+}
+
+fn normalize(text: &str) -> String {
+    text.to_lowercase()
+        .replace('-', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `#12`, `KEY-12`, or an issue or pull URL (as `#12`).
+fn issue(token: &str) -> Option<String> {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if let Some(n) = token.strip_prefix('#') {
+        return digits(n).then(|| token.to_string());
+    }
+    for marker in ["/issues/", "/pull/"] {
+        if let Some((_, n)) = token.rsplit_once(marker) {
+            return digits(n).then(|| format!("#{n}"));
+        }
+    }
+    let (key, n) = token.split_once('-')?;
+    let key_ok = key.len() >= 2
+        && key.starts_with(|c: char| c.is_ascii_uppercase())
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        && !NOT_ISSUE_KEYS.contains(&key);
+    (key_ok && digits(n)).then(|| token.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hints(text: &str) -> Vec<(HintKind, String, Option<Category>)> {
+        let message = Message {
+            source: Source::Message,
+            commit: None,
+            text: text.to_string(),
+        };
+        hints_in(&message)
+            .into_iter()
+            .map(|h| (h.hint, h.value, h.category))
+            .collect()
+    }
+
+    #[test]
+    fn conventional_types_need_a_known_type() {
+        assert_eq!(
+            conventional("fix(api)!: x"),
+            Some(("fix".to_string(), true, " x"))
+        );
+        assert_eq!(conventional("wip: x"), None);
+        assert_eq!(conventional("Note: x"), None);
+    }
+
+    #[test]
+    fn issue_keys_skip_standards_and_bare_words() {
+        assert_eq!(issue("#12"), Some("#12".into()));
+        assert_eq!(issue("PROJ-34"), Some("PROJ-34".into()));
+        assert_eq!(issue("https://github.com/o/r/pull/9"), Some("#9".into()));
+        for no in ["UTF-8", "SHA-256", "#abc", "x-1", "A-1", "re-run"] {
+            assert_eq!(issue(no), None, "{no}");
+        }
+    }
+
+    #[test]
+    fn purpose_words_count_only_in_the_subject() {
+        let found = hints("Speed up lookups\n\nThis fixes a bug and adds a test.");
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn nfc_is_a_word_not_a_substring() {
+        assert_eq!(hints("Tidy (NFC)").len(), 2);
+        assert_eq!(
+            hints("Tidy\n\nNFC"),
+            [
+                (HintKind::Keyword, "tidy".into(), Some(Category::Refactor)),
+                (
+                    HintKind::NoBehaviorChange,
+                    "nfc".into(),
+                    Some(Category::Refactor)
+                )
+            ]
+        );
+        assert!(hints("Update NFCReader").is_empty());
+    }
+}

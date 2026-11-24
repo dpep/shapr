@@ -39,7 +39,7 @@ src/
   main.rs, lib.rs   entry; lib exposes the modules to the integration tests
   cli.rs            clap, input selection (range or stdin, -C), exit codes, after-help
   log.rs            -v telemetry (the verbose! macro)
-  git.rs            the git calls, run in -C's directory: `git diff RANGE`, blob reads
+  git.rs            the git calls, run in -C's directory: `git diff RANGE`, `git log` messages, blob reads
                     (worktree fallback), linguist-generated attributes
   diff.rs           unified diff parser: FileDiff, Hunk (narrowed to its changed region), Lines
   tree.rs           the language-neutral Tree and the TreeBuilder that normalizes it
@@ -63,6 +63,8 @@ src/
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
     facets.rs       facets on logic hunks (condition, signature, ...), from Frontend::construct;
                     runs after the passes and never relabels
+  claims.rs         summary.claims: hints read from commit messages and --message, and
+                    conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
 tests/              end to end against throwaway git repos: cli.rs (input, output,
                     size measures), one file per detector, rust_lang.rs (Rust end to end)

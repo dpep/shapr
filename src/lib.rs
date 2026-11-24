@@ -3,6 +3,7 @@
 //! both.
 
 pub mod change;
+pub mod claims;
 pub mod classify;
 mod cli;
 pub mod diff;

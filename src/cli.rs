@@ -1,5 +1,6 @@
 //! The command line: flags, input selection, exit codes.
 
+use crate::claims::{Claims, Message, Source};
 use crate::report::{self, Format};
 use crate::{change, classify, diff, git};
 use clap::{CommandFactory, Parser};
@@ -16,6 +17,7 @@ EXAMPLES
   shapr -J main..HEAD        one JSON line per file and hunk, then a summary line
   shapr -q main..HEAD        no output; the exit code is the verdict
   shapr -C app main..HEAD    run in another repository, like git -C
+  shapr --message pr.md main..HEAD   also read claims from a PR description
 
   With no RANGE, shapr reads a diff from stdin; like any filter, it waits while an
   inherited stdin stays open. An empty stdin is no input (64), so a failed
@@ -70,6 +72,12 @@ struct Cli {
     /// still carries the verdict, and errors still go to stderr.
     #[arg(short, long)]
     quiet: bool,
+
+    /// Read claims from FILE, a description of the change such as a PR body,
+    /// beside the range's commit messages (see summary.claims). `-` reads
+    /// stdin, when a RANGE is given. Claims never change a hunk's label.
+    #[arg(long, value_name = "FILE")]
+    message: Option<PathBuf>,
 
     /// Print a shell completion script (bash, zsh, fish, elvish,
     /// powershell); defaults to $SHELL.
@@ -131,7 +139,15 @@ pub fn run() -> ExitCode {
             USAGE,
         );
     }
-    let git = git::Git::new(cli.dir);
+    let git = git::Git::new(cli.dir.clone());
+    let stdin_message = cli.message.as_deref() == Some(std::path::Path::new("-"));
+    if stdin_message && cli.range.is_none() {
+        return fail(
+            format,
+            "--message - needs a RANGE: stdin carries the diff without one",
+            USAGE,
+        );
+    }
     let text = match &cli.range {
         Some(range) if range.starts_with('-') => {
             return fail(format, &format!("`{range}` is not a range"), USAGE);
@@ -159,9 +175,13 @@ pub fn run() -> ExitCode {
         }
         return fail(format, "stdin is not a diff: no file headers", ERROR);
     }
+    let messages = match messages(&cli, &git, stdin_message) {
+        Ok(messages) => messages,
+        Err(error) => return fail(format, &format!("{error:#}"), ERROR),
+    };
     let change = change::assemble(files, &git);
     let labels = classify::classify(&change);
-    let report = report::build(&change, &labels);
+    let report = report::build(&change, &labels, Claims::read(&messages));
     if !cli.quiet {
         let mut stdout = std::io::stdout().lock();
         let written = report::render(&mut stdout, format, &report).and_then(|()| stdout.flush());
@@ -172,6 +192,39 @@ pub fn run() -> ExitCode {
         }
     }
     ExitCode::from(report.summary.verdict.exit_code())
+}
+
+/// The range's commit messages, then the `--message` description.
+fn messages(cli: &Cli, git: &git::Git, stdin: bool) -> anyhow::Result<Vec<Message>> {
+    let mut messages = Vec::new();
+    if let Some(range) = &cli.range {
+        for (id, text) in git.messages(range)? {
+            messages.push(Message {
+                source: Source::Commit,
+                commit: Some(id[..id.len().min(12)].to_string()),
+                text,
+            });
+        }
+    }
+    if let Some(path) = &cli.message {
+        let text = if stdin {
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .map_err(|e| anyhow::anyhow!("reading stdin: {e}"))?;
+            text
+        } else {
+            // Relative to where shapr was started, like any file argument.
+            std::fs::read_to_string(path)
+                .map_err(|e| anyhow::anyhow!("--message {}: {e}", path.display()))?
+        };
+        messages.push(Message {
+            source: Source::Message,
+            commit: None,
+            text,
+        });
+    }
+    Ok(messages)
 }
 
 trait BrokenPipe {

@@ -50,6 +50,29 @@ impl Git {
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
 
+    /// Each commit's id and message in the commits `git diff RANGE` spans,
+    /// newest first: `A..B` and `A...B` are the commits in B and not A, and
+    /// one revision `R` (against the working tree) is `R..HEAD`.
+    pub fn messages(&self, range: &str) -> Result<Vec<(String, String)>> {
+        let commits = match range.split_once("...") {
+            Some((from, to)) => format!("{from}..{to}"),
+            None if range.contains("..") => range.to_string(),
+            None => format!("{range}..HEAD"),
+        };
+        let out = run(self.command().args([
+            "log",
+            "--no-color",
+            "--format=%H%x00%B%x1e",
+            &commits,
+            "--",
+        ]))?;
+        Ok(String::from_utf8_lossy(&out)
+            .split('\x1e')
+            .filter_map(|entry| entry.trim_start().split_once('\0'))
+            .map(|(id, message)| (id.to_string(), message.trim_end().to_string()))
+            .collect())
+    }
+
     /// Fails in one line unless RANGE resolves as revisions in a repository.
     /// Outside a repository, or given a path that exists outside it (`..`),
     /// `git diff` drops into `--no-index` mode and prints its whole usage.

@@ -2,6 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Change, FileChange};
+use crate::claims::{Claims, CodeFacts, Finding};
 use crate::classify::{Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method};
 use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
@@ -136,9 +137,10 @@ pub struct Summary {
     lines: LineCounts,
     behavior_lines: usize,
     structure_share: f64,
+    claims: Claims,
 }
 
-pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
+pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<'a> {
     let mut files = Vec::new();
     let mut hunks = Vec::new();
     for (file, labels) in change.files.iter().zip(labels) {
@@ -182,7 +184,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
             lines: totals,
         });
     }
-    let summary = summarize(&files, &hunks);
+    let summary = summarize(&files, &hunks, claims);
     Report {
         files,
         hunks,
@@ -263,7 +265,7 @@ fn moved_changes(label: &Label, id: usize) -> (BTreeSet<usize>, BTreeSet<usize>)
     (before, after)
 }
 
-fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
+fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> Summary {
     let mut kinds: BTreeMap<&'static str, usize> =
         Kind::ALL.iter().map(|k| (k.as_str(), 0)).collect();
     let mut move_contexts: BTreeMap<&'static str, usize> =
@@ -312,6 +314,19 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
         .map(|p| p.split_once('/').map_or(".", |(s, _)| s))
         .collect();
     let total = lines.changed();
+    // Only hunks shapr compared are evidence against a claim.
+    let compared: Vec<&HunkRecord> = hunks
+        .iter()
+        .filter(|h| !h.kind.is_structure() && h.evidence.method != Method::None)
+        .collect();
+    claims.check(&CodeFacts {
+        structure: verdict == Verdict::Structure,
+        behavior: compared.len(),
+        non_test_behavior: compared
+            .iter()
+            .filter(|h| !h.facets.contains(&Facet::Test))
+            .count(),
+    });
     Summary {
         record: "summary",
         schema: SCHEMA,
@@ -338,6 +353,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
         } else {
             round2(structure_lines as f64 / total as f64)
         },
+        claims,
     }
 }
 
@@ -419,6 +435,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         )?;
     }
     let s = &report.summary;
+    claims(out, &s.claims)?;
     let kinds: Vec<String> = s
         .kinds
         .iter()
@@ -447,6 +464,46 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         s.lines.comment_deleted,
         s.structure_share,
     )
+}
+
+/// What the messages claim, and where the code doesn't bear a claim out.
+fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
+    if claims.messages == 0 {
+        return Ok(());
+    }
+    let claimed: Vec<String> = claims
+        .categories
+        .iter()
+        .filter(|(_, n)| **n > 0)
+        .map(|(c, n)| format!("{c} {n}"))
+        .collect();
+    writeln!(
+        out,
+        "claims: {} ({} message{})",
+        if claimed.is_empty() {
+            "none".to_string()
+        } else {
+            claimed.join(", ")
+        },
+        claims.messages,
+        if claims.messages == 1 { "" } else { "s" },
+    )?;
+    for conflict in &claims.conflicts {
+        let plural = if conflict.count == 1 { "" } else { "s" };
+        let finding = match conflict.finding {
+            Finding::BehaviorHunks => format!("{} behavior hunk{plural}", conflict.count),
+            Finding::NonTestBehaviorHunks => {
+                format!("{} behavior hunk{plural} outside tests", conflict.count)
+            }
+            Finding::NoBehaviorHunks => "every hunk is structure".to_string(),
+        };
+        writeln!(
+            out,
+            "conflict: claims {}; {finding}",
+            conflict.claim.as_str()
+        )?;
+    }
+    Ok(())
 }
 
 /// `file:first-last` on the after side; a pure deletion names its before lines.
