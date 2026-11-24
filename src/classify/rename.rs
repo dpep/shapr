@@ -520,7 +520,7 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
 /// A plain literal spelling `name` (`:name`, `"name"`, `name:`): DSLs such
 /// as callbacks and `autoload` name methods and constants this way, through
 /// calls no frontend can list.
-fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
+pub(super) fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
     let n = tree.node(id);
     if n.role != Role::Other || n.comment || !n.children.is_empty() {
         return false;

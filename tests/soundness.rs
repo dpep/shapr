@@ -451,3 +451,35 @@ fn a_rust_item_under_an_attribute_that_may_read_its_name_is_not_renamed() {
         assert_eq!(kinds(&report), ["rename"], "{attr}");
     }
 }
+
+#[test]
+fn a_caller_reading_its_frame_keeps_its_statements() {
+    // The match moves out of the frame that reads `$1`.
+    let report = ruby(
+        "class A\n  def go(a)\n    a =~ /(\\d+)/\n    puts a.to_s + 'zz' + a.to_s\n    puts $1\n  end\nend\n",
+        "class A\n  def go(a)\n    show(a)\n    puts $1\n  end\n\n  def show(a)\n    a =~ /(\\d+)/\n    puts a.to_s + 'zz' + a.to_s\n  end\nend\n",
+    );
+    assert_near(&report, "extract", Some("jump"));
+    // The chunk's locals leave the frame `binding` reads.
+    let chunk = "    t = a * 2 + 1\n    u = t.to_s + 'zz'\n    puts u\n";
+    let report = ruby(
+        &format!("class A\n  def go(a)\n{chunk}    binding.local_variables\n  end\nend\n"),
+        &format!(
+            "class A\n  def go(a)\n    show(a)\n    binding.local_variables\n  end\n\n  def show(a)\n{chunk}  end\nend\n"
+        ),
+    );
+    assert_near(&report, "extract", Some("jump"));
+}
+
+#[test]
+fn a_literal_naming_the_new_method_collides() {
+    let chunk = "    t = a * 2 + 1\n    puts t.to_s + 'zz' + a.to_s\n";
+    let mm = "  def method_missing(n, *a)\n    n == :show ? 1 : super\n  end\n";
+    let report = ruby(
+        &format!("class A\n{mm}  def go(a)\n{chunk}    1\n  end\nend\n"),
+        &format!(
+            "class A\n{mm}  def go(a)\n    show(a)\n    1\n  end\n\n  def show(a)\n{chunk}  end\nend\n"
+        ),
+    );
+    assert_near(&report, "extract", Some("collision"));
+}

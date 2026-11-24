@@ -12,7 +12,7 @@
 
 use super::{Confidence, Kind, Label, Labels};
 use crate::change::{Change, FileChange, Trees};
-use crate::tree::{NameKind, NodeId, Receiver, Role, Span, Tree};
+use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 
@@ -255,9 +255,11 @@ fn find(
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
     // The chunk stays in its file, so `__FILE__` reads the same in B.
-    let bound =
-        |n: NodeId| matches!(chunks.node(n).role, Role::Jump(j) if j != crate::tree::Jump::File);
-    let outcome = if in_chunk().any(bound) {
+    let bound = |n: NodeId| matches!(chunks.node(n).role, Role::Jump(j) if j != Jump::File);
+    // Code anywhere in A that reads its frame (`binding`, `$1`) sees the
+    // chunk's locals and matches leave, or arrive.
+    let frame = |n: NodeId| matches!(chunks.node(n).role, Role::Jump(Jump::Binding | Jump::Frame));
+    let outcome = if in_chunk().any(bound) || chunks.descendants(a_chunk).any(frame) {
         Err(Risk::Jump)
     } else if in_chunk().any(|n| {
         let node = chunks.node(n);
@@ -985,15 +987,16 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
             .any(|trees| {
                 let (calls, chunks) = dir.sides(trees);
                 ids(chunks).any(|id| {
-                    named(chunks, id)
-                        && matches!(
-                            chunks.node(id).role,
-                            Role::Definition(NameKind::Method)
-                                | Role::Reference(NameKind::Method)
-                                | Role::Call(_)
-                                | Role::DynamicName
-                                | Role::Opaque
-                        )
+                    super::rename::literal_names(chunks, id, method)
+                        || named(chunks, id)
+                            && matches!(
+                                chunks.node(id).role,
+                                Role::Definition(NameKind::Method)
+                                    | Role::Reference(NameKind::Method)
+                                    | Role::Call(_)
+                                    | Role::DynamicName
+                                    | Role::Opaque
+                            )
                 }) || ids(calls).any(|id| {
                     named(calls, id)
                         && calls.node(id).role == Role::Definition(NameKind::Method)
