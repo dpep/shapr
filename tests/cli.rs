@@ -108,7 +108,8 @@ fn reformatting_is_format_only() {
     let hunk = &report["hunks"][0];
     assert_eq!(lead(hunk)["confidence"], 1.0);
     assert_eq!(hunk["parsed"], true);
-    assert_eq!(lead(hunk)["evidence"]["method"], "ast");
+    assert_eq!(lead(hunk)["evidence"]["comparison"], "ast");
+    assert_eq!(lead(hunk)["evidence"].get("method"), None);
     assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(report["summary"]["structure_share"], 1.0);
@@ -349,7 +350,7 @@ fn a_syntax_error_falls_back_to_lines_and_proves_no_structure() {
     assert_eq!(hunk["kind"], "logic");
     assert_eq!(lead(hunk)["detail"]["near"], "format_only");
     assert_eq!(hunk["parsed"], false);
-    assert_eq!(lead(hunk)["evidence"]["method"], "line");
+    assert_eq!(lead(hunk)["evidence"]["comparison"], "line");
     assert_eq!(lead(hunk)["confidence"], 0.0);
     assert_eq!(report["summary"]["unparsed_hunks"], 1);
 }
@@ -362,7 +363,7 @@ fn an_unparsed_language_is_logic_outside_the_verdict() {
     assert_eq!(hunk["verdict"], "unknown");
     assert_eq!(lead(hunk)["confidence"], 0.0);
     assert_eq!(hunk["language"], Value::Null);
-    assert_eq!(lead(hunk)["evidence"]["method"], "none");
+    assert_eq!(lead(hunk)["evidence"]["comparison"], "none");
     assert_eq!(report["summary"]["verdict"], "unknown");
     assert_eq!(code, 0);
 }

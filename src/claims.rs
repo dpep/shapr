@@ -142,7 +142,7 @@ pub struct Experimental {
 pub struct CodeFacts {
     /// Every hunk is structure (and there is at least one).
     pub structure: bool,
-    /// Behavior hunks shapr compared (`evidence.method` not `none`).
+    /// Hunks whose verdict is behavior or mixed.
     pub behavior: usize,
     /// Of those, the ones outside test code.
     pub non_test_behavior: usize,

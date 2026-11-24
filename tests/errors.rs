@@ -182,7 +182,7 @@ fn a_syntax_error_is_named_in_the_reason() {
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
-    assert_eq!(lead(hunk)["evidence"]["method"], "line");
+    assert_eq!(lead(hunk)["evidence"]["comparison"], "line");
     let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(
         reason.contains("syntax error on the after side; compared line by line"),

@@ -186,7 +186,7 @@ pub struct PartRecord {
     lines: Runs,
     confidence: Confidence,
     reason: String,
-    evidence: Evidence,
+    evidence: EvidenceRecord,
     detail: Map<String, Value>,
     facets: Vec<Facet>,
     review_lines: usize,
@@ -195,6 +195,25 @@ pub struct PartRecord {
     changed: usize,
     #[serde(skip)]
     context: Vec<Context>,
+}
+
+/// What a part rests on: how the hunk was compared, beside the kind's own
+/// values. `comparison`, not `method`, which kind detail uses for a method
+/// name.
+#[derive(Serialize)]
+struct EvidenceRecord {
+    comparison: Method,
+    #[serde(flatten)]
+    values: Map<String, Value>,
+}
+
+impl EvidenceRecord {
+    fn of(evidence: &Evidence) -> EvidenceRecord {
+        EvidenceRecord {
+            comparison: evidence.method,
+            values: evidence.values.clone(),
+        }
+    }
 }
 
 /// A part's changed lines on each side, as runs.
@@ -366,7 +385,7 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             lines: Runs::of(&p.lines),
             confidence: p.confidence,
             reason: p.reason.clone(),
-            evidence: p.evidence.clone(),
+            evidence: EvidenceRecord::of(&p.evidence),
             detail: p.detail.clone(),
             facets: Vec::new(),
             review_lines: code(&p.review),
@@ -382,7 +401,7 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             lines: Runs::of(&r.lines),
             confidence: r.confidence,
             reason: r.reason.clone(),
-            evidence: r.evidence.clone(),
+            evidence: EvidenceRecord::of(&r.evidence),
             detail: r.detail.clone(),
             facets: r.facets.clone(),
             review_lines: code(&r.lines),

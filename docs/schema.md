@@ -1,7 +1,7 @@
 # Output schema
 
 shapr's JSON is a public contract: field names and the values of closed
-vocabularies (`record`, `kind`, `verdict`, `category`, `evidence.method`)
+vocabularies (`record`, `kind`, `verdict`, `category`, `evidence.comparison`)
 change only with a bump of `schema` in the `meta` record. New fields may be
 added without a bump; consumers must ignore fields they don't know. Fields
 marked *experimental* may change in any release before 1.0.
@@ -88,9 +88,9 @@ A hunk's `verdict` is the first that applies:
 | `unknown` | The file is `binary`, `generated` or `vendored`. |
 | `none` | The file is `docs`. |
 | `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
-| `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.method` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
+| `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.comparison` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
 | `behavior` | A `config` or `manifest` file shapr has no parser for: its text changed beyond whitespace, and that text is the setting. |
-| `unknown` | Anything else: an `unknown` file, or `code` or `test` whose content couldn't be read (`evidence.method` `"none"`). |
+| `unknown` | Anything else: an `unknown` file, or `code` or `test` whose content couldn't be read (`evidence.comparison` `"none"`). |
 
 The change's `verdict` rolls up the hunks whose verdict is `structure`,
 `behavior` or `mixed`: `structure` when every part among them is structure,
@@ -167,7 +167,7 @@ parsed file of the change.
 | `kind` | string | `local`, `field`, `method` or `constant`. |
 | `occurrences` | int | Uses renamed across the change, the definition included; a class or module name counts once. |
 
-`evidence`, beside `method`:
+`evidence`, beside `comparison`:
 
 | key | type | meaning |
 |---|---|---|
@@ -300,7 +300,7 @@ can check `schema` before reading the rest.
 | `file` | string | Path after the change; the old path for a deleted file. |
 | `old_file` | string or null | Path before the change; `null` for an added file. Differs from `file` on a rename. |
 | `language` | string or null | The frontend that parsed it (`"ruby"` or `"rust"`, see [Languages](#languages)); `null` when none did. |
-| `parsed` | bool | Every hunk in the file was compared as trees (`evidence.method` `"ast"`). |
+| `parsed` | bool | Every hunk in the file was compared as trees (`evidence.comparison` `"ast"`). |
 | `category` | string | What kind of file: `code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary` or `unknown`. See [Categories](#categories). |
 | `lines_before` | int or null | Lines in the file before the change (Kamei's LT); 0 for an added file; `null` when its content couldn't be read. |
 | `hunks` | int | Hunk records that follow for this file. |
@@ -332,7 +332,7 @@ Each part:
 | `lines` | object | The changed lines the part explains: `before`, the `-` lines, and `after`, the `+` lines, each an array of line runs. |
 | `confidence` | number 0–1 | How strongly the evidence supports the part. See [Confidence](#confidence). |
 | `reason` | string | One short human-readable sentence. Not a contract: don't match on it. A residual's names the structural kind it resembles and why it isn't one, when a pass came close. |
-| `evidence` | object | What the part rests on. Always has `method`; other keys depend on the kind. See [Evidence](#evidence). |
+| `evidence` | object | What the part rests on. Always has `comparison`; other keys depend on the kind. See [Evidence](#evidence). |
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `move` into new surroundings: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. |
@@ -341,8 +341,8 @@ Each part:
 
 | key | type | when | meaning |
 |---|---|---|---|
-| `method` | string | always | `"ast"`: both sides parsed cleanly and their trees were compared. `"line"`: a side has a syntax error, so the region's text was compared, whitespace and comments aside. `"none"`: nothing was compared (no frontend for the file, a binary file, or content that couldn't be read). |
-| `similarity` | number 0–1 | `method` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
+| `comparison` | string | always | `"ast"`: both sides parsed cleanly and their trees were compared. `"line"`: a side has a syntax error, so the region's text was compared, whitespace and comments aside. `"none"`: nothing was compared (no frontend for the file, a binary file, or content that couldn't be read). |
+| `similarity` | number 0–1 | `comparison` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
 
 ## Extract and inline
 
@@ -356,7 +356,7 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 | `caller` | string | The method the chunk left or joined. |
 | `hunks` | int array | `id`s of every hunk the refactoring touches, this one included. |
 
-`evidence` keys beside `method`:
+`evidence` keys beside `comparison`:
 
 | key | type | meaning |
 |---|---|---|
@@ -382,7 +382,7 @@ shapr sees only the files in the diff: a subclass override or a caller elsewhere
 A residual's `facets` say what kind of logic change it is: facts the code
 shows on the residual's lines, never what a commit message claims. They
 don't change `kind` or the verdict, and a residual can carry several or
-none. They need both sides parsed cleanly (`evidence.method` `"ast"`).
+none. They need both sides parsed cleanly (`evidence.comparison` `"ast"`).
 
 | facet | meaning | how it is found |
 |---|---|---|
@@ -458,19 +458,19 @@ where to look.
 
 Each part's confidence is computed from the evidence, not assigned per kind.
 
-- `method` `"ast"`: 1 for `format_only`, `comment_only` and `logic`. Tree
+- `comparison` `"ast"`: 1 for `format_only`, `comment_only` and `logic`. Tree
   comparison is exact, so it settles those three. `rename`, `move`,
   `extract` and `inline` compute their own score: see
   [Renames](#renames), [Moves](#moves) and
   [Extract and inline](#extract-and-inline).
-- `method` `"line"`: text equality can't see a change in how whitespace
+- `comparison` `"line"`: text equality can't see a change in how whitespace
   parses (`puts -x` and `puts - x`), so it never proves structure. A hunk
   whose code text matches is one `logic` part with confidence 0 and
   `detail.near` naming the kind it resembles, `"format_only"` or
   `"comment_only"`. One whose code text differs is `logic` at most **0.5**
   (the line cap), falling in proportion to the region's lines that hold a
   syntax error: `0.5 × (1 − lines with an error / lines in both regions)`.
-- `method` `"none"`: 0. The `logic` part is the safe default, not a finding.
+- `comparison` `"none"`: 0. The `logic` part is the safe default, not a finding.
 
 ## Moves
 

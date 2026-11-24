@@ -101,7 +101,7 @@ fn a_whitespace_edit_in_a_file_that_doesnt_parse_is_logic() {
     );
     assert_near(&report, "format_only", None);
     let hunk = &hunks(&report)[0];
-    assert_eq!(lead(hunk)["evidence"]["method"], "line");
+    assert_eq!(lead(hunk)["evidence"]["comparison"], "line");
     let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(reason.contains("compared line by line"), "{reason}");
 }
