@@ -97,9 +97,12 @@ fn a_fix_commit_is_a_claim_beside_the_code_facts() {
         claims["hints"],
         json!([{"hint": "type", "value": "fix", "category": "fix", "source": "commit", "commit": sha, "field": "subject"}])
     );
-    assert_eq!(claims["categories"]["fix"], 1);
-    assert_eq!(claims["categories"]["feature"], 0, "{claims}");
-    assert_eq!(claims["conflicts"], json!([]));
+    assert_eq!(claims["experimental"]["categories"]["fix"], 1);
+    assert_eq!(
+        claims["experimental"]["categories"]["feature"], 0,
+        "{claims}"
+    );
+    assert_eq!(claims["experimental"]["conflicts"], json!([]));
     // The claim never touches the code's labels.
     assert_eq!(report["hunks"][0]["kind"], "logic");
     assert_eq!(lead(&report["hunks"][0])["facets"], json!(["condition"]));
@@ -111,9 +114,9 @@ fn a_refactor_claim_with_behavior_hunks_is_a_conflict() {
     let claims = &report["summary"]["claims"];
     assert_eq!(claims["hints"][0]["hint"], "keyword");
     assert_eq!(claims["hints"][0]["value"], "refactor");
-    assert_eq!(claims["categories"]["refactor"], 1);
+    assert_eq!(claims["experimental"]["categories"]["refactor"], 1);
     assert_eq!(
-        claims["conflicts"],
+        claims["experimental"]["conflicts"],
         json!([{"claim": "refactor", "finding": "behavior_hunks", "count": 1}])
     );
 }
@@ -133,7 +136,7 @@ fn a_no_behavior_change_phrase_is_a_refactor_claim() {
             && h["field"] == "body"),
         "{claims}"
     );
-    assert_eq!(claims["conflicts"][0]["claim"], "refactor");
+    assert_eq!(claims["experimental"]["conflicts"][0]["claim"], "refactor");
 }
 
 #[test]
@@ -142,7 +145,7 @@ fn a_fix_claim_with_only_structure_is_a_conflict() {
     let (report, _) = classify(GATE, &after, "Fix the gate");
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(
-        report["summary"]["claims"]["conflicts"],
+        report["summary"]["claims"]["experimental"]["conflicts"],
         json!([{"claim": "fix", "finding": "no_behavior_hunks", "count": 0}])
     );
 }
@@ -165,8 +168,8 @@ fn a_revert_names_the_commit_and_claims_nothing_it_quotes() {
             ("revert", "0123456789abcdef0123456789abcdef01234567")
         ]
     );
-    assert_eq!(claims["categories"]["revert"], 1);
-    assert_eq!(claims["categories"]["fix"], 0, "{claims}");
+    assert_eq!(claims["experimental"]["categories"]["revert"], 1);
+    assert_eq!(claims["experimental"]["categories"]["fix"], 0, "{claims}");
 }
 
 #[test]
@@ -217,7 +220,7 @@ fn a_description_can_come_from_stdin_with_a_range() {
         "fix: small gates\n",
     );
     let claims = &report(&out)["summary"]["claims"];
-    assert_eq!(claims["categories"]["fix"], 1, "{claims}");
+    assert_eq!(claims["experimental"]["categories"]["fix"], 1, "{claims}");
 }
 
 #[test]
@@ -235,7 +238,7 @@ fn a_piped_diff_has_no_claims() {
     let claims = &report(&shapr(dir.path(), &["-j"], &diff))["summary"]["claims"];
     assert_eq!(claims["messages"], 0);
     assert_eq!(claims["hints"], json!([]));
-    assert_eq!(claims["conflicts"], json!([]));
+    assert_eq!(claims["experimental"]["conflicts"], json!([]));
 }
 
 #[test]
@@ -258,9 +261,10 @@ fn every_claims_field_is_documented() {
     let claims = &report["summary"]["claims"];
     for record in [
         claims,
+        &claims["experimental"],
         &claims["hints"][0],
-        &claims["categories"],
-        &claims["conflicts"][0],
+        &claims["experimental"]["categories"],
+        &claims["experimental"]["conflicts"][0],
     ] {
         for key in record.as_object().unwrap().keys() {
             assert!(

@@ -126,6 +126,13 @@ pub enum Finding {
 pub struct Claims {
     pub messages: usize,
     pub hints: Vec<Hint>,
+    pub experimental: Experimental,
+}
+
+/// Judgements drawn from the hints by unmeasured keyword rules: unstable
+/// until measured against labelled changes.
+#[derive(Serialize)]
+pub struct Experimental {
     /// Messages carrying a hint of each category, every category present.
     pub categories: BTreeMap<&'static str, usize>,
     pub conflicts: Vec<Conflict>,
@@ -157,8 +164,10 @@ impl Claims {
         Claims {
             messages: messages.len(),
             hints,
-            categories,
-            conflicts: Vec::new(),
+            experimental: Experimental {
+                categories,
+                conflicts: Vec::new(),
+            },
         }
     }
 
@@ -166,7 +175,7 @@ impl Claims {
     /// docs, test) conflicts only when no message also claims a behavior
     /// change; hunks shapr couldn't compare are unknown, not evidence.
     pub fn check(&mut self, code: &CodeFacts) {
-        let claimed = |c: Category| self.categories[c.as_str()] > 0;
+        let claimed = |c: Category| self.experimental.categories[c.as_str()] > 0;
         let behavior = Category::ALL.iter().any(|&c| c.behavior() && claimed(c));
         let mut conflicts = Vec::new();
         let mut conflict = |claim, finding, count| {
@@ -197,7 +206,7 @@ impl Claims {
                 }
             }
         }
-        self.conflicts = conflicts;
+        self.experimental.conflicts = conflicts;
     }
 }
 

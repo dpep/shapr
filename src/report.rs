@@ -515,6 +515,7 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         return Ok(());
     }
     let claimed: Vec<String> = claims
+        .experimental
         .categories
         .iter()
         .filter(|(_, n)| **n > 0)
@@ -531,7 +532,7 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         claims.messages,
         if claims.messages == 1 { "" } else { "s" },
     )?;
-    for conflict in &claims.conflicts {
+    for conflict in &claims.experimental.conflicts {
         let plural = if conflict.count == 1 { "" } else { "s" };
         let finding = match conflict.finding {
             Finding::BehaviorHunks => format!("{} behavior hunk{plural}", conflict.count),

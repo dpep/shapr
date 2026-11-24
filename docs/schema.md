@@ -381,8 +381,7 @@ against the code rather than instead of it.
 |---|---|---|
 | `messages` | int | Messages read: one per commit, plus one for the description. |
 | `hints` | array | Each hint, in message order, once per message. Below. |
-| `categories` | object | Messages carrying at least one hint of each category, every category present: `fix`, `feature`, `refactor`, `perf`, `test`, `docs`, `chore`, `revert`. |
-| `conflicts` | array | Claims the code doesn't bear out. Below. |
+| `experimental` | object | *Experimental*: judgements drawn from the hints. Below. |
 
 Each hint:
 
@@ -394,6 +393,15 @@ Each hint:
 | `source` | string | `commit`, `message` (`--message`), or `pull_request` (a GitHub pull request's title and body). |
 | `commit` | string or null | The commit's id, 12 hex digits; `null` for a description. |
 | `field` | string | `subject` (the first non-empty line) or `body`. Purpose words are read only in the subject, where they summarize; a body mentions too much in passing. |
+
+Hints are facts: what a message says, where. `experimental` holds
+judgements built on them by keyword rules that haven't been measured against
+labelled changes; its fields and rules may change in any release before 1.0.
+
+| field | type | meaning |
+|---|---|---|
+| `categories` | object | Messages carrying at least one hint of each category, every category present: `fix`, `feature`, `refactor`, `perf`, `test`, `docs`, `chore`, `revert`. |
+| `conflicts` | array | Claims the code doesn't bear out. Below. |
 
 Each conflict is a count of what the code shows, not a verdict on the author:
 

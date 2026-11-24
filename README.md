@@ -62,7 +62,7 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 - per hunk: its `parts`, each with a `kind`, the lines it covers, a graded `confidence` with the `evidence` behind it, and for the `logic` part `facets` saying what kind of logic change it is (`condition`, `signature`, `error_handling`, `literal_only`, `test`, …); the hunk's `verdict` and `kind`; code and comment lines added and deleted, and `review_lines`, the code lines a reviewer still has to read (the last column of [Kinds](#kinds));
 - per file: lines before the change, whether it is `generated` (a lockfile, a minified asset, or `linguist-generated`), and the same line counts;
 - a summary: the verdict, counts of parts per kind and facet, `structure_share`, and Kamei's diffusion measures (files, directories, subsystems, entropy);
-- `summary.claims`: what the commit messages and a `--message` description claim (conventional types, purpose words, reverts, issues), with their source, and where the code doesn't bear a claim out. Claims never change a label: shapr reads the code first.
+- `summary.claims`: what the commit messages and a `--message` description claim (conventional types, purpose words, reverts, issues), with their source; and, experimental, the categories they claim and where the code doesn't bear a claim out. Claims never change a label: shapr reads the code first.
 
 ## Exit codes
 
