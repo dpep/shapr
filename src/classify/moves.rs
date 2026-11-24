@@ -553,13 +553,18 @@ fn visibility_name(v: Option<Visibility>) -> &'static str {
 /// Siblings whose order relative to `node` matters, as (hash, comes first),
 /// sorted: those that name what it declares at load time (`alias_method`,
 /// `private :x`, a constant read), that declare the same name, or that
-/// declare a name its own load-time code reads.
+/// declare a name its own load-time code reads. For anything but a method,
+/// whose body runs later, every statement that isn't a declaration counts:
+/// a `require` or a call may run code that reads it.
 fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     let Some(parent) = tree.node(node).parent else {
         return Vec::new();
     };
     let declared = declared_name(tree, node);
     let reads = mentions(tree, node);
+    // A method body runs later; anything else runs where it stands, so a
+    // statement beside it may need it (or change it) by the time it runs.
+    let runs_now = tree.node(node).role != Role::Definition(NameKind::Method);
     let mut before = true;
     let mut out = Vec::new();
     for &sibling in &tree.node(parent).children {
@@ -571,8 +576,8 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
             continue;
         }
         let theirs = declared_name(tree, sibling);
-        let depends = declared
-            .is_some_and(|d| theirs == Some(d) || mentions(tree, sibling).contains(&d))
+        let depends = (runs_now && !tree.node(sibling).role.is_declaration())
+            || declared.is_some_and(|d| theirs == Some(d) || mentions(tree, sibling).contains(&d))
             || theirs.is_some_and(|t| reads.contains(&t));
         if depends {
             out.push((tree.node(sibling).hash, before));

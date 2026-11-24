@@ -211,8 +211,9 @@ A pair stays `logic`, with the reason saying why, when its new place changes
 what it means: a different owner (enclosing class or module), a different
 visibility section (it crossed `private`), a different order relative to a
 sibling that names it or that it names at load time (`alias_method`,
-`private :x`, a redefinition, a constant read), or, across files, different
-file-level directives (`# frozen_string_literal`).
+`private :x`, a redefinition, a constant read) or, for anything but a
+method, any statement that runs code at load time (a `require`), or, across
+files, different file-level directives (`# frozen_string_literal`).
 
 A hunk is a move when every changed code line lies in a paired unit or in
 code the alignment kept unchanged. Both halves are labeled.

@@ -330,6 +330,20 @@ fn a_method_edited_where_neighbors_swap_around_it_stays_put() {
 }
 
 #[test]
+fn a_constant_moved_past_a_require_is_logic() {
+    // The required file may read the constant when it loads.
+    let root = "ROOT = File.expand_path(File.join(__dir__, \"..\"))\n";
+    let requires = "require \"a\"\nrequire \"b\"\nrequire \"c\"\nrequire \"d\"\n";
+    let report = classify(
+        &[("helper.rb", &format!("{root}{requires}"))],
+        &[("helper.rb", &format!("{requires}{root}"))],
+    );
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+    let reason = hunks(&report)[0]["reason"].as_str().unwrap();
+    assert!(reason.contains("load time"), "{reason}");
+}
+
+#[test]
 fn a_duplicate_candidate_lowers_confidence() {
     let a = method("first", "2");
     let b = method("second", "3");
