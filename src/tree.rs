@@ -191,7 +191,7 @@ impl std::ops::BitOr for Flags {
 }
 
 /// Facts about a language's semantics that the core acts on, set by the
-/// frontend. The default is Ruby's: neither holds.
+/// frontend. By default none holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Semantics {
     /// Each file is its own namespace (a Rust module): a definition moved to
@@ -207,10 +207,11 @@ pub struct Semantics {
     /// `inherited`), an entry point (`main`). Defining, removing or renaming
     /// one reaches callers beyond the change.
     pub reserved: &'static [&'static str],
+    pub spelling: Spelling,
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A
-/// control byte, so never part of a token next to it (see [`mask_name`]).
+/// control byte, so never part of a token next to it (see [`Spelling::mask`]).
 pub const MARK: u8 = 0x01;
 
 /// Stands for a masked name in [`Tree::own_text`].
@@ -253,30 +254,84 @@ pub fn spells(pattern: &str, name: &str) -> bool {
     rest.ends_with(last)
 }
 
-/// Replaces the first occurrence of `name` in `text` that stands as a whole
-/// token with [`MASKED`].
-pub fn mask_name(text: &mut Vec<u8>, name: &[u8]) {
-    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
-    let suffixed = name.last().is_some_and(|b| b"?!=".contains(b));
-    let at = (0..text.len()).find(|&i| {
-        text[i..].starts_with(name)
-            && (i == 0 || !(word(text[i - 1]) || b"@$".contains(&text[i - 1])))
-            && text
-                .get(i + name.len())
-                .is_none_or(|&n| !word(n) && (suffixed || !b"?!".contains(&n)))
-    });
-    if let Some(i) = at {
-        text.splice(i..i + name.len(), [MASKED]);
-    }
+/// How a language spells names in source text, for the few places the core
+/// reads a name out of text: masking it in a node's own text, telling an
+/// identifier from an operator, matching a literal that spells it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Spelling {
+    /// Sigils that start a variable's name and belong to it (Ruby's `@x`,
+    /// `$x`).
+    pub sigils: &'static [char],
+    /// Punctuation a method's name may end with (Ruby's `x?`, `x!`, `x=`).
+    pub suffixes: &'static [char],
+    /// Of the suffixes, those that, glued to a name, spell another name:
+    /// `x?` is not `x`, but `x=1` assigns `x`.
+    pub glued: &'static [char],
+    /// The sigil of an object's own state (Ruby's `@x`), which an
+    /// accessor's name drops.
+    pub field_sigil: Option<char>,
+    /// Marks a symbol before or after its name (Ruby's `:x`, `x:`).
+    pub symbol: Option<char>,
+    /// Quotes around a string literal.
+    pub quotes: &'static [char],
 }
 
-/// A name a rename can change: an identifier, not an operator.
-pub fn is_identifier(name: &str) -> bool {
-    let bare = name.trim_start_matches(['@', '$']);
-    let bare = bare.strip_suffix(['?', '!', '=']).unwrap_or(bare);
-    let mut chars = bare.chars();
-    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
-        && chars.all(|c| c.is_alphanumeric() || c == '_')
+impl Spelling {
+    /// Replaces the first occurrence of `name` in `text` that stands as a
+    /// whole token with [`MASKED`].
+    pub fn mask(&self, text: &mut Vec<u8>, name: &[u8]) {
+        let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+        let has = |set: &[char], b: u8| set.contains(&(b as char));
+        let suffixed = name.last().is_some_and(|&b| has(self.suffixes, b));
+        let at = (0..text.len()).find(|&i| {
+            text[i..].starts_with(name)
+                && (i == 0 || !(word(text[i - 1]) || has(self.sigils, text[i - 1])))
+                && text
+                    .get(i + name.len())
+                    .is_none_or(|&n| !word(n) && (suffixed || !has(self.glued, n)))
+        });
+        if let Some(i) = at {
+            text.splice(i..i + name.len(), [MASKED]);
+        }
+    }
+
+    /// A name a rename can change: an identifier, not an operator.
+    pub fn is_identifier(&self, name: &str) -> bool {
+        let bare = name.trim_start_matches(self.sigils);
+        let bare = bare.strip_suffix(self.suffixes).unwrap_or(bare);
+        let mut chars = bare.chars();
+        chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+            && chars.all(|c| c.is_alphanumeric() || c == '_')
+    }
+
+    /// `name` without the field sigil.
+    pub fn bare<'n>(&self, name: &'n str) -> &'n str {
+        match self.field_sigil {
+            Some(sigil) => name.trim_start_matches(sigil),
+            None => name,
+        }
+    }
+
+    /// Whether a literal's text (`:name`, `"name"`, `name:`) spells `name`.
+    pub fn literal_spells(&self, text: &str, name: &str) -> bool {
+        let text = match self.symbol {
+            Some(symbol) => text.trim_start_matches(symbol),
+            None => text,
+        };
+        let text = self.bare(text).trim_matches(self.quotes);
+        text == name
+            || self
+                .symbol
+                .is_some_and(|s| text.strip_suffix(s) == Some(name))
+    }
+
+    /// The name-like core of a token's text: punctuation trimmed but a
+    /// method name's suffix.
+    pub fn word<'t>(&self, text: &'t str) -> &'t str {
+        text.trim_matches(|c: char| {
+            !(c.is_alphanumeric() || c == '_' || self.suffixes.contains(&c))
+        })
+    }
 }
 
 impl Semantics {
@@ -468,7 +523,7 @@ impl Tree {
             Piece::Child(_) => {}
         });
         if let Some(name) = self.node(id).name.as_deref().filter(|_| mask) {
-            mask_name(&mut out, name.as_bytes());
+            self.semantics.spelling.mask(&mut out, name.as_bytes());
         }
         out.retain(|b| !b.is_ascii_whitespace());
         out
@@ -931,9 +986,19 @@ mod tests {
         assert!(spells("name", "name"));
     }
 
+    /// Ruby's, as its frontend sets it.
+    const RUBY: Spelling = Spelling {
+        sigils: &['@', '$'],
+        suffixes: &['?', '!', '='],
+        glued: &['?', '!'],
+        field_sigil: Some('@'),
+        symbol: Some(':'),
+        quotes: &['"', '\''],
+    };
+
     fn masked(text: &str, name: &str) -> String {
         let mut bytes = text.as_bytes().to_vec();
-        mask_name(&mut bytes, name.as_bytes());
+        RUBY.mask(&mut bytes, name.as_bytes());
         String::from_utf8_lossy(&bytes).replace('\0', "_")
     }
 
@@ -950,11 +1015,23 @@ mod tests {
     #[test]
     fn identifiers_exclude_operators() {
         for ok in ["a", "@b", "@@c", "d?", "e=", "Foo", "_x1", "é"] {
-            assert!(is_identifier(ok), "{ok}");
+            assert!(RUBY.is_identifier(ok), "{ok}");
         }
         for bad in ["+", "[]", "<=>", "", "1a", "a b"] {
-            assert!(!is_identifier(bad), "{bad}");
+            assert!(!RUBY.is_identifier(bad), "{bad}");
         }
+        assert!(!Spelling::default().is_identifier("x?"));
+    }
+
+    #[test]
+    fn literals_spell_names_the_language_way() {
+        for text in [":go", "\"go\"", "'go'", "go:", ":@go"] {
+            assert!(RUBY.literal_spells(text, "go"), "{text}");
+        }
+        assert!(Spelling::default().literal_spells("go", "go"));
+        assert!(!Spelling::default().literal_spells(":go", "go"));
+        assert_eq!(RUBY.word(":empty?,"), "empty?");
+        assert_eq!(Spelling::default().word("empty?"), "empty");
     }
 
     #[test]

@@ -5,7 +5,7 @@ mod reserved;
 mod roles;
 
 use super::{Construct, Frontend};
-use crate::tree::{NodeId, Role, Semantics, Span, Tree, TreeBuilder};
+use crate::tree::{NodeId, Role, Semantics, Span, Spelling, Tree, TreeBuilder};
 use ruby_prism::{Location, Node, Visit};
 
 pub struct Ruby;
@@ -41,6 +41,14 @@ impl Frontend for Ruby {
         let mut builder = TreeBuilder::new(source.clone());
         builder.semantics(Semantics {
             reserved: reserved::RESERVED,
+            spelling: Spelling {
+                sigils: &['@', '$'],
+                suffixes: &['?', '!', '='],
+                glued: &['?', '!'],
+                field_sigil: Some('@'),
+                symbol: Some(':'),
+                quotes: &['"', '\''],
+            },
             ..Semantics::default()
         });
         let result = ruby_prism::parse(&source);

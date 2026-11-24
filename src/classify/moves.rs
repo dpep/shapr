@@ -753,7 +753,7 @@ fn mentions(tree: &Tree, node: NodeId) -> Vec<&str> {
         }
         if n.children.is_empty() {
             let text = std::str::from_utf8(tree.text(&n.span)).unwrap_or_default();
-            out.push(text.trim_matches(|c: char| !(c.is_alphanumeric() || "_?!=".contains(c))));
+            out.push(tree.semantics.spelling.word(text));
         }
         stack.extend(&n.children);
     }

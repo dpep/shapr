@@ -8,7 +8,7 @@
 
 use super::site::Site;
 use crate::change::Trees;
-use crate::tree::{NodeId, Span, Tree, is_identifier};
+use crate::tree::{NodeId, Span, Tree};
 
 /// An aligned node whose name changed.
 pub(super) struct Diff {
@@ -91,7 +91,9 @@ fn pair(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, out: &mut Alignment) {
     }
     if bn.name != an.name {
         let renamable = super::rename::renamable(bn.role);
-        let names = [&bn.name, &an.name].map(|n| n.as_deref().is_some_and(is_identifier));
+        let spelling = b.semantics.spelling;
+        let names =
+            [&bn.name, &an.name].map(|n| n.as_deref().is_some_and(|n| spelling.is_identifier(n)));
         if !renamable || names.contains(&false) {
             return differs(out);
         }

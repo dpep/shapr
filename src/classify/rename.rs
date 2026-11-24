@@ -466,7 +466,8 @@ fn uses(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> usize {
 /// would shadow, or a dynamic reference (for a field, an accessor of the
 /// same name).
 fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
-    let bare = |s: &str| s.trim_start_matches('@').to_string();
+    let spelling = tree.semantics.spelling;
+    let bare = |s: &str| spelling.bare(s).to_string();
     tree.descendants(root).any(|id| {
         let n = tree.node(id);
         let Some(found) = n.name.as_deref() else {
@@ -495,9 +496,7 @@ pub(super) fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
         return false;
     }
     let text = String::from_utf8_lossy(tree.text(&n.span));
-    let text = text.trim_start_matches(':').trim_start_matches('@');
-    let text = text.trim_matches(['"', '\'']);
-    text == name || text.strip_suffix(':') == Some(name)
+    tree.semantics.spelling.literal_spells(&text, name)
 }
 
 /// A class, module or constant's name, which the tree also holds as a

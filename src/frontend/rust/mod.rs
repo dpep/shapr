@@ -11,7 +11,7 @@
 mod roles;
 
 use super::{Construct, Frontend};
-use crate::tree::{NodeId, Semantics, Span, Tree, TreeBuilder};
+use crate::tree::{NodeId, Semantics, Span, Spelling, Tree, TreeBuilder};
 use roles::{Mode, Plan};
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -108,6 +108,10 @@ impl Frontend for Rust {
             file_scoped: true,
             scoped_drop: true,
             reserved: RESERVED,
+            spelling: Spelling {
+                quotes: &['"', '\''],
+                ..Spelling::default()
+            },
         });
         let mut parser = Parser::new();
         parser
