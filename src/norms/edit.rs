@@ -27,6 +27,22 @@ pub fn keeps(path: &str, tree: &Tree, replaces: &[Replace], renames: bool) -> bo
         && (renames || after.node(Tree::ROOT).canon == tree.node(Tree::ROOT).canon)
 }
 
+/// `replaces` with each line break they insert written as the file's
+/// first one is: `\r\n` in a CRLF file.
+pub fn endings(source: &[u8], replaces: &[Replace]) -> Vec<Replace> {
+    let crlf =
+        (source.iter().position(|&b| b == b'\n')).is_some_and(|i| i > 0 && source[i - 1] == b'\r');
+    (replaces.iter())
+        .map(|r| Replace {
+            span: r.span.clone(),
+            text: match crlf {
+                true => r.text.replace("\r\n", "\n").replace('\n', "\r\n"),
+                false => r.text.clone(),
+            },
+        })
+        .collect()
+}
+
 /// How a unified diff marks a last line with no line break.
 const NO_NEWLINE: &str = "\\ No newline at end of file\n";
 
@@ -53,25 +69,23 @@ pub fn unified(path: &str, source: &[u8], replaces: &[Replace]) -> Option<String
     new.extend_from_slice(&source[at..to]);
     let old_text = String::from_utf8_lossy(&source[from..to]);
     let new_text = String::from_utf8_lossy(&new);
-    let old: Vec<&str> = old_text.lines().collect();
-    let new: Vec<&str> = new_text.lines().collect();
+    // Each line keeps its own break, so a CRLF file's edit applies.
+    let old: Vec<&str> = old_text.split_inclusive('\n').collect();
+    let new: Vec<&str> = new_text.split_inclusive('\n').collect();
     let mut out = format!(
         "--- a/{path}\n+++ b/{path}\n@@ -{first},{} +{first},{} @@\n",
         old.len(),
         new.len()
     );
-    let bare = |text: &str| !text.is_empty() && !text.ends_with('\n');
-    for line in old {
-        out.push_str(&format!("-{line}\n"));
-    }
-    if bare(&old_text) {
-        out.push_str(NO_NEWLINE);
-    }
-    for line in new {
-        out.push_str(&format!("+{line}\n"));
-    }
-    if bare(&new_text) {
-        out.push_str(NO_NEWLINE);
+    for (mark, lines) in [('-', old), ('+', new)] {
+        for line in lines {
+            out.push(mark);
+            out.push_str(line);
+            if !line.ends_with('\n') {
+                out.push('\n');
+                out.push_str(NO_NEWLINE);
+            }
+        }
     }
     Some(out)
 }
@@ -120,6 +134,21 @@ mod tests {
             "--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -2,1 +2,1 @@\n-b = \"x\"\n+b = 'x'\n"
         );
         assert_eq!(unified("a.rb", source, &[]), None);
+        let gap = [Replace {
+            span: 5..5,
+            text: "\n".into(),
+        }];
+        assert_eq!(endings(b"a = 1\r\n", &gap)[0].text, "\r\n");
+        assert_eq!(endings(b"a = 1\n", &gap)[0].text, "\n");
+        let crlf = b"a = \"x\"\r\n";
+        let quote = |at: usize| Replace {
+            span: at..at + 1,
+            text: "'".into(),
+        };
+        assert_eq!(
+            unified("a.rb", crlf, &[quote(4), quote(6)]).unwrap(),
+            "--- a/a.rb\n+++ b/a.rb\n@@ -1,1 +1,1 @@\n-a = \"x\"\r\n+a = 'x'\r\n"
+        );
         let bare = b"a = 1";
         let append = [Replace {
             span: 5..5,

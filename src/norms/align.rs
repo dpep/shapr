@@ -519,12 +519,11 @@ impl File<'_> {
                     edit: (o.fix.iter())
                         .filter(|_| !unchecked(o))
                         .find(|(style, _)| style == expected)
-                        .filter(|(_, replaces)| self.inside(hunk, replaces))
-                        .filter(|(_, replaces)| {
-                            edit::keeps(self.path, self.tree, replaces, def.renames)
-                        })
-                        .filter(|(_, replaces)| !def.shared || self.unshared(replaces))
-                        .and_then(|(_, replaces)| edit::unified(self.path, self.source, replaces)),
+                        .map(|(_, replaces)| edit::endings(self.source, replaces))
+                        .filter(|replaces| self.inside(hunk, replaces))
+                        .filter(|replaces| edit::keeps(self.path, self.tree, replaces, def.renames))
+                        .filter(|replaces| !def.shared || self.unshared(replaces))
+                        .and_then(|replaces| edit::unified(self.path, self.source, &replaces)),
                 })
                 .collect(),
             None => Vec::new(),
@@ -598,7 +597,7 @@ impl File<'_> {
             // change neither: either one in the region will do.
             let between = r.span.is_empty()
                 && !r.text.is_empty()
-                && r.text.bytes().all(|b| b == b'\n')
+                && r.text.bytes().all(|b| matches!(b, b'\n' | b'\r'))
                 && self.index.start(line) == r.span.start;
             if between && line > 1 && region.contains(&(line - 1)) {
                 return true;

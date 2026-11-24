@@ -1,0 +1,24 @@
+{
+  "description": "a suggested edit in a file with CRLF line endings keeps them, so it applies",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 7,
+                  "edit": "--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -7,1 +7,1 @@\n-    v = \"e\"\r\n+    v = 'e'\r\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

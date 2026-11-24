@@ -842,7 +842,7 @@ Each norm:
 | `convergence` | string or null | When `converging`: `normalizing` (toward the surrounding norm) or `renorming` (the scope moved to a new one). |
 | `restyle` | bool | The hunk's [`restyle`](#restyle) part respells this norm's variant (the norm's name is a variant's): a respelling, not new code. Layout and naming norms are never a restyle; their respellings are `format_only` and `rename` parts. |
 | `flagged` | bool | `restyle` and `diverging`: a change that respells code away from its norm. |
-| `deviations` | array | New code not in the `expected` style: `line`, `column`, `style`, `expected`, and `edit`, a unified diff that applies the expected style, `null` when there is no mechanical fix, it would reach outside the hunk's changed region, or the edited file wouldn't be the same program: each edit is applied and the file re-parsed, and it must parse cleanly with an equal canonical tree (whitespace, comments and the spellings [Restyle](#restyle) proves the same may differ); a `Naming/` rename need only parse cleanly. |
+| `deviations` | array | New code not in the `expected` style: `line`, `column`, `style`, `expected`, and `edit`, a unified diff that applies the expected style (in the file's own line endings), `null` when there is no mechanical fix, it would reach outside the hunk's changed region, or the edited file wouldn't be the same program: each edit is applied and the file re-parsed, and it must parse cleanly with an equal canonical tree (whitespace, comments and the spellings [Restyle](#restyle) proves the same may differ); a `Naming/` rename need only parse cleanly. |
 
 ## `shapr norms`
 
