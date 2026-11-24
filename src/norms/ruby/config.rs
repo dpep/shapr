@@ -17,6 +17,8 @@ pub struct Config {
     /// relative to the repository's top, `None` where it can't be read (a
     /// regexp, an absolute path, ERB).
     lists: BTreeMap<String, BTreeMap<String, Vec<Option<String>>>>,
+    /// Lines of the file that aren't YAML this reader understands, 1-based.
+    unread: Vec<usize>,
 }
 
 impl Config {
@@ -82,6 +84,13 @@ fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize)
         ""
     };
     let (inherits, own) = parse(&String::from_utf8_lossy(&text), base);
+    if !own.unread.is_empty() {
+        let lines: Vec<String> = own.unread.iter().map(usize::to_string).collect();
+        crate::verbose!(
+            "{path}: line(s) {} not read as YAML; settings there are ignored",
+            lines.join(", ")
+        );
+    }
     for file in inherits {
         if let (false, Some(file)) = (file.contains("://"), resolve(parent(path), &file)) {
             merge(&file, snapshot, config, depth + 1);
@@ -111,10 +120,14 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
         let unreadable = item.starts_with('/') || item.starts_with('!') || item.contains("<%");
         (!unreadable).then(|| resolve(base, item)).flatten()
     };
-    for raw in text.lines() {
+    for (n, raw) in text.lines().enumerate() {
         let line = strip_comment(raw);
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed == "---" {
+            continue;
+        }
+        if !readable(trimmed) {
+            config.unread.push(n + 1);
             continue;
         }
         let depth = line.len() - line.trim_start().len();
@@ -171,6 +184,20 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
         }
     }
     (inherits, config)
+}
+
+/// A line is a list item or a `key: value` with a key, and a flow value
+/// closes on its line.
+fn readable(line: &str) -> bool {
+    if line.starts_with("- ") {
+        return true;
+    }
+    let Some((key, value)) = line.split_once(':') else {
+        return false;
+    };
+    let value = value.trim();
+    let open = |a: char, b: char| value.starts_with(a) && !value.ends_with(b);
+    !key.trim().is_empty() && !open('[', ']') && !open('{', '}')
 }
 
 /// RuboCop's path match: `File.fnmatch?` with `FNM_PATHNAME` and
@@ -302,6 +329,15 @@ mod tests {
             parse("inherit_from: [a.yml, 'b.yml']\n", "").0,
             ["a.yml", "b.yml"]
         );
+    }
+
+    #[test]
+    fn lines_this_reader_cant_read_are_noted() {
+        let (_, config) = parse(
+            "Style/StringLiterals: [oops\n  : :\nA:\n  B: c\nloose\n",
+            "",
+        );
+        assert_eq!(config.unread, [1, 2, 5]);
     }
 
     #[test]
