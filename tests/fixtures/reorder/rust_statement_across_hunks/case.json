@@ -1,0 +1,6 @@
+{
+  "description": "a statement moved from one hunk to another is no reorder within either hunk: each half stays logic",
+  "expect": {
+    "hunks": {"$every": {"parts": {"$every": {"kind": {"$not": "reorder"}}}}}
+  }
+}

@@ -7,7 +7,7 @@
 
 use super::align::{Alignments, lcs};
 use super::hazard::{self, Op};
-use super::site::Site;
+use super::site::{Side, Site};
 use super::{Claim, Confidence, Context, Evidence, Kind, Labels, Method, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::frontend::order::{self, Dependence};
@@ -43,22 +43,31 @@ struct Group {
     key: u64,
 }
 
-/// The container a side's cover sits in and the elements it covers: the
-/// cover itself when it is a run of siblings, else the one node's children.
-/// Whether the run is siblings, whose leading comments sit before it.
-fn elements(tree: &Tree, cover: &[NodeId]) -> Option<(NodeId, Vec<NodeId>, bool)> {
-    match cover {
+/// The container a side's cover sits in and the elements of it the hunk
+/// reaches: the cover itself when it is a run of siblings, else the one
+/// node's children that reach into the region (a Rust block covers a run of
+/// statements, as their `;` are its own text). Whether it was one node.
+fn elements(tree: &Tree, side: &Side) -> Option<(NodeId, Vec<NodeId>, bool)> {
+    match side.cover[..] {
         [] => None,
-        [one] => Some((*one, tree.node(*one).children.clone(), false)),
-        [first, ..] => Some((tree.node(*first).parent?, cover.to_vec(), true)),
+        [one] => {
+            let span = side.span.as_ref()?;
+            let children = tree.node(one).children.iter().copied();
+            let reach = |c: &NodeId| {
+                let extent = &tree.node(*c).extent;
+                extent.start < span.end && span.start < extent.end
+            };
+            Some((one, children.filter(reach).collect(), true))
+        }
+        [first, ..] => Some((tree.node(first).parent?, side.cover.clone(), false)),
     }
 }
 
-fn groups(tree: &Tree, elements: &[NodeId], run: bool) -> Vec<Group> {
+fn groups(tree: &Tree, elements: &[NodeId]) -> Vec<Group> {
     let mut pending: Vec<NodeId> = Vec::new();
-    // A run's first element keeps the comments just before it, unchanged
+    // The first element keeps the comments just before it, unchanged
     // context: they must still lead the same element.
-    if run && let Some(parent) = tree.node(elements[0]).parent {
+    if let Some(parent) = tree.node(elements[0]).parent {
         let siblings = &tree.node(parent).children;
         let at = siblings.iter().position(|&c| c == elements[0]).unwrap_or(0);
         let leading = siblings[..at].iter().rev();
@@ -115,17 +124,20 @@ fn context(dependence: Dependence) -> Context {
 
 fn prove(trees: &Trees, site: &Site, free: &Claim) -> Option<Part> {
     let (tb, ta) = (&trees.before, &trees.after);
-    let (cb, eb, run) = elements(tb, &site.before.cover)?;
-    let (ca, ea, run_a) = elements(ta, &site.after.cover)?;
+    let (cb, eb, one) = elements(tb, &site.before)?;
+    let (ca, ea, one_a) = elements(ta, &site.after)?;
     let (nb, na) = (tb.node(cb), ta.node(ca));
-    if run != run_a || nb.kind != na.kind || !site.same_nesting(tb, ta) {
+    if one != one_a || nb.kind != na.kind || !site.same_nesting(tb, ta) {
         return None;
     }
     // One node on each side: only its children may differ.
-    if !run && (nb.role != na.role || tb.own_text(cb, false) != ta.own_text(ca, false)) {
+    if one && (nb.role != na.role || tb.own_text(cb, false) != ta.own_text(ca, false)) {
         return None;
     }
-    let (gb, ga) = (groups(tb, &eb, run), groups(ta, &ea, run));
+    if eb.is_empty() || ea.is_empty() {
+        return None;
+    }
+    let (gb, ga) = (groups(tb, &eb), groups(ta, &ea));
     let kept = lcs(gb.len(), ga.len(), |i, j| gb[i].key == ga[j].key, |_| 1);
     let (mut left_b, mut left_a): (Vec<usize>, Vec<usize>) = (
         (0..gb.len())
