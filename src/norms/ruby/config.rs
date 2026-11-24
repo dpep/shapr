@@ -26,7 +26,8 @@ pub struct Config {
     /// `inherit_gem` gems, by name.
     gems: Vec<String>,
     /// What the chain holds that wasn't read, one note each: a gem, a
-    /// missing or remote file, lines that aren't YAML this reader reads.
+    /// missing or remote file, lines that aren't YAML this reader reads, a
+    /// pattern past the brace cap.
     pub unread: Vec<String>,
     /// Cops a `.rubocop_todo.yml` in the chain lists: offenses the project
     /// has parked rather than fixed.
@@ -116,6 +117,7 @@ fn merge(
         let s = if lines.len() == 1 { "" } else { "s" };
         (config.unread).push(format!("{path}: line{s} {} not read", lines.join(", ")));
     }
+    (config.unread).extend(own.unread.iter().map(|note| format!("{path}: {note}")));
     (config.unread).extend(own.gems.iter().map(|g| format!("inherit_gem: {g}")));
     for entry in inherits {
         let file = resolve(parent(path), &entry).filter(|f| snapshot.read(f).is_some());
@@ -160,9 +162,15 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
     let mut indent: Option<usize> = None;
     // The setting whose block list the following `- ` lines extend.
     let mut items: Option<String> = None;
-    let pattern = |item: &str| {
+    // Patterns past the brace cap, by their text.
+    let mut wide = Vec::new();
+    let mut pattern = |item: &str| {
         let item = unquote(item);
         let unreadable = item.starts_with('/') || item.starts_with('!') || item.contains("<%");
+        if alternatives(item).is_none() {
+            wide.push(item.to_string());
+            return None;
+        }
         (!unreadable).then(|| resolve(base, item)).flatten()
     };
     for (n, raw) in text.lines().enumerate() {
@@ -233,6 +241,9 @@ fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
                 .insert(key.to_string(), unquote(value).to_string());
         }
     }
+    config.unread = (wide.into_iter())
+        .map(|p| format!("pattern {p} not read (over {MAX_ALTERNATIVES} alternatives)"))
+        .collect();
     (inherits, config)
 }
 
@@ -250,69 +261,127 @@ fn readable(line: &str) -> bool {
     !key.trim().is_empty() && !open('[', ']') && !open('{', '}')
 }
 
+/// Brace alternatives one path pattern may stand for: far more than a real
+/// pattern lists, and a bound on one built to multiply.
+const MAX_ALTERNATIVES: usize = 256;
+
 /// RuboCop's path match: `File.fnmatch?` with `FNM_PATHNAME` and
 /// `FNM_EXTGLOB`, so `*` stays within a directory, `**/` spans any number of
 /// them and `{a,b}` is either; a pattern with no wildcard matches only itself.
 pub fn glob(pattern: &str, path: &str) -> bool {
-    if let Some(open) = pattern.find('{')
-        && let Some(close) = pattern[open..].find('}').map(|i| open + i)
-    {
-        return (pattern[open + 1..close].split(',')).any(|alt| {
-            glob(
-                &format!("{}{alt}{}", &pattern[..open], &pattern[close + 1..]),
-                path,
-            )
-        });
-    }
-    let pattern: Vec<&str> = pattern.split('/').collect();
-    let path: Vec<&str> = path.split('/').collect();
-    segments(&pattern, &path)
+    let path: Vec<&[u8]> = path.split('/').map(str::as_bytes).collect();
+    (alternatives(pattern).unwrap_or_default().iter()).any(|p| {
+        let p: Vec<&[u8]> = p.split('/').map(str::as_bytes).collect();
+        segments(&p, &path)
+    })
 }
 
-fn segments(pattern: &[&str], path: &[&str]) -> bool {
-    match (pattern.split_first(), path.split_first()) {
-        (None, None) => true,
-        (Some((&"**", rest)), _) if !rest.is_empty() => {
-            (0..=path.len()).any(|skip| segments(rest, &path[skip..]))
+/// The patterns `{a,b}` stands for, braces expanded; `None` past
+/// [`MAX_ALTERNATIVES`].
+fn alternatives(pattern: &str) -> Option<Vec<String>> {
+    let mut done = Vec::new();
+    let mut todo = vec![pattern.to_string()];
+    while let Some(p) = todo.pop() {
+        let Some((open, close)) =
+            (p.find('{')).and_then(|open| Some((open, open + p[open..].find('}')?)))
+        else {
+            done.push(p);
+            continue;
+        };
+        // Each expansion drops a `{`, so the work ends.
+        for alt in p[open + 1..close].split(',').rev() {
+            todo.push(format!("{}{alt}{}", &p[..open], &p[close + 1..]));
         }
-        (Some((p, rest)), Some((name, tail))) => {
-            wildcard(p.as_bytes(), name.as_bytes()) && segments(rest, tail)
+        if done.len() + todo.len() > MAX_ALTERNATIVES {
+            return None;
         }
-        _ => false,
     }
+    Some(done)
 }
 
-/// One path segment against `*`, `?` and `[...]`.
+/// Path segments against pattern segments, where a `**` that isn't last
+/// spans any number of segments; table-driven, so no pattern backtracks.
+fn segments(pattern: &[&[u8]], path: &[&[u8]]) -> bool {
+    // `rest[j]`: the pattern from the segment at hand on matches `path[j..]`.
+    let mut rest: Vec<bool> = (0..=path.len()).map(|j| j == path.len()).collect();
+    for (i, p) in pattern.iter().enumerate().rev() {
+        rest = if *p == b"**" && i + 1 < pattern.len() {
+            let mut any = false;
+            let mut spans: Vec<bool> = (0..=path.len())
+                .rev()
+                .map(|j| {
+                    any |= rest[j];
+                    any
+                })
+                .collect();
+            spans.reverse();
+            spans
+        } else {
+            (0..=path.len())
+                .map(|j| j < path.len() && rest[j + 1] && wildcard(p, path[j]))
+                .collect()
+        };
+    }
+    rest[0]
+}
+
+/// One path segment against `*`, `?` and `[...]`: on a mismatch only the
+/// last `*` retries, which suffices when `*` is the only wildcard spanning
+/// more than one byte.
 fn wildcard(pattern: &[u8], name: &[u8]) -> bool {
-    match pattern.split_first() {
-        None => name.is_empty(),
-        Some((b'*', rest)) => (0..=name.len()).any(|i| wildcard(rest, &name[i..])),
-        Some((b'?', rest)) => !name.is_empty() && wildcard(rest, &name[1..]),
-        Some((b'[', rest)) => {
-            let Some(end) = rest.iter().position(|&b| b == b']') else {
-                return name.first() == Some(&b'[') && wildcard(rest, &name[1..]);
-            };
-            let (class, rest) = (&rest[..end], &rest[end + 1..]);
-            let (negate, class) = match class.split_first() {
-                Some((b'!' | b'^', class)) => (true, class),
-                _ => (false, class),
-            };
-            let Some(&c) = name.first() else { return false };
-            let mut hit = false;
-            let mut i = 0;
-            while i < class.len() {
-                if i + 2 < class.len() && class[i + 1] == b'-' {
-                    hit |= (class[i]..=class[i + 2]).contains(&c);
-                    i += 3;
-                } else {
-                    hit |= class[i] == c;
-                    i += 1;
-                }
+    let (mut p, mut n) = (0, 0);
+    // The last `*` seen, and where in `name` it next resumes.
+    let mut star: Option<(usize, usize)> = None;
+    while n < name.len() {
+        let step = match pattern.get(p) {
+            Some(b'*') => {
+                star = Some((p, n));
+                p += 1;
+                continue;
             }
-            hit != negate && wildcard(rest, &name[1..])
+            Some(b'?') => Some(1),
+            Some(b'[') => class(&pattern[p + 1..], name[n]).map(|len| len + 1),
+            Some(&b) => (b == name[n]).then_some(1),
+            None => None,
+        };
+        match (step, star) {
+            (Some(len), _) => {
+                p += len;
+                n += 1;
+            }
+            (None, Some((at, from))) => {
+                star = Some((at, from + 1));
+                p = at + 1;
+                n = from + 1;
+            }
+            (None, None) => return false,
         }
-        Some((&b, rest)) => name.first() == Some(&b) && wildcard(rest, &name[1..]),
     }
+    pattern[p..].iter().all(|&b| b == b'*')
+}
+
+/// The bytes of a `[...]` after its `[` that `c` matches, `]` included; an
+/// unclosed `[` is a literal one.
+fn class(pattern: &[u8], c: u8) -> Option<usize> {
+    let Some(end) = pattern.iter().position(|&b| b == b']') else {
+        return (c == b'[').then_some(0);
+    };
+    let (negate, set) = match pattern[..end].split_first() {
+        Some((b'!' | b'^', set)) => (true, set),
+        _ => (false, &pattern[..end]),
+    };
+    let mut hit = false;
+    let mut i = 0;
+    while i < set.len() {
+        if i + 2 < set.len() && set[i + 1] == b'-' {
+            hit |= (set[i]..=set[i + 2]).contains(&c);
+            i += 3;
+        } else {
+            hit |= set[i] == c;
+            i += 1;
+        }
+    }
+    (hit != negate).then_some(end + 1)
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -411,6 +480,21 @@ mod tests {
         assert!(glob("a/[b-c]?.rb", "a/cd.rb"));
         assert!(!glob("a/*", "a/b/c.rb"));
         assert!(!glob("a", "a/b.rb"));
+    }
+
+    #[test]
+    fn globs_built_to_backtrack_match_without_it() {
+        let stars = format!("{}b", "*a".repeat(16));
+        assert!(!glob(&stars, &"a".repeat(64)));
+        assert!(glob(&stars, &format!("{}b", "a".repeat(64))));
+        let deep = format!("{}x", "**/".repeat(16));
+        assert!(!glob(&deep, &"a/".repeat(40)));
+        assert!(glob(&deep, &format!("{}x", "a/".repeat(40))));
+        assert_eq!(
+            alternatives("{a,b}{c,d}").unwrap(),
+            ["ac", "ad", "bc", "bd"]
+        );
+        assert_eq!(alternatives(&"{a,b}".repeat(9)), None);
     }
 
     /// A chain that fans out without a cycle stops at the file cap.

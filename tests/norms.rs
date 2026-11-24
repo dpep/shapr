@@ -485,3 +485,38 @@ fn an_inherit_from_cycle_is_read_once_and_named() {
         "double_quotes"
     );
 }
+
+/// Path patterns built to backtrack or expand exponentially finish: one
+/// past the brace cap can't be read, so it counts against the file and is
+/// named; star-heavy ones are matched in linear time.
+#[test]
+fn path_patterns_built_to_blow_up_finish() {
+    let bomb = format!("x{}", "{a,b}".repeat(26));
+    let config = format!(
+        "AllCops:\n  Exclude:\n    - '{}b'\n    - '{}{}x'\n\
+         Style/StringLiterals:\n  EnforcedStyle: double_quotes\n  Exclude:\n    - '{bomb}'\n\
+         Layout/SpaceInsideHashLiteralBraces:\n  EnforcedStyle: space\n",
+        "*a".repeat(16),
+        "**/".repeat(16),
+        "a".repeat(24),
+    );
+    let name = format!("{}{}.rb", "a/".repeat(20), "a".repeat(40));
+    let dir = repo(&[&[(".rubocop.yml", &config), (&name, "def a\n  'x'\nend\n")]]);
+    let out = shapr_within(dir.path(), &["norms", "-j", &name], 30);
+    let report = report(&out);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([format!(
+            ".rubocop.yml: pattern {bomb} not read (over 256 alternatives)"
+        )])
+    );
+    // The unread pattern may exclude the file, so config sets no style.
+    assert_eq!(
+        norm(&report, "Style/StringLiterals")["configured"],
+        Value::Null
+    );
+    assert_eq!(
+        norm(&report, "Layout/SpaceInsideHashLiteralBraces")["configured"],
+        "space"
+    );
+}

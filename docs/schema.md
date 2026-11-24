@@ -1053,7 +1053,8 @@ style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
 `lines_touched` (over the steps) and `config_unread`: config the files fall
 under that shapr didn't read, one note each (`inherit_gem: NAME`,
 `inherit_from: PATH (not found)`, `(remote)`, `(cycle)` or `(past 32 config
-files)`, `FILE: lines N not read`),
+files)`, `FILE: lines N not read`, `FILE: pattern P not read (over 256
+alternatives)`),
 so their norms were judged without it. Each note is also one stderr line,
 under `shapr norms` and a change's hunks alike.
 
