@@ -24,6 +24,33 @@ const MAGIC_KEYS: &[&str] = &[
     "typed",
 ];
 
+/// Ruby DSL files without an extension, as RuboCop includes them by default.
+const FILES: &[&str] = &[
+    "Appraisals",
+    "Berksfile",
+    "Brewfile",
+    "Buildfile",
+    "Capfile",
+    "Cheffile",
+    "Dangerfile",
+    "Deliverfile",
+    "Fastfile",
+    "Gemfile",
+    "Guardfile",
+    "Jarfile",
+    "Mavenfile",
+    "Podfile",
+    "Puppetfile",
+    "Rakefile",
+    "Snapfile",
+    "Steepfile",
+    "Thorfile",
+    "Vagabondfile",
+    "Vagrantfile",
+    "buildfile",
+    "rakefile",
+];
+
 /// Comment directives prism doesn't report as magic: they have no `: value`.
 const DIRECTIVE_PREFIXES: &[&str] = &["rubocop:disable", "rubocop:enable", "rubocop:todo"];
 
@@ -34,7 +61,7 @@ impl Frontend for Ruby {
 
     fn handles(&self, path: &str) -> bool {
         let base = path.rsplit('/').next().unwrap_or(path);
-        matches!(base, "Gemfile" | "Rakefile")
+        FILES.contains(&base)
             || base
                 .rsplit_once('.')
                 .is_some_and(|(_, ext)| matches!(ext, "rb" | "rake" | "gemspec" | "ru"))
@@ -113,8 +140,29 @@ impl Frontend for Ruby {
             "*.slim",
             "*.builder",
             "*.jbuilder",
+            "Appraisals",
+            "Berksfile",
+            "Brewfile",
+            "Buildfile",
+            "Capfile",
+            "Cheffile",
+            "Dangerfile",
+            "Deliverfile",
+            "Fastfile",
             "Gemfile",
+            "Guardfile",
+            "Jarfile",
+            "Mavenfile",
+            "Podfile",
+            "Puppetfile",
             "Rakefile",
+            "Snapfile",
+            "Steepfile",
+            "Thorfile",
+            "Vagabondfile",
+            "Vagrantfile",
+            "buildfile",
+            "rakefile",
         ]
     }
 
@@ -327,8 +375,14 @@ mod tests {
             "config.ru",
             "Gemfile",
             "sub/Rakefile",
+            "Guardfile",
+            "ios/Podfile",
         ] {
             assert!(Ruby.handles(path), "{path}");
+        }
+        // Every DSL file is searched for uses too.
+        for name in FILES {
+            assert!(Ruby.search_globs().contains(name), "{name}");
         }
         for path in ["a.py", "README.md", "Gemfile.lock", "rb"] {
             assert!(!Ruby.handles(path), "{path}");

@@ -174,7 +174,7 @@ a hunk is `behavior` or `mixed`.
 
 The search reads the files a language's code can reach a name from (Ruby:
 `.rb`, `.rake`, `.gemspec`, `.ru`, ERB, Haml, Slim and builder templates,
-`Gemfile`, `Rakefile`; Rust: `.rs`): tracked files, and when the change ends in the working tree its untracked files too (not ignored ones). A use is matched
+the extensionless DSL files below; Rust: `.rs`): tracked files, and when the change ends in the working tree its untracked files too (not ignored ones). A use is matched
 by name, not resolved: a common name used for something else (another
 class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
@@ -441,8 +441,10 @@ a Rails `db/schema.rb` aren't `generated` by name; mark them in
 
 ## Languages
 
-`language` is `"ruby"` for `.rb`, `.rake`, `.gemspec`, `.ru`, `Gemfile` and
-`Rakefile` (parsed with prism) and `"rust"` for `.rs` (parsed with
+`language` is `"ruby"` for `.rb`, `.rake`, `.gemspec`, `.ru` and the
+extensionless DSL files RuboCop includes by default (`Gemfile`, `Rakefile`,
+`Guardfile`, `Podfile`, `Vagrantfile`, `Capfile`, `Brewfile`, `Fastfile` and
+the like; a file found only by its shebang is not) (parsed with prism) and `"rust"` for `.rs` (parsed with
 tree-sitter). Any other file is `null` and its hunks `logic`. The rules above
 are stated in Ruby's terms; for Rust:
 
