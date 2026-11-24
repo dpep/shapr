@@ -1,79 +1,9 @@
 //! End to end: extract-method and inline-method detection.
 
 use serde_json::Value;
-use std::path::Path;
-use std::process::Command;
 
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// `shapr -j` over one commit turning `before` into `after` in `a.rb`.
-fn classify(before: &str, after: &str) -> (Value, i32) {
-    classify_files(&[("a.rb", before)], &[("a.rb", after)])
-}
-
-/// `shapr -j` over one commit writing each (path, content) pair.
-fn classify_files(before: &[(&str, &str)], after: &[(&str, &str)]) -> (Value, i32) {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path();
-    git(path, &["init", "-q", "-b", "main"]);
-    git(path, &["config", "user.email", "test@example.com"]);
-    git(path, &["config", "user.name", "Test"]);
-    for files in [before, after] {
-        for (name, content) in files {
-            std::fs::write(path.join(name), content).unwrap();
-        }
-        git(path, &["add", "-A"]);
-        git(path, &["commit", "-q", "--allow-empty", "-m", "state"]);
-    }
-    let out = command(env!("CARGO_BIN_EXE_shapr"), path)
-        .args(["-j", "HEAD~1..HEAD"])
-        .output()
-        .unwrap();
-    let report = serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)));
-    (report, out.status.code().unwrap())
-}
-
-fn hunks(report: &Value) -> &Vec<Value> {
-    report["hunks"].as_array().unwrap()
-}
-
-fn kinds(report: &Value) -> Vec<&str> {
-    hunks(report)
-        .iter()
-        .map(|h| h["kind"].as_str().unwrap())
-        .collect()
-}
+mod common;
+use common::*;
 
 /// Methods that keep an edit's hunks apart.
 fn filler() -> String {
@@ -119,7 +49,7 @@ end
 
 #[test]
 fn a_clean_extract_without_parameters() {
-    let (report, code) = classify(RENDER, RENDER_EXTRACTED);
+    let report = ruby(RENDER, RENDER_EXTRACTED);
     assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
     let hunk = &hunks(&report)[0];
     assert_eq!(lead(hunk)["detail"]["method"], "rule");
@@ -132,7 +62,6 @@ fn a_clean_extract_without_parameters() {
     // Twelve nodes, under the sixteen that saturate the size factor.
     assert_eq!(lead(hunk)["confidence"], 0.75);
     assert_eq!(report["summary"]["verdict"], "structure");
-    assert_eq!(code, 0);
 }
 
 fn invoice(body: &str, extracted: Option<&str>) -> String {
@@ -166,7 +95,7 @@ const APPLY_TAX: &str = "  def apply_tax(amount, rate)
 fn an_extract_with_parameters_and_a_return_value_cross_references_its_hunks() {
     let before = invoice(TOTAL, None);
     let after = invoice(TOTAL_EXTRACTED, Some(APPLY_TAX));
-    let (report, code) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_eq!(kinds(&report), ["extract", "extract"], "{report:#}");
     for hunk in hunks(&report) {
         assert_eq!(lead(hunk)["detail"]["method"], "apply_tax");
@@ -180,20 +109,18 @@ fn an_extract_with_parameters_and_a_return_value_cross_references_its_hunks() {
     // `subtotal` reaches the body as `amount`: one renamed node in ten.
     assert_eq!(evidence["verbatim"], 0.9);
     assert_eq!(lead(&hunks(&report)[0])["confidence"], 0.59);
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn a_clean_inline_is_the_inverse() {
     let before = invoice(TOTAL_EXTRACTED, Some(APPLY_TAX));
     let after = invoice(TOTAL, None);
-    let (report, code) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_eq!(kinds(&report), ["inline", "inline"], "{report:#}");
     let hunk = &hunks(&report)[0];
     assert_eq!(lead(hunk)["detail"]["method"], "apply_tax");
     assert_eq!(lead(hunk)["detail"]["caller"], "total");
     assert_eq!(lead(hunk)["detail"]["hunks"], serde_json::json!([0, 1]));
-    assert_eq!(code, 0);
 }
 
 #[test]
@@ -201,7 +128,7 @@ fn an_extract_mixed_with_a_logic_edit_in_the_same_method_is_logic() {
     let before = invoice(TOTAL, None);
     let edited = TOTAL_EXTRACTED.replace("puts rounded", "puts rounded.to_s");
     let after = invoice(&edited, Some(APPLY_TAX));
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
@@ -222,7 +149,7 @@ def scale(a, b)
   a * 2 + b
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert_near(&report, "extract", "wiring");
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
@@ -247,7 +174,7 @@ def guard(order)
   log(order, :checked)
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert_near(&report, "extract", "jump");
 }
 
@@ -271,7 +198,7 @@ def emit(row)
   yield cells.map(&:strip)
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert_near(&report, "extract", "jump");
 }
 
@@ -295,7 +222,7 @@ def emit(row, block)
   block.call(cells.map(&:strip))
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert_near(&report, "extract", "block_parameter");
 }
 
@@ -315,7 +242,7 @@ def shout(name)
   puts name.upcase
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert_near(&report, "extract", "tiny");
 }
 
@@ -324,7 +251,7 @@ fn a_new_method_whose_name_is_already_in_use_is_logic() {
     let other = "class Other\n  def rule\n    :other\n  end\nend\n";
     let before = format!("{RENDER}{other}");
     let after = format!("{RENDER_EXTRACTED}{other}");
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_near(&report, "extract", "collision");
 }
 
@@ -347,7 +274,7 @@ def report(items)
   puts total.inspect
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert_near(&report, "extract", "wiring");
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
@@ -357,7 +284,7 @@ fn a_class_method_calling_a_new_instance_method_is_logic() {
     for receiver in ["self.", "self::"] {
         let before = SHELF.replace("self.", receiver);
         let after = SHELF_SHOWN.replace("self.", receiver);
-        let (report, _) = classify(&before, &after);
+        let report = ruby(&before, &after);
         assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
         assert_eq!(report["summary"]["verdict"], "behavior");
     }
@@ -388,7 +315,7 @@ fn inlining_a_method_still_called_elsewhere_is_logic() {
     let caller = "\ndef again(rate)\n  apply_tax(1, rate)\nend\n";
     let before = format!("{}{caller}", invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)));
     let after = format!("{}{caller}", invoice(TOTAL, None));
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
@@ -402,7 +329,7 @@ fn an_extract_returning_through_a_trailing_read() {
   end
 ";
     let after = invoice(TOTAL_EXTRACTED, Some(body));
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_eq!(kinds(&report), ["extract", "extract"], "{report:#}");
 }
 
@@ -416,7 +343,7 @@ fn an_extract_whose_new_method_drops_the_returned_value_is_logic() {
   end
 ";
     let after = invoice(TOTAL_EXTRACTED, Some(body));
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
@@ -425,7 +352,7 @@ fn a_reformatted_sibling_keeps_its_label_beside_an_extract() {
     let before = invoice(TOTAL, None);
     let after =
         invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("def filler2\n", "def  filler2\n");
-    let (report, code) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_eq!(
         kinds(&report),
         ["extract", "format_only", "extract"],
@@ -435,13 +362,12 @@ fn a_reformatted_sibling_keeps_its_label_beside_an_extract() {
         lead(&hunks(&report)[0])["detail"]["hunks"],
         serde_json::json!([0, 2])
     );
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn a_new_use_of_the_new_method_elsewhere_is_not_a_collision() {
     let spec = "describe Report do\n  it { Report.new.rule }\nend\n";
-    let (report, _) = classify_files(
+    let report = classify(
         &[("a.rb", RENDER)],
         &[("a.rb", RENDER_EXTRACTED), ("a_spec.rb", spec)],
     );
@@ -456,7 +382,7 @@ fn a_new_use_of_the_new_method_elsewhere_is_not_a_collision() {
 #[test]
 fn a_new_method_overriding_one_defined_elsewhere_in_the_change_is_logic() {
     let base = "class Base\n  def rule\n    :base\n  end\nend\n";
-    let (report, _) = classify_files(
+    let report = classify(
         &[("a.rb", RENDER), ("base.rb", "class Base\nend\n")],
         &[("a.rb", RENDER_EXTRACTED), ("base.rb", base)],
     );
@@ -474,7 +400,7 @@ fn an_extract_beside_an_edit_to_another_method_is_mixed() {
     let before = invoice(TOTAL, None);
     let after =
         invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("filler2\n    2\n", "filler2\n    20\n");
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_eq!(
         kinds(&report),
         ["extract", "logic", "extract"],
@@ -491,7 +417,7 @@ fn an_extract_beside_an_edit_to_another_method_is_mixed() {
 fn an_extract_sharing_a_hunk_with_another_edit_is_logic() {
     let before = format!("{RENDER}X = 1\n");
     let after = format!("{RENDER_EXTRACTED}X = 2\n");
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
 
@@ -499,7 +425,7 @@ fn an_extract_sharing_a_hunk_with_another_edit_is_logic() {
 fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_leaves_the_edit_as_logic() {
     let before = invoice(TOTAL, None);
     let after = invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("    4\n", "    40\n");
-    let (report, _) = classify(&before, &after);
+    let report = ruby(&before, &after);
     assert_eq!(kinds(&report), ["extract", "logic"], "{report:#}");
     let parts: Vec<&str> = hunks(&report)[1]["parts"]
         .as_array()
@@ -543,7 +469,7 @@ end
   end
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
 }
 
@@ -563,6 +489,6 @@ def render(item:)
   puts label.center(20)
 end
 ";
-    let (report, _) = classify(before, after);
+    let report = ruby(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
