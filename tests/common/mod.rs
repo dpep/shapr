@@ -9,8 +9,8 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 /// git and shapr with the caller's repository context removed, so a run
-/// under `git rebase --exec` can't write into the real repository, and with
-/// no system or user git config.
+/// under `git rebase --exec` can't write into the real repository, with
+/// no system or user git config, and with shapr's usage log off.
 pub fn command(program: &str, dir: &Path) -> Command {
     let mut cmd = Command::new(program);
     cmd.current_dir(dir)
@@ -18,7 +18,8 @@ pub fn command(program: &str, dir: &Path) -> Command {
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("SHAPR_USAGE", "0");
     cmd
 }
 

@@ -15,5 +15,6 @@ pub mod norms;
 pub mod outside;
 pub mod report;
 pub mod tree;
+mod usage;
 
 pub use cli::run;

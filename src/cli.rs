@@ -48,6 +48,13 @@ GITHUB (experimental: the forms, meta.source and the cache may change before 1.0
   GITHUB_TOKEN or `gh auth token` if there is one; objects are fetched with your git
   credentials into a cache of partial clones (--cache-dir), never into this repository.
 
+USAGE LOG
+  Each classify or norms run appends one JSON line to $XDG_STATE_HOME/shapr/usage.jsonl
+  (else ~/.local/state/shapr/usage.jsonl): the command, input form, flag names, format,
+  exit code, duration and counts. Never paths, repositories, revisions, code, messages
+  or URLs. SHAPR_USAGE=0 turns it off, an absolute path moves it; it is off under
+  CI=true. --usage summarizes it, --usage --reset empties it, --status shows where it is.
+
 EXIT CODES
   0   success, whatever the verdict: the verdict is in the output
   2   error: git failed (not a repository, a bad revision, a name that is neither a
@@ -126,6 +133,15 @@ struct Cli {
     #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "clear_cache"])]
     status: bool,
 
+    /// Summarize the usage log: runs by command, input form, flag, kind and
+    /// verdict (see USAGE LOG below).
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "status", "clear_cache"])]
+    usage: bool,
+
+    /// With --usage, empty the usage log first.
+    #[arg(long, requires = "usage")]
+    reset: bool,
+
     /// Experimental. Remove every cached GitHub repository, then show the
     /// cache.
     #[arg(long, conflicts_with_all = ["args", "paths", "merge_base"])]
@@ -163,6 +179,45 @@ pub(crate) fn usage_message(error: &clap::Error) -> String {
 }
 
 pub fn run() -> ExitCode {
+    let started = std::time::Instant::now();
+    let code = dispatch();
+    crate::usage::finish(started, flag_names(std::env::args().skip(1)));
+    code
+}
+
+/// The canonical names of the flags in ARGS (`json` for `-j`), never their
+/// values, as either command knows them; sorted, once each.
+fn flag_names(args: impl Iterator<Item = String>) -> Vec<String> {
+    let commands = [Cli::command(), crate::norms::command::NormsCli::command()];
+    let known: Vec<&clap::Arg> = commands.iter().flat_map(|c| c.get_arguments()).collect();
+    let name = |arg: &clap::Arg| arg.get_long().unwrap_or(arg.get_id().as_str()).to_string();
+    let mut names = std::collections::BTreeSet::new();
+    for word in args.take_while(|a| a != "--") {
+        if let Some(long) = word.strip_prefix("--") {
+            let long = long.split('=').next().unwrap_or_default();
+            names.extend(
+                known
+                    .iter()
+                    .find(|a| a.get_long() == Some(long))
+                    .map(|a| name(a)),
+            );
+        } else if let Some(shorts) = word.strip_prefix('-') {
+            for short in shorts.chars() {
+                let Some(arg) = known.iter().find(|a| a.get_short() == Some(short)) else {
+                    break;
+                };
+                names.insert(name(arg));
+                // The rest of the cluster is this flag's value (`-Capp`).
+                if arg.get_action().takes_values() {
+                    break;
+                }
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
+fn dispatch() -> ExitCode {
     // A subcommand beside free revisions and paths: `norms` is never read as
     // either, and the global flags (format, -C) may come before it.
     let mut args: Vec<String> = std::env::args().collect();
@@ -195,8 +250,10 @@ pub fn run() -> ExitCode {
             if !error.use_stderr() {
                 return ExitCode::SUCCESS;
             }
+            crate::usage::command("classify");
+            crate::usage::format(requested_format());
             emit_error(requested_format(), &usage_message(&error), USAGE);
-            return ExitCode::from(USAGE);
+            return exit(USAGE);
         }
     };
     crate::log::set_verbose(cli.verbose);
@@ -233,6 +290,16 @@ pub fn run() -> ExitCode {
     if cli.status || cli.clear_cache {
         return cache(format, cli.cache_dir, cli.clear_cache, cli.quiet);
     }
+    if cli.usage {
+        return usage(format, cli.reset, cli.quiet);
+    }
+    crate::usage::command("classify");
+    // The format asked for, though -q renders none.
+    crate::usage::format(match (cli.ndjson, cli.json) {
+        (true, _) => Format::Ndjson,
+        (_, true) => Format::Json,
+        _ => Format::Text,
+    });
     let mut git = git::Git::new(cli.dir.clone());
     let dashdash = std::env::args().skip(1).any(|a| a == "--");
     let input = match input(&cli, dashdash, &git) {
@@ -248,7 +315,7 @@ pub fn run() -> ExitCode {
         );
     }
     let mut remote = None;
-    let (form, local) = match &input {
+    let (form, local): (_, Option<(&str, &[String])>) = match &input {
         Input::Stdin => (report::Input::Stdin, None),
         Input::Local { form, range, paths } => (*form, Some((range.as_str(), paths.as_slice()))),
         Input::GitHub(target) => {
@@ -259,6 +326,8 @@ pub fn run() -> ExitCode {
             (form, None)
         }
     };
+    let paths = local.is_some_and(|(_, paths)| !paths.is_empty());
+    crate::usage::input(form, paths);
     let text = match &input {
         Input::Local { range, paths, .. } => git.diff(range, paths),
         Input::GitHub(target) => {
@@ -372,8 +441,7 @@ pub fn run() -> ExitCode {
         &change,
         &labels,
         claims,
-        report::Meta::new("classify", source)
-            .input(form, local.is_some_and(|(_, paths)| !paths.is_empty())),
+        report::Meta::new("classify", source).input(form, paths),
     );
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
@@ -388,13 +456,14 @@ pub fn run() -> ExitCode {
             style
         });
     }
+    crate::usage::counts(&report.summary, &["files", "hunks", "kinds", "verdict"]);
     if !cli.quiet {
         let mut stdout = std::io::stdout().lock();
         let written = report::render(&mut stdout, format, &report).and_then(|()| stdout.flush());
         // A closed pipe (`shapr … | head`) is the reader's choice, not an error.
         if let Err(error) = written.filter_broken_pipe() {
             eprintln!("shapr: writing output: {error}");
-            return ExitCode::from(ERROR);
+            return exit(ERROR);
         }
     }
     ExitCode::SUCCESS
@@ -602,9 +671,16 @@ fn cache(format: Format, dir: Option<PathBuf>, clear: bool, quiet: bool) -> Exit
         return ExitCode::SUCCESS;
     }
     let status = cache.status();
+    let log = crate::usage::summary();
+    let mut record = serde_json::to_value(&status).unwrap_or_default();
+    record["usage"] = serde_json::json!({
+        "path": log.path,
+        "bytes": log.bytes,
+        "enabled": log.enabled,
+    });
     let rendered = match format {
-        Format::Json => serde_json::to_string_pretty(&status).map_err(std::io::Error::from),
-        Format::Ndjson => serde_json::to_string(&status).map_err(std::io::Error::from),
+        Format::Json => serde_json::to_string_pretty(&record).map_err(std::io::Error::from),
+        Format::Ndjson => serde_json::to_string(&record).map_err(std::io::Error::from),
         Format::Text => {
             let mut text = format!(
                 "{}: {} repositor{}, {}",
@@ -621,6 +697,7 @@ fn cache(format: Format, dir: Option<PathBuf>, clear: bool, quiet: bool) -> Exit
                 text.push_str("\n  ");
                 text.push_str(repo);
             }
+            text.push_str(&format!("\nusage log: {}", usage_line(&log)));
             Ok(text)
         }
     };
@@ -628,7 +705,57 @@ fn cache(format: Format, dir: Option<PathBuf>, clear: bool, quiet: bool) -> Exit
     let written = rendered.and_then(|r| writeln!(stdout, "{r}"));
     if let Err(error) = written.filter_broken_pipe() {
         eprintln!("shapr: writing output: {error}");
-        return ExitCode::from(ERROR);
+        return exit(ERROR);
+    }
+    ExitCode::SUCCESS
+}
+
+/// The usage log's path and size, and whether it is off.
+fn usage_line(log: &crate::usage::Summary) -> String {
+    let path = log.path.as_deref().unwrap_or("no home directory");
+    let off = if log.enabled { "" } else { " (off)" };
+    format!("{path}, {}{off}", human_bytes(log.bytes))
+}
+
+/// `--usage`, after `--reset` empties the log: what it holds, counted.
+fn usage(format: Format, reset: bool, quiet: bool) -> ExitCode {
+    if reset && let Err(error) = crate::usage::reset() {
+        return fail(format, &format!("emptying the usage log: {error}"), ERROR);
+    }
+    if quiet {
+        return ExitCode::SUCCESS;
+    }
+    let log = crate::usage::summary();
+    let rendered = match format {
+        Format::Json => serde_json::to_string_pretty(&log).map_err(std::io::Error::from),
+        Format::Ndjson => serde_json::to_string(&log).map_err(std::io::Error::from),
+        Format::Text => {
+            let span = match (&log.first, &log.last) {
+                (Some(first), Some(last)) => format!(", {first} to {last}"),
+                _ => String::new(),
+            };
+            let mut text = format!("{}: {} runs{span}", usage_line(&log), log.runs);
+            let row = |label: &str, counts: &std::collections::BTreeMap<String, u64>| {
+                let mut counts: Vec<(&String, &u64)> =
+                    counts.iter().filter(|(_, n)| **n > 0).collect();
+                // Most first; ties by name.
+                counts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+                let list: Vec<String> = counts.iter().map(|(k, n)| format!("{k} {n}")).collect();
+                format!("\n  {label:<9} {}", list.join(", "))
+            };
+            text.push_str(&row("commands", &log.commands));
+            text.push_str(&row("inputs", &log.inputs));
+            text.push_str(&row("flags", &log.flags));
+            text.push_str(&row("kinds", &log.kinds));
+            text.push_str(&row("verdicts", &log.verdicts));
+            Ok(text)
+        }
+    };
+    let mut stdout = std::io::stdout().lock();
+    let written = rendered.and_then(|r| writeln!(stdout, "{r}"));
+    if let Err(error) = written.filter_broken_pipe() {
+        eprintln!("shapr: writing output: {error}");
+        return exit(ERROR);
     }
     ExitCode::SUCCESS
 }
@@ -666,6 +793,12 @@ impl BrokenPipe for std::io::Result<()> {
 pub(crate) fn fail(format: Format, message: &str, code: u8) -> ExitCode {
     eprintln!("shapr: {message}");
     emit_error(format, message, code);
+    exit(code)
+}
+
+/// CODE as the process's exit code, recorded for the usage log.
+pub(crate) fn exit(code: u8) -> ExitCode {
+    crate::usage::exit(code);
     ExitCode::from(code)
 }
 

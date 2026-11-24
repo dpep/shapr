@@ -1095,8 +1095,35 @@ object under `-j` or `-J`.
 | `repositories` | array of strings | `github.com/OWNER/REPO` per cached clone, sorted. |
 | `bytes` | int | Their size on disk. |
 
+| `usage` | object | The [usage log](#usage-record): `path` (with `~`; null without a home directory), `bytes`, and `enabled`, whether runs write to it. |
+
 `--clear-cache` removes `<cache>/github.com` and nothing else in the
 directory.
+
+## `usage` record
+
+`shapr --usage` (after `--reset` empties the log) summarizes the usage log, one
+object under `-j` or `-J`. Each `classify` or `norms` run appends a line to the
+log, `$XDG_STATE_HOME/shapr/usage.jsonl`, else
+`~/.local/state/shapr/usage.jsonl`: `ts` (UTC), `version`, `command`, `input`
+and `paths` (as `meta`), `flags` (the long names of the flags given, never their
+values), `format` (`text`, `json`, `ndjson`), `exit`, `duration_ms`, and
+`counts` (`files`, `hunks`, `kinds` and `verdict` from the summary; for
+`norms`, `files` and `steps`). It holds no paths, repositories, revisions,
+code, messages or URLs. `SHAPR_USAGE=0` turns logging off, `1` on, an
+absolute path moves the log; unset, it is on except under `CI=true` and in a
+debug build. Past 5 MB the log keeps its newest half.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"usage"` | |
+| `path` | string or null | The log, with the home directory as `~`. |
+| `enabled` | bool | Whether runs write to it. |
+| `bytes` | int | Its size. |
+| `runs` | int | Lines read. |
+| `first`, `last` | string or null | The earliest and latest `ts`. |
+| `commands`, `inputs`, `flags`, `verdicts` | object | Runs per command, input form, flag and verdict. |
+| `kinds` | object | Parts per kind, summed over runs. |
 
 ## Exit codes
 

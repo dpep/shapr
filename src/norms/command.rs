@@ -145,6 +145,7 @@ struct Report {
 
 /// Runs `shapr norms`, given the arguments after `shapr`.
 pub fn run(args: Vec<String>) -> ExitCode {
+    crate::usage::command("norms");
     let cli = match NormsCli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => {
@@ -154,7 +155,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
             }
             let message = crate::cli::usage_message(&error);
             crate::cli::emit_error(crate::cli::requested_format(), &message, crate::cli::USAGE);
-            return ExitCode::from(crate::cli::USAGE);
+            return crate::cli::exit(crate::cli::USAGE);
         }
     };
     crate::log::set_verbose(cli.verbose);
@@ -167,6 +168,12 @@ pub fn run(args: Vec<String>) -> ExitCode {
     } else {
         Format::Text
     };
+    // The format asked for, though -q renders none.
+    crate::usage::format(match (cli.ndjson, cli.json) {
+        (true, _) => Format::Ndjson,
+        (_, true) => Format::Json,
+        _ => Format::Text,
+    });
     if let Some(dir) = &cli.dir
         && std::env::set_current_dir(dir).is_err()
     {
@@ -186,6 +193,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
         Err(message) => return crate::cli::fail(format, &message, crate::cli::ERROR),
     };
     let report = build(&paths, collected, cli.norm_threshold);
+    crate::usage::counts(&report.summary, &["files", "steps"]);
     if cli.quiet {
         return ExitCode::SUCCESS;
     }
@@ -195,7 +203,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
     match written {
         Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => {
             eprintln!("shapr: writing output: {e}");
-            ExitCode::from(crate::cli::ERROR)
+            crate::cli::exit(crate::cli::ERROR)
         }
         _ => ExitCode::SUCCESS,
     }

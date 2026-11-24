@@ -27,6 +27,8 @@ from concurrent.futures import ThreadPoolExecutor
 # Kinds whose hunks are structure (docs/schema.md, "Hunk kinds").
 STRUCTURAL = {"format_only", "comment_only", "restyle", "rename", "move", "extract", "inline"}
 GIT_ENV = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+# A corpus run is not usage.
+SHAPR_ENV = {**GIT_ENV, "SHAPR_USAGE": "0"}
 
 
 def default_cache():
@@ -63,7 +65,7 @@ def run_one(binary, repo, sha, path, timeout, attempts=2):
     it is retried, and never cached, so a later run redoes it."""
     for _ in range(attempts):
         try:
-            p = subprocess.run([binary, "-J", "-C", repo, f"{sha}^..{sha}"], capture_output=True, env=GIT_ENV, timeout=timeout)
+            p = subprocess.run([binary, "-J", "-C", repo, f"{sha}^..{sha}"], capture_output=True, env=SHAPR_ENV, timeout=timeout)
         except subprocess.TimeoutExpired:
             out = json.dumps({"record": "error", "error": f"timeout after {timeout}s", "code": "timeout"}).encode() + b"\n"
             break

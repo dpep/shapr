@@ -874,3 +874,184 @@ fn dash_c_may_come_before_or_after_norms() {
         assert_eq!(report(&out)["summary"]["files"], 1, "{args:?}");
     }
 }
+
+// The usage log.
+
+/// shapr in DIR with ENV, stdin empty.
+fn shapr_env(dir: &std::path::Path, args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = command(env!("CARGO_BIN_EXE_shapr"), dir);
+    cmd.args(args).stdin(Stdio::null());
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.output().unwrap()
+}
+
+#[test]
+fn each_run_appends_names_and_counts_never_paths_or_revisions() {
+    let dir = branched();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("usage.jsonl");
+    let env = [("SHAPR_USAGE", log.to_str().unwrap())];
+    let message = state.path().join("secret-description.md");
+    std::fs::write(&message, "fix: the secret thing\n").unwrap();
+    let root = dir.path().to_str().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let args = [
+        "-j",
+        "-C",
+        root,
+        "--message",
+        message.to_str().unwrap(),
+        "main..feat",
+        "--",
+        "lib",
+    ];
+    assert_eq!(
+        shapr_env(elsewhere.path(), &args, &env).status.code(),
+        Some(0)
+    );
+    assert_eq!(
+        shapr_env(dir.path(), &["-qJ", "norms", "a.rb"], &env)
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        shapr_env(dir.path(), &["nope"], &env).status.code(),
+        Some(2)
+    );
+    // Neither --usage nor --status is a run worth logging.
+    shapr_env(dir.path(), &["--usage"], &env);
+
+    let text = std::fs::read_to_string(&log).unwrap();
+    for secret in [root, "feat", "lib", "secret", "nope", "a.rb"] {
+        assert!(!text.contains(secret), "{secret} in {text}");
+    }
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3, "{text}");
+    let classify = &lines[0];
+    assert_eq!(classify["command"], "classify");
+    assert_eq!(classify["input"], "range");
+    assert_eq!(classify["paths"], true);
+    assert_eq!(
+        classify["flags"],
+        serde_json::json!(["dir", "json", "message"])
+    );
+    assert_eq!(classify["format"], "json");
+    assert_eq!(classify["exit"], 0);
+    assert_eq!(classify["counts"]["files"], 1);
+    assert_eq!(classify["counts"]["verdict"], "behavior");
+    assert_eq!(classify["counts"]["kinds"]["logic"], 1);
+    assert!(classify["ts"].as_str().unwrap().ends_with('Z'));
+    assert!(classify["duration_ms"].is_u64());
+    assert_eq!(classify["version"], env!("CARGO_PKG_VERSION"));
+    let norms = &lines[1];
+    assert_eq!(
+        (norms["command"].as_str(), norms["format"].as_str()),
+        (Some("norms"), Some("ndjson"))
+    );
+    assert_eq!(norms["flags"], serde_json::json!(["ndjson", "quiet"]));
+    assert_eq!(norms["counts"]["files"], 1);
+    assert!(norms["counts"]["steps"].is_u64());
+    assert_eq!(
+        (lines[2]["exit"].as_u64(), lines[2]["input"].clone()),
+        (Some(2), Value::Null)
+    );
+}
+
+#[test]
+fn usage_summarizes_the_log_and_reset_empties_it() {
+    let dir = branched();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("usage.jsonl");
+    let env = [("SHAPR_USAGE", log.to_str().unwrap())];
+    for args in [
+        &["-j", "feat"][..],
+        &["-q", "."],
+        &["-q", "--merge-base", "main"],
+    ] {
+        assert_eq!(
+            shapr_env(dir.path(), args, &env).status.code(),
+            Some(0),
+            "{args:?}"
+        );
+    }
+    let summary = report(&shapr_env(dir.path(), &["-j", "--usage"], &env));
+    assert_eq!(summary["record"], "usage");
+    assert_eq!(summary["runs"], 3);
+    assert_eq!(summary["commands"]["classify"], 3);
+    assert_eq!(
+        summary["inputs"],
+        serde_json::json!({"commit": 1, "merge_base_worktree": 1, "worktree": 1})
+    );
+    assert_eq!(
+        summary["flags"],
+        serde_json::json!({"json": 1, "merge-base": 1, "quiet": 2})
+    );
+    assert_eq!(summary["verdicts"]["behavior"], 3);
+    assert_eq!(summary["kinds"]["logic"], 6);
+    assert!(summary["first"].as_str() <= summary["last"].as_str());
+    let text = String::from_utf8(shapr_env(dir.path(), &["--usage"], &env).stdout).unwrap();
+    assert!(
+        text.contains("3 runs") && text.contains("worktree 1"),
+        "{text}"
+    );
+
+    let reset = records(&shapr_env(dir.path(), &["-J", "--usage", "--reset"], &env));
+    assert_eq!(reset[0]["runs"], 0);
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
+    assert_eq!(
+        shapr_env(dir.path(), &["--reset"], &env).status.code(),
+        Some(64)
+    );
+}
+
+#[test]
+fn the_log_defaults_to_xdg_state_and_status_shows_it() {
+    let dir = branched();
+    let home = tempfile::tempdir().unwrap();
+    let home_path = home.path().to_str().unwrap();
+    let env = [
+        ("SHAPR_USAGE", "1"),
+        ("HOME", home_path),
+        ("XDG_STATE_HOME", ""),
+    ];
+    assert_eq!(
+        shapr_env(dir.path(), &["-q", "feat"], &env).status.code(),
+        Some(0)
+    );
+    let log = home.path().join(".local/state/shapr/usage.jsonl");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
+    let status = report(&shapr_env(dir.path(), &["-j", "--status"], &env));
+    assert_eq!(status["usage"]["path"], "~/.local/state/shapr/usage.jsonl");
+    assert_eq!(status["usage"]["enabled"], true);
+    assert!(status["usage"]["bytes"].as_u64().unwrap() > 0);
+    let text = String::from_utf8(shapr_env(dir.path(), &["--status"], &env).stdout).unwrap();
+    assert!(
+        text.contains("usage log: ~/.local/state/shapr/usage.jsonl"),
+        "{text}"
+    );
+
+    // Off: written nowhere, and said so.
+    let off = [("SHAPR_USAGE", "0"), ("HOME", home_path)];
+    shapr_env(dir.path(), &["-q", "feat"], &off);
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
+    let status = report(&shapr_env(dir.path(), &["-j", "--status"], &off));
+    assert_eq!(status["usage"]["enabled"], false);
+}
+
+#[test]
+fn a_log_that_cant_be_written_never_fails_the_run() {
+    let dir = branched();
+    let out = shapr_env(
+        dir.path(),
+        &["-j", "feat"],
+        &[("SHAPR_USAGE", "/dev/null/usage.jsonl")],
+    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(out.stderr.is_empty(), "{out:?}");
+}

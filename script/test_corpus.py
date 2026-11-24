@@ -115,6 +115,20 @@ class RunOne(unittest.TestCase):
             corpus.run_one("shapr", "repo", "s", path, 5)
         return path, len(calls)
 
+    def test_shapr_runs_one_commit_against_its_parent_with_the_usage_log_off(self):
+        import subprocess
+        seen = {}
+
+        def fake(args, **kwargs):
+            seen.update(args=args, env=kwargs["env"])
+            return subprocess.CompletedProcess([], 0, stdout=b'{"record":"summary"}\n', stderr=b"")
+
+        import tempfile
+        with unittest.mock.patch.object(corpus.subprocess, "run", fake):
+            corpus.run_one("shapr", "repo", "s", os.path.join(tempfile.mkdtemp(), "s.ndjson"), 5)
+        self.assertEqual(seen["args"][-1], "s^..s")
+        self.assertEqual(seen["env"]["SHAPR_USAGE"], "0")
+
     def test_a_signal_kill_is_retried_and_never_cached(self):
         path, calls = self.run_one((-9, b""), (-9, b""))
         self.assertEqual(calls, 2)
