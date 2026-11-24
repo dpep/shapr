@@ -182,8 +182,17 @@ impl Claims {
         let mut hints = Vec::new();
         let mut categories: BTreeMap<&'static str, usize> =
             Category::ALL.iter().map(|c| (c.as_str(), 0)).collect();
+        let subjects: BTreeSet<&str> = messages
+            .iter()
+            .filter(|m| m.source == Source::Commit)
+            .map(|m| subject(&m.text))
+            .collect();
         for message in messages {
-            let found = hints_in(message);
+            let mut found = hints_in(message);
+            // A pull request titled after its commit says it once.
+            if message.source != Source::Commit && subjects.contains(subject(&message.text)) {
+                found.retain(|h| h.field == Field::Body);
+            }
             let claimed: BTreeSet<Category> = found.iter().filter_map(|h| h.category).collect();
             for category in claimed {
                 *categories.entry(category.as_str()).or_default() += 1;
@@ -475,6 +484,19 @@ fn hints_in(message: &Message) -> Vec<Hint> {
                 add(HintKind::Keyword, &word, Some(category), Field::Subject);
             }
         }
+        // "moves to x.rs, unchanged": the closing clause; elsewhere the word
+        // names data ("skip a large, unchanged repo").
+        if normalize(subject)
+            .trim_end_matches('.')
+            .ends_with(", unchanged")
+        {
+            add(
+                HintKind::NoBehaviorChange,
+                "unchanged",
+                Some(Category::Refactor),
+                Field::Subject,
+            );
+        }
     }
     for line in body.lines() {
         if let Some(rest) = line.trim().strip_prefix("This reverts commit ") {
@@ -716,6 +738,21 @@ mod tests {
             [refactor, Some(Category::Test)]
         );
         assert!(hints("Sort fields when printing").is_empty());
+    }
+
+    #[test]
+    fn unchanged_claims_only_as_a_trailing_clause_of_the_subject() {
+        assert_eq!(
+            hints("cli: the sweep goes to cli/refs.rs, unchanged"),
+            [(
+                HintKind::NoBehaviorChange,
+                "unchanged".into(),
+                Some(Category::Refactor)
+            )]
+        );
+        assert!(hints("Skip an unchanged file").is_empty());
+        assert!(hints("Skip the walk on a large, unchanged repo").is_empty());
+        assert!(hints("Speed up\n\nThe suite, unchanged.").is_empty());
     }
 
     #[test]

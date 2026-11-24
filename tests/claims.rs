@@ -293,6 +293,18 @@ fn a_style_claim_ignores_manifest_hunks() {
 }
 
 #[test]
+fn a_trailing_unchanged_is_a_no_behavior_change_claim() {
+    let (report, _) = classify(GATE, &flipped(), "The gate check, unchanged");
+    let claims = &report["summary"]["claims"];
+    assert_eq!(claims["hints"][0]["hint"], "no_behavior_change", "{claims}");
+    assert_eq!(claims["hints"][0]["value"], "unchanged");
+    assert_eq!(
+        claims["experimental"]["conflicts"],
+        json!([{"claim": "refactor", "finding": "behavior_hunks", "count": 1, "hunks": [0]}])
+    );
+}
+
+#[test]
 fn a_reorder_claim_without_a_reorder_says_so() {
     let (report, _) = classify(GATE, &flipped(), "Reorder the gate checks");
     let claims = &report["summary"]["claims"];
@@ -318,6 +330,31 @@ fn a_reorder_claim_with_a_reorder_is_borne_out() {
     let (report, _) = classify(two, swapped, "Reorder the gate methods");
     let claims = &report["summary"]["claims"];
     assert_eq!(claims["experimental"]["conflicts"], json!([]), "{claims}");
+}
+
+/// A pull request's title repeating its commit's subject is one claim.
+#[test]
+fn a_description_repeating_a_subject_claims_it_once() {
+    let dir = gate_repo(GATE, &flipped(), "Refactor the gate check");
+    std::fs::write(
+        dir.path().join("pr.md"),
+        "Refactor the gate check\n\nSee #3.\n",
+    )
+    .unwrap();
+    let out = shapr(dir.path(), &["-j", "--message", "pr.md", "HEAD~1..HEAD"]);
+    let claims = &report(&out)["summary"]["claims"];
+    let hints: Vec<(&str, &str)> = claims["hints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| (h["source"].as_str().unwrap(), h["value"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        hints,
+        [("commit", "refactor"), ("message", "#3")],
+        "{claims}"
+    );
+    assert_eq!(claims["experimental"]["categories"]["refactor"], 1);
 }
 
 #[test]
