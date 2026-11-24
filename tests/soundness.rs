@@ -2,81 +2,9 @@
 //! must stay out of the structural kinds.
 
 use serde_json::Value;
-use std::path::Path;
-use std::process::Command;
 
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// `shapr -j` over one commit writing each (path, content) pair.
-fn classify(before: &[(&str, &str)], after: &[(&str, &str)]) -> Value {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path();
-    git(path, &["init", "-q", "-b", "main"]);
-    git(path, &["config", "user.email", "test@example.com"]);
-    git(path, &["config", "user.name", "Test"]);
-    for files in [before, after] {
-        for (name, content) in files {
-            std::fs::write(path.join(name), content).unwrap();
-        }
-        git(path, &["add", "-A"]);
-        git(path, &["commit", "-q", "--allow-empty", "-m", "state"]);
-    }
-    let out = command(env!("CARGO_BIN_EXE_shapr"), path)
-        .args(["-j", "HEAD~1..HEAD"])
-        .output()
-        .unwrap();
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))
-}
-
-fn ruby(before: &str, after: &str) -> Value {
-    classify(&[("a.rb", before)], &[("a.rb", after)])
-}
-
-fn rust(before: &str, after: &str) -> Value {
-    classify(&[("lib.rs", before)], &[("lib.rs", after)])
-}
-
-fn hunks(report: &Value) -> &Vec<Value> {
-    report["hunks"].as_array().unwrap()
-}
-
-fn kinds(report: &Value) -> Vec<&str> {
-    hunks(report)
-        .iter()
-        .map(|h| h["kind"].as_str().unwrap())
-        .collect()
-}
+mod common;
+use common::*;
 
 /// Every hunk is `logic`, and some hunk was a near miss of `near` for `risk`.
 fn assert_near(report: &Value, near: &str, risk: Option<&str>) {
