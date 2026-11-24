@@ -375,6 +375,35 @@ pub struct Node {
     /// Equal for subtrees that differ only in whitespace and comments.
     /// Process-local: never persisted or printed.
     pub hash: u64,
+    /// Like `hash`, but also equal where the frontend vouches that two
+    /// spellings are the same program ([`TreeBuilder::respell`]); equals
+    /// `hash` in a subtree nothing respells.
+    pub canon: u64,
+    /// Set when the frontend gave this node a canonical form.
+    pub respell: Option<Respell>,
+}
+
+/// A frontend's canonical form for a node whose syntax has equivalent
+/// spellings ([`TreeBuilder::respell`]). It replaces what [`Node::canon`]
+/// reads of the node, so it must hold everything the node means.
+pub enum Canonical {
+    /// The node's whole meaning; its own text and children aren't read (a
+    /// string literal's value and encoding, however it is quoted).
+    Value(Vec<u8>),
+    /// Stands for the node's own text; its code children follow in the
+    /// order the frontend reported them, not source order (a modifier `if`
+    /// lists its condition first either way).
+    Syntax(Vec<u8>),
+    /// The node means its only code child (redundant parentheses).
+    Transparent,
+}
+
+/// A respelled node: the variant family it belongs to, named by the
+/// frontend, and whether it stands for its only child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Respell {
+    pub variant: &'static str,
+    pub transparent: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -646,6 +675,7 @@ pub struct TreeBuilder {
     errors: Vec<Span>,
     semantics: Semantics,
     ignored: Vec<Span>,
+    canonical: Vec<Option<(&'static str, Canonical)>>,
 }
 
 impl TreeBuilder {
@@ -661,6 +691,7 @@ impl TreeBuilder {
             errors: Vec::new(),
             semantics: Semantics::default(),
             ignored: Vec::new(),
+            canonical: Vec::new(),
         };
         builder.push("root", 0..len, None, Role::Other, false);
         builder.stack.push(Tree::ROOT);
@@ -710,6 +741,15 @@ impl TreeBuilder {
         self.ignored.push(span);
     }
 
+    /// Gives the node just opened or reported as a leaf a canonical form, in
+    /// the frontend's `variant` family: equivalent spellings must produce the
+    /// same form, and different programs different ones.
+    pub fn respell(&mut self, variant: &'static str, canonical: Canonical) {
+        if let Some(last) = self.canonical.last_mut() {
+            *last = Some((variant, canonical));
+        }
+    }
+
     /// Marks the innermost open node.
     pub fn flag(&mut self, flags: Flags) {
         if let [_, .., open] = self.stack[..] {
@@ -746,8 +786,11 @@ impl TreeBuilder {
             role,
             flags: Flags::default(),
             hash: 0,
+            canon: 0,
+            respell: None,
         });
         self.leaf.push(leaf);
+        self.canonical.push(None);
         id
     }
 
@@ -778,7 +821,14 @@ impl TreeBuilder {
             },
         };
         for i in (0..tree.nodes.len()).rev() {
-            tree.nodes[i].hash = hash(&tree, i, self.leaf[i]);
+            tree.nodes[i].hash = hash(&tree, i, self.leaf[i], |n| n.hash);
+            let canonical = self.canonical[i].as_ref();
+            let (canon, transparent) = canon(&tree, i, self.leaf[i], canonical.map(|c| &c.1));
+            tree.nodes[i].canon = canon;
+            tree.nodes[i].respell = canonical.map(|&(variant, _)| Respell {
+                variant,
+                transparent,
+            });
         }
         tree.lines = line_facts(&tree);
         tree
@@ -818,8 +868,11 @@ impl TreeBuilder {
                     false => Flags::default(),
                 },
                 hash: 0,
+                canon: 0,
+                respell: None,
             });
             self.leaf.push(true);
+            self.canonical.push(None);
             let siblings = &self.nodes[at].children;
             let pos =
                 siblings.partition_point(|s| self.nodes[s.0 as usize].extent.start <= span.start);
@@ -830,7 +883,8 @@ impl TreeBuilder {
 
 /// Kind, then children in order with the non-whitespace text of the node's
 /// own span between them. Comments are skipped; leaves hash every byte.
-fn hash(tree: &Tree, i: usize, leaf: bool) -> u64 {
+/// `child` reads a child's hash (its `hash` or its `canon`).
+fn hash(tree: &Tree, i: usize, leaf: bool, child: fn(&Node) -> u64) -> u64 {
     let node = &tree.nodes[i];
     let mut h = DefaultHasher::new();
     node.kind.hash(&mut h);
@@ -843,11 +897,46 @@ fn hash(tree: &Tree, i: usize, leaf: bool) -> u64 {
         Piece::Child(c) if !tree.node(c).comment => {
             // Marks where a child sits, so text cannot slide across it.
             h.write_u8(MARK);
-            tree.node(c).hash.hash(&mut h);
+            child(tree.node(c)).hash(&mut h);
         }
         Piece::Child(_) => {}
     });
     h.finish()
+}
+
+/// [`Node::canon`]: the hash over children's canons, or the frontend's
+/// canonical form; and whether the node stands for its only code child.
+fn canon(tree: &Tree, i: usize, leaf: bool, canonical: Option<&Canonical>) -> (u64, bool) {
+    let node = &tree.nodes[i];
+    let code = || {
+        node.children
+            .iter()
+            .map(|&c| tree.node(c))
+            .filter(|c| !c.comment)
+    };
+    let mut h = DefaultHasher::new();
+    node.kind.hash(&mut h);
+    match canonical {
+        Some(Canonical::Value(value)) => {
+            h.write_u8(b'v');
+            value.hash(&mut h);
+        }
+        Some(Canonical::Syntax(text)) => {
+            h.write_u8(b's');
+            text.hash(&mut h);
+            for child in code() {
+                h.write_u8(MARK);
+                child.canon.hash(&mut h);
+            }
+        }
+        Some(Canonical::Transparent) if code().count() == 1 => {
+            return (code().next().expect("one child").canon, true);
+        }
+        Some(Canonical::Transparent) | None => {
+            return (hash(tree, i, leaf, |n| n.canon), false);
+        }
+    }
+    (h.finish(), false)
 }
 
 fn hash_text(tree: &Tree, span: Span, h: &mut DefaultHasher) {
@@ -959,6 +1048,55 @@ mod tests {
         };
         assert_eq!(call(&tree("f(a,)", Some(3))), call(&tree("f(a )", None)));
         assert_ne!(call(&tree("f(a,)", None)), call(&tree("f(a )", None)));
+    }
+
+    #[test]
+    fn canon_reads_a_respelled_node_by_its_canonical_form() {
+        // A "call" of one leaf: `f(a)`, `f a` or `f((a))`, the leaf a quoted string.
+        let tree = |s: &str, respell: bool| {
+            let mut b = TreeBuilder::new(s.as_bytes().to_vec());
+            b.open("call", 0..s.len(), None, Role::Other);
+            if respell {
+                b.respell("parens", Canonical::Syntax(b"f".to_vec()));
+            }
+            let (start, end) = (
+                s.find(['\'', '"']).unwrap(),
+                s.rfind(['\'', '"']).unwrap() + 1,
+            );
+            if s.contains("((") {
+                b.open("paren", start - 1..end + 1, None, Role::Other);
+                b.respell("parens", Canonical::Transparent);
+            }
+            b.leaf("string", start..end, None, Role::Other);
+            if respell {
+                b.respell(
+                    "quotes",
+                    Canonical::Value(s.as_bytes()[start + 1..end - 1].to_vec()),
+                );
+            }
+            if s.contains("((") {
+                b.close();
+            }
+            b.close();
+            b.finish()
+        };
+        let node = |t: &Tree| t.node(t.node(Tree::ROOT).children[0]).clone();
+        let base = node(&tree("f('a')", true));
+        for same in ["f \"a\"", "f(('a'))"] {
+            let other = node(&tree(same, true));
+            assert_ne!(base.hash, other.hash, "{same}");
+            assert_eq!(base.canon, other.canon, "{same}");
+        }
+        assert_ne!(base.canon, node(&tree("f('b')", true)).canon);
+        let plain = node(&tree("f('a')", false));
+        assert_eq!(plain.canon, plain.hash);
+        assert_eq!(
+            base.respell,
+            Some(Respell {
+                variant: "parens",
+                transparent: false
+            })
+        );
     }
 
     #[test]
