@@ -1,0 +1,8 @@
+{
+  "description": "a Rust function renamed through its doctest too is a rename; the doctest's code isn't parsed into the tree, so a word there can't be told from a string's content and the line stays logic",
+  "open": true,
+  "expect": {
+    "hunks": {"$every": {"kind": "rename", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

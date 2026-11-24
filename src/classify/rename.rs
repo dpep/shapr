@@ -572,8 +572,7 @@ fn holds(
 }
 
 /// For a name code outside the change can reach: fails when a file outside
-/// the change still uses the old name at the after revision, or already
-/// mentions the new one; otherwise what
+/// the change still uses the old name at the after revision; otherwise what
 /// stays assumed (a search that couldn't run, a library's public surface)
 /// and how many files were searched.
 fn reach(
@@ -707,7 +706,8 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
     tree.descendants(root).any(|id| {
         let n = tree.node(id);
         let Some(found) = n.name.as_deref() else {
-            return scope != Scope::Local && literal_names(tree, id, &bare(name));
+            return scope != Scope::Local
+                && (literal_names(tree, id, &bare(name)) || directive_names(tree, id, name));
         };
         match n.role {
             // A computed name reaches methods (`send(n)`, `define_method`).
@@ -739,6 +739,20 @@ pub(super) fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
     }
     let text = String::from_utf8_lossy(tree.text(&n.span));
     tree.semantics.spelling.literal_spells(&text, name)
+}
+
+/// A directive (a Rust doctest line) holding `name` as a word: its code isn't
+/// parsed into the tree, so any mention may be a use.
+fn directive_names(tree: &Tree, id: NodeId, name: &str) -> bool {
+    let n = tree.node(id);
+    if !n.flags.contains(Flags::DIRECTIVE) {
+        return false;
+    }
+    let word = tree.semantics.spelling.bare(name);
+    let word = word.trim_end_matches(tree.semantics.spelling.suffixes);
+    String::from_utf8_lossy(tree.text(&n.span))
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w == word)
 }
 
 /// A class, module or constant's name, which the tree also holds as a

@@ -442,7 +442,10 @@ are stated in Ruby's terms; for Rust:
   four columns past the text, or past an open list item's, after a blank
   line), and a `/** */` block holding either. Attributes
   (`#[...]`, `#![...]`, `#[doc = "..."]`) are code, and belong to the item
-  after them.
+  after them. A doctest's code isn't parsed into the tree, so a method,
+  constant or field's name anywhere in it, as a word, counts as a use: a
+  rename leaving the old name in a doctest, or onto a name one holds, is
+  `logic`, and so is a doctest line the rename edits.
 - A trailing comma (before a closing bracket, or ending a match arm) never
   changes the parse, so adding or dropping one is formatting, as rustfmt
   does when it reflows a list. A one-element tuple's comma is code.

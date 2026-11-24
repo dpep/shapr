@@ -1,0 +1,7 @@
+{
+  "description": "a Rust function renamed with its doctest still calling the old name: the doctest no longer compiles, so it is not a rename",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}},
+    "summary": {"verdict": "behavior"}
+  }
+}
