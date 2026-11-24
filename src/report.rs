@@ -550,6 +550,10 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
                 test: h.category == Category::Test
                     || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
                 code: matches!(h.category, Category::Code | Category::Test),
+                reorder: h
+                    .parts
+                    .iter()
+                    .any(|p| matches!(p.kind, Kind::Reorder | Kind::Move)),
             })
             .collect(),
     });
@@ -818,11 +822,16 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
                     if conflict.count == 1 { "is" } else { "are" }
                 ),
             ),
+            Finding::NoReorderParts => (
+                "unproven",
+                format!("no reorder or move in {} hunk{plural}", conflict.count),
+            ),
         };
-        emit(
-            out,
-            &format!("{label}: claims {}; {finding}", conflict.claim.as_str()),
-        )?;
+        let claim = match conflict.finding {
+            Finding::NoReorderParts => "reorder",
+            _ => conflict.claim.as_str(),
+        };
+        emit(out, &format!("{label}: claims {claim}; {finding}"))?;
     }
     Ok(())
 }

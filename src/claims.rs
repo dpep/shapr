@@ -136,6 +136,8 @@ pub enum Finding {
     /// Hunks in code or tests shapr couldn't prove structural, against a
     /// style claim.
     LogicHunks,
+    /// No hunk holds a reorder or move part, against a reorder claim.
+    NoReorderParts,
 }
 
 #[derive(Serialize)]
@@ -171,6 +173,8 @@ pub struct HunkFacts {
     pub test: bool,
     /// In a code or test file, not config or a manifest.
     pub code: bool,
+    /// Holds a reorder or move part.
+    pub reorder: bool,
 }
 
 impl Claims {
@@ -229,6 +233,10 @@ impl Claims {
     pub fn check(&mut self, code: &CodeFacts) {
         let claimed = |c: Category| self.experimental.categories[c.as_str()] > 0;
         let behavior = Category::ALL.iter().any(|&c| c.behavior() && claimed(c));
+        let reorder = self
+            .hints
+            .iter()
+            .any(|h| h.hint == HintKind::Keyword && REORDER.contains(&h.value.as_str()));
         let ids = |keep: &dyn Fn(&HunkFacts) -> bool| -> Vec<usize> {
             code.hunks
                 .iter()
@@ -264,6 +272,9 @@ impl Claims {
             let logic = ids(&|h| h.behavior && h.code && outside(h));
             if claimed(Category::Style) && !logic.is_empty() {
                 conflict(Category::Style, Finding::LogicHunks, logic);
+            }
+            if reorder && !code.hunks.is_empty() && !code.hunks.iter().any(|h| h.reorder) {
+                conflict(Category::Refactor, Finding::NoReorderParts, ids(&|_| true));
             }
             let outside_tests = ids(&|h| h.behavior && !h.test);
             if tests && !outside_tests.is_empty() {
@@ -334,6 +345,11 @@ const KEYWORDS: &[(&str, Category)] = &[
     ("simplify", Category::Refactor),
     ("simplifies", Category::Refactor),
     ("restructure", Category::Refactor),
+    ("reorder", Category::Refactor),
+    ("reordered", Category::Refactor),
+    ("reordering", Category::Refactor),
+    ("alphabetize", Category::Refactor),
+    ("dry", Category::Refactor),
     ("perf", Category::Perf),
     ("performance", Category::Perf),
     ("faster", Category::Perf),
@@ -378,6 +394,9 @@ const NO_BEHAVIOR_CHANGE: &[&str] = &[
     "behaviour preserving",
     "pure refactor",
 ];
+
+/// Keywords claiming a reorder, checked against the reorder and move parts.
+const REORDER: &[&str] = &["reorder", "reordered", "reordering", "alphabetize"];
 
 /// Words that fix what a style word in the same subject names ("Fix lint
 /// errors"): they claim style, not a bug fix.
@@ -685,6 +704,18 @@ mod tests {
         // "format" names output formats as often as code layout.
         assert!(hints("Format dates in the log").is_empty());
         assert_eq!(categories("Fix the gate"), [Some(Category::Fix)]);
+    }
+
+    #[test]
+    fn reorder_and_dry_claim_refactor_but_sort_does_not() {
+        let refactor = Some(Category::Refactor);
+        assert_eq!(categories("Reorder methods in feature"), [refactor]);
+        assert_eq!(categories("Alphabetize adapters"), [refactor]);
+        assert_eq!(
+            categories("DRY up error tests"),
+            [refactor, Some(Category::Test)]
+        );
+        assert!(hints("Sort fields when printing").is_empty());
     }
 
     #[test]

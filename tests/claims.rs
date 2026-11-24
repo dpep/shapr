@@ -293,6 +293,34 @@ fn a_style_claim_ignores_manifest_hunks() {
 }
 
 #[test]
+fn a_reorder_claim_without_a_reorder_says_so() {
+    let (report, _) = classify(GATE, &flipped(), "Reorder the gate checks");
+    let claims = &report["summary"]["claims"];
+    assert_eq!(
+        claims["experimental"]["conflicts"],
+        json!([
+            {"claim": "refactor", "finding": "behavior_hunks", "count": 1, "hunks": [0]},
+            {"claim": "refactor", "finding": "no_reorder_parts", "count": 1, "hunks": [0]}
+        ])
+    );
+    let dir = gate_repo(GATE, &flipped(), "Reorder the gate checks");
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("unproven: claims reorder; no reorder or move in 1 hunk"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_reorder_claim_with_a_reorder_is_borne_out() {
+    let two = "class Gate\n  def a\n    1\n  end\n\n  def b\n    2\n  end\nend\n";
+    let swapped = "class Gate\n  def b\n    2\n  end\n\n  def a\n    1\n  end\nend\n";
+    let (report, _) = classify(two, swapped, "Reorder the gate methods");
+    let claims = &report["summary"]["claims"];
+    assert_eq!(claims["experimental"]["conflicts"], json!([]), "{claims}");
+}
+
+#[test]
 fn style_conflicts_show_in_text_output() {
     let dir = gate_repo(GATE, &flipped(), "Fix lint errors");
     let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
