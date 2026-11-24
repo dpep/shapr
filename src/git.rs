@@ -546,22 +546,24 @@ impl Git {
             .collect())
     }
 
-    /// Files of STATE matching PATHSPECS that hold WORD as a whole word, as
-    /// paths from the top; the working tree's untracked files included.
-    /// Never fetches: a blob a partial clone lacks is an error.
-    pub fn grep(&self, state: &State, word: &str, pathspecs: &[String]) -> Result<Vec<String>> {
+    /// Files of STATE matching PATHSPECS that hold one of WORDS as a whole
+    /// word, as paths from the top; the working tree's untracked files
+    /// included, binary files only when BINARY. Never fetches: a blob a
+    /// partial clone lacks is an error.
+    pub fn grep(
+        &self,
+        state: &State,
+        words: &[&str],
+        pathspecs: &[String],
+        binary: bool,
+    ) -> Result<Vec<String>> {
         let mut cmd = self.command();
-        cmd.env("GIT_NO_LAZY_FETCH", "1").args([
-            "grep",
-            "--no-color",
-            "-l",
-            "-I",
-            "-w",
-            "-F",
-            "--full-name",
-            "-e",
-            word,
-        ]);
+        cmd.env("GIT_NO_LAZY_FETCH", "1")
+            .args(["grep", "--no-color", "-l", "-w", "-F", "--full-name"])
+            .arg(if binary { "--text" } else { "-I" });
+        for word in words {
+            cmd.args(["-e", word]);
+        }
         let rev = match state {
             State::Revision(rev) => Some(rev.as_str()),
             State::Index => {

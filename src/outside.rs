@@ -165,12 +165,14 @@ impl Repository<'_> {
         texts: &[&(String, String)],
     ) -> anyhow::Result<(Vec<String>, Vec<String>)> {
         if matches!(self.state, State::Revision(_)) && self.git.partial() {
-            let found = self.git.grep(&self.state, word, &pathspecs(globs))?;
+            let found = self
+                .git
+                .grep(&self.state, &[word], &pathspecs(globs), false)?;
             return Ok((found, self.mentions(word, texts)?));
         }
         let texts: BTreeSet<&str> = texts.iter().map(|(p, _)| p.as_str()).collect();
         let (found, rest): (Vec<String>, Vec<String>) = (self.git)
-            .grep(&self.state, word, &[":(top)".to_string()])?
+            .grep(&self.state, &[word], &[":(top)".to_string()], false)?
             .into_iter()
             .partition(|p| matches(globs, p));
         let mentioned = rest.into_iter().filter(|p| texts.contains(p.as_str()));
@@ -186,21 +188,38 @@ impl Repository<'_> {
                 .iter()
                 .map(|(p, _)| format!(":(top,literal){p}"))
                 .collect();
-            found.extend(self.git.grep(&self.state, word, &paths)?);
+            found.extend(self.git.grep(&self.state, &[word], &paths, false)?);
         }
         Ok(found)
     }
 
-    /// Parses every candidate file once for [`Computed`] names.
+    /// Parses once each candidate file that calls one of the frontend's
+    /// dispatch words, for [`Computed`] names.
     fn computed_names(
         &self,
         frontend: &dyn Frontend,
         candidates: &[&(String, String)],
     ) -> Option<Computed> {
-        // Only a dispatch word reaches a method by a computed name.
-        if frontend.dispatch_words().is_empty() {
+        // Only a dispatch word reaches a method by a computed name, and its
+        // call spells it out. `grep -w` can't end a word on `?` or `!`; the
+        // stem still matches the call.
+        let words: Vec<&str> = (frontend.dispatch_words().iter())
+            .map(|w| w.trim_end_matches(['?', '!']))
+            .collect();
+        if words.is_empty() {
             return Some(Computed::new());
         }
+        let globs = pathspecs(frontend.search_globs());
+        let callers: BTreeSet<String> = match self.git.grep(&self.state, &words, &globs, true) {
+            Ok(found) => found.into_iter().collect(),
+            Err(error) => {
+                crate::verbose!("can't find files that call by a computed name: {error:#}");
+                return None;
+            }
+        };
+        let candidates: Vec<&(String, String)> = (candidates.iter().copied())
+            .filter(|(path, _)| callers.contains(path))
+            .collect();
         let sources: Vec<Option<Vec<u8>>> = match self.state {
             State::Worktree => candidates
                 .iter()
