@@ -2,108 +2,17 @@
 
 use serde_json::Value;
 use std::io::Write;
-use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::Stdio;
 
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-/// git and shapr with the caller's repository context removed, so a run
-/// under `git rebase --exec` can't write into the real repository.
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
-
-/// A repo with one commit per state; each state maps paths to contents.
-fn repo(states: &[&[(&str, &str)]]) -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    git(dir.path(), &["init", "-q", "-b", "main"]);
-    git(dir.path(), &["config", "user.email", "test@example.com"]);
-    git(dir.path(), &["config", "user.name", "Test"]);
-    for state in states {
-        write(dir.path(), state);
-        git(dir.path(), &["add", "-A"]);
-        git(
-            dir.path(),
-            &["commit", "-q", "--allow-empty", "-m", "state"],
-        );
-    }
-    dir
-}
-
-fn write(dir: &Path, files: &[(&str, &str)]) {
-    for (path, content) in files {
-        let path = dir.join(path);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, content).unwrap();
-    }
-}
-
-fn shapr(dir: &Path, args: &[&str], stdin: Option<&str>) -> Output {
-    let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut pipe = child.stdin.take().unwrap();
-    pipe.write_all(stdin.unwrap_or_default().as_bytes())
-        .unwrap();
-    drop(pipe);
-    child.wait_with_output().unwrap()
-}
-
-/// `shapr -j` on the last commit: the report and the exit code.
-fn classify(before: &[(&str, &str)], after: &[(&str, &str)]) -> (Value, i32) {
-    let dir = repo(&[before, after]);
-    let out = shapr(dir.path(), &["-j", "HEAD~1..HEAD"], None);
-    let report = serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)));
-    (report, out.status.code().unwrap())
-}
-
-fn kinds(report: &Value) -> Vec<&str> {
-    report["hunks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|h| h["kind"].as_str().unwrap())
-        .collect()
-}
+mod common;
+use common::*;
 
 const METHOD: &str = "class Greeter\n  def greet(name)\n    \"hi #{name}\"\n  end\nend\n";
 
 #[test]
 fn reformatting_is_format_only() {
     let after = "class Greeter\n  def greet( name )\n      \"hi #{name}\"\n  end\nend\n";
-    let (report, code) = classify(&[("a.rb", METHOD)], &[("a.rb", after)]);
+    let report = classify(&[("a.rb", METHOD)], &[("a.rb", after)]);
     assert_eq!(kinds(&report), ["format_only"]);
     let hunk = &report["hunks"][0];
     assert_eq!(lead(hunk)["confidence"], 1.0);
@@ -113,14 +22,13 @@ fn reformatting_is_format_only() {
     assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(report["summary"]["structure_share"], 1.0);
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn rewording_a_comment_is_comment_only_and_counted() {
     let before = "# Says hello.\ndef greet\n  1 # the answer\nend\n";
     let after = "# Says hello politely.\n# Twice.\ndef greet\n  1 # the answer\nend\n";
-    let (report, code) = classify(&[("a.rb", before)], &[("a.rb", after)]);
+    let report = classify(&[("a.rb", before)], &[("a.rb", after)]);
     assert_eq!(kinds(&report), ["comment_only"]);
     let hunk = &report["hunks"][0];
     assert_eq!(
@@ -131,7 +39,6 @@ fn rewording_a_comment_is_comment_only_and_counted() {
         (Some(2), Some(1))
     );
     assert_eq!(hunk["code_added"], 0);
-    assert_eq!(code, 0);
 }
 
 #[test]
@@ -139,29 +46,27 @@ fn a_magic_comment_is_code() {
     let body = "def greet\n  \"hi\"\nend\n";
     let before = format!("# frozen_string_literal: true\n{body}");
     let after = format!("# frozen_string_literal: false\n{body}");
-    let (report, code) = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
+    let report = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
     assert_eq!(kinds(&report), ["logic"]);
     assert_eq!(report["hunks"][0]["code_added"], 1);
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn changing_code_is_logic_with_its_evidence() {
     let after = METHOD.replace("hi", "hello");
-    let (report, code) = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
+    let report = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
     assert_eq!(kinds(&report), ["logic"]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["review_lines"], 2);
     assert!(lead(hunk)["evidence"]["code_similarity"].as_f64().unwrap() < 1.0);
     assert_eq!(report["summary"]["verdict"], "behavior");
     assert_eq!(report["summary"]["behavior_lines"], 2);
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn whitespace_inside_a_string_is_logic() {
     let after = METHOD.replace("hi #", "hi  #");
-    let (report, _) = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
+    let report = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
     assert_eq!(kinds(&report), ["logic"]);
 }
 
@@ -170,7 +75,7 @@ fn format_and_logic_in_one_change_is_mixed() {
     let filler = "X = 1\n".repeat(10);
     let before = format!("def a\n  1+1\nend\n{filler}def b\n  2\nend\n");
     let after = format!("def a\n  1 + 1\nend\n{filler}def b\n  3\nend\n");
-    let (report, code) = classify(&[("lib/a.rb", &before)], &[("lib/a.rb", &after)]);
+    let report = classify(&[("lib/a.rb", &before)], &[("lib/a.rb", &after)]);
     assert_eq!(kinds(&report), ["format_only", "logic"]);
     let summary = &report["summary"];
     assert_eq!(summary["verdict"], "mixed");
@@ -178,7 +83,6 @@ fn format_and_logic_in_one_change_is_mixed() {
     assert_eq!(summary["review_lines"], 2);
     assert_eq!(summary["structure_share"], 0.5);
     assert_eq!(report["files"][0]["lines_before"], 16);
-    assert_eq!(code, 0);
 }
 
 fn review_lines(report: &Value) -> Vec<u64> {
@@ -194,14 +98,13 @@ fn review_lines(report: &Value) -> Vec<u64> {
 fn an_extract_is_structure_but_still_read() {
     let before = "class Report\n  def render(title)\n    puts title\n    puts \"-\" * 10\n    puts \"=\" * 10\n    puts \"end\"\n  end\nend\n";
     let after = "class Report\n  def render(title)\n    puts title\n    rule\n    puts \"end\"\n  end\n\n  def rule\n    puts \"-\" * 10\n    puts \"=\" * 10\n  end\nend\n";
-    let (report, code) = classify(&[("a.rb", before)], &[("a.rb", after)]);
+    let report = classify(&[("a.rb", before)], &[("a.rb", after)]);
     assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
     // Every changed code line: git's diff keeps the moved statements as
     // context and changes the lines around them.
     assert_eq!(report["summary"]["review_lines"], 5);
     assert_eq!(report["summary"]["behavior_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
-    assert_eq!(code, 0);
 }
 
 #[test]
@@ -220,7 +123,7 @@ fn a_moved_method_with_an_edit_reviews_only_the_changed_lines() {
         method("first", "log"),
         method("moved", "warn")
     );
-    let (report, _) = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
+    let report = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
     // Moved and edited: a move part and the edited line as logic.
     assert_eq!(kinds(&report), ["logic", "logic"], "{report:#}");
     // `log(y)` out of the removed body, `warn(y)` into the added one.
@@ -231,7 +134,7 @@ fn a_moved_method_with_an_edit_reviews_only_the_changed_lines() {
 #[test]
 fn a_lockfile_is_generated_and_not_counted_in_size() {
     let reformatted = METHOD.replace("greet(name)", "greet( name )");
-    let (report, _) = classify(
+    let report = classify(
         &[
             ("a.rb", METHOD),
             ("Gemfile.lock", "rack (2.0)\nrake (13.0)\n"),
@@ -301,7 +204,7 @@ fn every_file_has_one_category() {
         v.iter().map(|(p, c)| (*p, c.as_str())).collect()
     };
     let (before, after) = (borrow(before.leak()), borrow(after.leak()));
-    let (report, _) = classify(&before, &after);
+    let report = classify(&before, &after);
     let mut got = categories(&report);
     got.sort();
     assert_eq!(
@@ -345,7 +248,7 @@ fn every_file_has_one_category() {
 fn a_syntax_error_falls_back_to_lines_and_proves_no_structure() {
     let before = "def a\n  1+1\nend\ndef broken(\n";
     let after = "def a\n  1 + 1\nend\ndef broken(\n";
-    let (report, _) = classify(&[("a.rb", before)], &[("a.rb", after)]);
+    let report = classify(&[("a.rb", before)], &[("a.rb", after)]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
     assert_eq!(lead(hunk)["detail"]["near"], "format_only");
@@ -357,7 +260,7 @@ fn a_syntax_error_falls_back_to_lines_and_proves_no_structure() {
 
 #[test]
 fn an_unparsed_language_is_logic_outside_the_verdict() {
-    let (report, code) = classify(&[("run.sh", "echo a\n")], &[("run.sh", "echo b\n")]);
+    let report = classify(&[("run.sh", "echo a\n")], &[("run.sh", "echo b\n")]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
     assert_eq!(hunk["verdict"], "unknown");
@@ -365,12 +268,11 @@ fn an_unparsed_language_is_logic_outside_the_verdict() {
     assert_eq!(hunk["language"], Value::Null);
     assert_eq!(lead(hunk)["evidence"]["comparison"], "none");
     assert_eq!(report["summary"]["verdict"], "unknown");
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn a_readme_only_change_has_no_verdict() {
-    let (report, code) = classify(&[("README.md", "# A\n")], &[("README.md", "# B\n")]);
+    let report = classify(&[("README.md", "# A\n")], &[("README.md", "# B\n")]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["category"], "docs");
     assert_eq!(hunk["verdict"], "none");
@@ -379,13 +281,12 @@ fn a_readme_only_change_has_no_verdict() {
     assert_eq!(summary["verdict"], "none");
     assert_eq!(summary["verdicts"]["none"], 1);
     assert_eq!(summary["behavior_lines"], 0);
-    assert_eq!(code, 0);
 }
 
 #[test]
 fn a_docs_edit_doesnt_flip_a_structure_verdict() {
     let reformatted = METHOD.replace("greet(name)", "greet( name )");
-    let (report, _) = classify(
+    let report = classify(
         &[("a.rb", METHOD), ("README.md", "# A\n")],
         &[("a.rb", &reformatted), ("README.md", "# B\n")],
     );
@@ -394,7 +295,7 @@ fn a_docs_edit_doesnt_flip_a_structure_verdict() {
 
 #[test]
 fn a_config_change_is_behavior() {
-    let (report, _) = classify(
+    let report = classify(
         &[("config/app.yml", "port: 1\n")],
         &[("config/app.yml", "port: 2\n")],
     );
@@ -406,14 +307,14 @@ fn a_config_change_is_behavior() {
 
 #[test]
 fn trailing_whitespace_and_blank_lines_in_an_unparsed_file_are_neutral() {
-    let (report, _) = classify(
+    let report = classify(
         &[("config/app.yml", "a: 1\nb: 2\n")],
         &[("config/app.yml", "a: 1  \n\nb: 2\n")],
     );
     assert_eq!(report["hunks"][0]["verdict"], "none");
     assert_eq!(report["summary"]["verdict"], "none");
     // Indentation is not neutral: YAML, Python and Makefiles read it.
-    let (report, _) = classify(
+    let report = classify(
         &[("config/app.yml", "a:\n  b: 1\n")],
         &[("config/app.yml", "a:\nb: 1\n")],
     );
@@ -422,7 +323,7 @@ fn trailing_whitespace_and_blank_lines_in_an_unparsed_file_are_neutral() {
 
 #[test]
 fn a_lockfile_alone_is_unknown() {
-    let (report, _) = classify(
+    let report = classify(
         &[("Gemfile.lock", "a (1)\n")],
         &[("Gemfile.lock", "a (2)\n")],
     );
@@ -434,7 +335,7 @@ fn a_lockfile_alone_is_unknown() {
 #[test]
 fn test_review_lines_are_split_out() {
     let spec = "RSpec.describe Greeter do\n  it { expect(1).to eq(1) }\nend\n";
-    let (report, _) = classify(
+    let report = classify(
         &[("lib/a.rb", METHOD), ("spec/a_spec.rb", spec)],
         &[
             ("lib/a.rb", &METHOD.replace("hi", "yo")),
@@ -453,18 +354,13 @@ fn a_piped_diff_matches_the_range() {
     // Uncommitted: the after blob is only in the working tree.
     write(dir.path(), &[("a.rb", &METHOD.replace("  end", "    end"))]);
     let diff = git(dir.path(), &["diff"]);
-    let piped = shapr(dir.path(), &["-J"], Some(&diff));
-    let ranged = shapr(dir.path(), &["-J", "HEAD"], None);
+    let piped = shapr_stdin(dir.path(), &["-J"], &diff);
+    let ranged = shapr(dir.path(), &["-J", "HEAD"]);
     assert_eq!(
         String::from_utf8_lossy(&piped.stdout),
         String::from_utf8_lossy(&ranged.stdout)
     );
-    let lines: Vec<Value> = piped
-        .stdout
-        .split(|&b| b == b'\n')
-        .filter(|l| !l.is_empty())
-        .map(|l| serde_json::from_slice(l).unwrap())
-        .collect();
+    let lines = records(&piped);
     let records: Vec<&str> = lines
         .iter()
         .map(|l| l["record"].as_str().unwrap())
@@ -480,16 +376,15 @@ fn a_meta_record_leads_with_the_schema_and_tool_versions() {
         &[("a.rb", METHOD)],
         &[("a.rb", &METHOD.replace("hi", "yo"))],
     ]);
-    let out = shapr(dir.path(), &["-J", "HEAD~1..HEAD"], None);
-    let first = out.stdout.split(|&b| b == b'\n').next().unwrap();
-    let meta: Value = serde_json::from_slice(first).unwrap();
+    let out = shapr(dir.path(), &["-J", "HEAD~1..HEAD"]);
+    let meta = records(&out).remove(0);
     assert_eq!(meta["record"], "meta");
     assert_eq!(meta["schema"], 1);
     assert_eq!(meta["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(meta["source"], Value::Null);
 
-    let out = shapr(dir.path(), &["-j", "HEAD~1..HEAD"], None);
-    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let out = shapr(dir.path(), &["-j", "HEAD~1..HEAD"]);
+    let report = report(&out);
     assert_eq!(report["meta"], meta);
     assert_eq!(report["summary"].get("schema"), None);
 }
@@ -520,7 +415,7 @@ fn dash_c_reads_that_repository_whatever_git_dir_says() {
             .write_all(stdin.as_bytes())
             .unwrap();
         let out = child.wait_with_output().unwrap();
-        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let report = report(&out);
         (report, out.status.code())
     };
     // A range, and a piped diff whose working-tree blob is read from disk.
@@ -541,18 +436,18 @@ fn dash_c_reads_that_repository_whatever_git_dir_says() {
 #[test]
 fn errors_have_their_own_exit_codes() {
     let dir = repo(&[&[("a.rb", "1\n")]]);
-    let bad_range = shapr(dir.path(), &["-J", "nope..HEAD"], None);
+    let bad_range = shapr(dir.path(), &["-J", "nope..HEAD"]);
     assert_eq!(bad_range.status.code(), Some(2));
-    let error: Value = serde_json::from_slice(&bad_range.stdout).unwrap();
+    let error = report(&bad_range);
     assert_eq!(
         (error["record"].as_str(), error["code"].as_u64()),
         (Some("error"), Some(2))
     );
     assert_eq!(error["schema"], 1);
 
-    let usage = shapr(dir.path(), &["-J", "--bogus"], None);
+    let usage = shapr(dir.path(), &["-J", "--bogus"]);
     assert_eq!(usage.status.code(), Some(64));
-    let error: Value = serde_json::from_slice(&usage.stdout).unwrap();
+    let error = report(&usage);
     assert_eq!(error["code"], 64);
 }
 
@@ -564,7 +459,7 @@ fn completions_carry_each_shells_marker() {
         ("zsh", "#compdef"),
         ("fish", "complete -c"),
     ] {
-        let out = shapr(dir.path(), &["--completions", shell], None);
+        let out = shapr(dir.path(), &["--completions", shell]);
         assert!(out.status.success());
         assert!(
             String::from_utf8_lossy(&out.stdout).contains(marker),
@@ -584,7 +479,7 @@ fn every_output_field_is_documented() {
     let schema =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/schema.md")).unwrap();
     let after = METHOD.replace("hi", "hello");
-    let (report, _) = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
+    let report = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
     let records = [
         &report["meta"],
         &report["files"][0],
@@ -600,7 +495,7 @@ fn every_output_field_is_documented() {
         &report["summary"]["verdicts"],
     ];
     let quoted = "def a\n  x = 'a'\n  y = 'b'\n  z = 'c'\nend\n";
-    let (styled, _) = classify(
+    let styled = classify(
         &[("b.rb", quoted)],
         &[("b.rb", &quoted.replace("end", "  w = \"d\"\nend"))],
     );
