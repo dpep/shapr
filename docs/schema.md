@@ -554,6 +554,7 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 | `Layout/SpaceInsideHashLiteralBraces` | `space`, `no_space` | each non-empty hash literal with spaces inside both braces or neither; a brace beside a line break chooses nothing (RuboCop's `compact` reads as `space`) |
 | `Style/TrailingCommaInArrayLiteral`, `Style/TrailingCommaInHashLiteral` | `comma`, `no_comma` | each multiline `[]` or `{}` literal with every item on its own line, after the bracket's line, and the closing bracket on a line of its own (where RuboCop's `comma`, `consistent_comma` and `diff_comma` all read as `comma`); a heredoc body before the bracket chooses nothing |
 | `Style/TrailingCommaInArguments` | `comma`, `no_comma` | the same, for a call's arguments in `()` or `[]` (`Set[...]`), each keyword argument an item and a `&block` argument last |
+| `Style/HashSyntax` | `ruby19`, `hash_rockets` | each pair of a hash or keyword arguments whose key is a symbol: `a: 1` or `:a => 1` where the symbol can be a label, a quoted label `"a-b": 1` as `ruby19`. As in RuboCop's `ruby19`, a rocket counts only when every key in its hash can be a label; a hash with an omitted value (`{a:}`) chooses nothing. `ruby19_no_mixed_keys` reads as `ruby19` |
 
 A style is a scope's norm when its share, as `(n + 1) / (total + styles)`, is
 at least `--norm-threshold` (default 0.8): three of three backs a norm, two of

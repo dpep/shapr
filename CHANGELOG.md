@@ -22,4 +22,5 @@ First release.
 - Experimental: the `Layout/SpaceInsideHashLiteralBraces` norm, `space` or `no_space` inside a hash literal's braces.
 - Experimental: the `Style/TrailingCommaInArrayLiteral` and `Style/TrailingCommaInHashLiteral` norms, a trailing comma or none in a multiline literal with an item per line.
 - Experimental: the `Style/TrailingCommaInArguments` norm, the same for a multiline call's arguments, apart from literals.
+- Experimental: the `Style/HashSyntax` norm, `ruby19` labels or `hash_rockets`, per pair.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.

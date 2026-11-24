@@ -4,6 +4,7 @@
 mod braces;
 mod commas;
 mod config;
+mod hash_syntax;
 mod strings;
 
 use super::{Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind};
@@ -34,6 +35,10 @@ static NORMS: &[NormDef] = &[
         id: commas::ARGUMENTS,
         styles: commas::STYLES,
     },
+    NormDef {
+        id: hash_syntax::NORM,
+        styles: hash_syntax::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -43,6 +48,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     commas::see_array,
     commas::see_hash,
     commas::see_arguments,
+    hash_syntax::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -86,6 +92,16 @@ static SETTINGS: &[Setting] = &[
         norm: commas::ARGUMENTS,
         key: "EnforcedStyleForMultiline",
         values: COMMA_VALUES,
+    },
+    Setting {
+        norm: hash_syntax::NORM,
+        key: "EnforcedStyle",
+        // `no_mixed_keys` constrains a hash's pairs to agree, not a syntax.
+        values: &[
+            ("ruby19", "ruby19"),
+            ("ruby19_no_mixed_keys", "ruby19"),
+            ("hash_rockets", "hash_rockets"),
+        ],
     },
 ];
 
