@@ -1,0 +1,6 @@
+{
+  "description": "x becomes y, but one of its uses becomes a literal: not every use follows the rename, so nothing is a rename",
+  "expect": {
+    "hunks": [{"verdict": "behavior", "parts": {"$every": {"kind": "logic"}}}]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "a local renamed at every use beside an unrelated edit is a rename part and the edited line",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "mixed",
+        "parts": [
+          {"kind": "rename", "structure": true, "lines": {"before": [{"start": 2, "count": 2}], "after": [{"start": 2, "count": 2}]}},
+          {"kind": "logic", "lines": {"before": [{"start": 4, "count": 1}], "after": [{"start": 4, "count": 1}]}}
+        ]
+      }
+    ]
+  }
+}

@@ -443,12 +443,16 @@ fn judge(
     if defined_anew {
         return Err(format!("{to} is also defined by new code"));
     }
-    let (assumptions, searched) = reach(change, pair, facts, outside)?;
     let uses: usize = before
         .iter()
         .map(|&(_, t, root)| uses(t, root, scope, from))
         .sum();
     let renamed = facts.renamed;
+    // Every use of a local is in sight: one not renamed became other code.
+    if scope == Scope::Local && renamed < uses {
+        return Err(format!("{} of {from}'s {uses} uses become {to}", renamed));
+    }
+    let (assumptions, searched) = reach(change, pair, facts, outside)?;
     let uses = uses.max(renamed);
     // Every visible use is renamed; uses shapr can't see are smoothed in as
     // one unknown (Laplace's rule of succession).
