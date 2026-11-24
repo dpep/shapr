@@ -1,0 +1,15 @@
+{
+  "description": "a hash with a duplicate key reordered: the later entry wins, so the value changes",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic"
+          }
+        ]
+      }
+    ]
+  }
+}

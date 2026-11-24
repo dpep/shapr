@@ -1,0 +1,23 @@
+{
+  "description": "a struct literal's fields reordered where a value calls a function: they run in another order",
+  "open": true,
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "evaluation_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

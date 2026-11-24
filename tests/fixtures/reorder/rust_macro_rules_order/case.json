@@ -1,0 +1,18 @@
+{
+  "description": "a mod declaration moved above a macro_rules! definition: macro_rules is textually scoped, so the module no longer sees it",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": {
+          "$not": "structure"
+        },
+        "parts": {
+          "$every": {
+            "structure": false
+          }
+        }
+      }
+    ]
+  }
+}

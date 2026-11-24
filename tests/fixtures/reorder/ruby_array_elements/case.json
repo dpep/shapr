@@ -1,0 +1,23 @@
+{
+  "description": "an array's elements reordered (an expected list in a spec): positions are part of the value",
+  "open": true,
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "element_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

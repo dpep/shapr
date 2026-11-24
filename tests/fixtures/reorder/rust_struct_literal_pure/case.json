@@ -1,0 +1,20 @@
+{
+  "description": "a struct literal's fields reordered where every value is a literal or a local: nothing runs, so order is unobservable",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "reorder",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": true,
+            "detail": {
+              "context": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

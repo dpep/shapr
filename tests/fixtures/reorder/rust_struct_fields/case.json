@@ -1,0 +1,23 @@
+{
+  "description": "a struct declaration's fields reordered: layout, derived Ord and Debug output follow declaration order",
+  "open": true,
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "element_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

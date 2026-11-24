@@ -1,0 +1,22 @@
+{
+  "description": "requires sorted: files load in written order",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "load_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

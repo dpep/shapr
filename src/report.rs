@@ -500,7 +500,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         let counted = hunk.verdict.counted();
         for part in &hunk.parts {
             *kinds.entry(part.kind.as_str()).or_default() += 1;
-            for context in &part.context {
+            for context in part.context.iter().filter(|_| part.kind == Kind::Move) {
                 *move_contexts.entry(context.as_str()).or_default() += 1;
             }
             for facet in &part.facets {

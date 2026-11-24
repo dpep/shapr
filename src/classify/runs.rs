@@ -60,6 +60,7 @@ fn same_place(kind: Kind) -> bool {
         Kind::FormatOnly
         | Kind::CommentOnly
         | Kind::Restyle
+        | Kind::Reorder
         | Kind::DefaultArgument
         | Kind::Rename => true,
         Kind::Move | Kind::Extract | Kind::Inline | Kind::Logic => false,

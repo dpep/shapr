@@ -1,0 +1,17 @@
+{
+  "description": "two mod declarations swapped under an unchanged doc comment, which now documents the other module: not a reorder",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "reorder"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

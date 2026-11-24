@@ -1,0 +1,22 @@
+{
+  "description": "gemspec dependencies swapped",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "load_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "description": "two methods swapped are a move, not a reorder",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "move",
+        "parts": {
+          "$every": {
+            "kind": {
+              "$not": "reorder"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

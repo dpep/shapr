@@ -1,0 +1,33 @@
+{
+  "description": "a require moved up past statements that were deleted: the blank lines between deletions are read with them",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "load_order"
+              ]
+            }
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "start": 4,
+                  "count": 3
+                }
+              ],
+              "after": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

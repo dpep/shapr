@@ -18,6 +18,7 @@ pub use format::PLAIN_LOGIC;
 mod hazard;
 mod moves;
 mod rename;
+mod reorder;
 mod restyle;
 mod runs;
 
@@ -38,6 +39,7 @@ pub enum Kind {
     FormatOnly,
     CommentOnly,
     Restyle,
+    Reorder,
     DefaultArgument,
     Rename,
     Move,
@@ -47,10 +49,11 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 9] = [
+    pub const ALL: [Kind; 10] = [
         Kind::FormatOnly,
         Kind::CommentOnly,
         Kind::Restyle,
+        Kind::Reorder,
         Kind::DefaultArgument,
         Kind::Rename,
         Kind::Move,
@@ -69,6 +72,7 @@ impl Kind {
             Kind::FormatOnly => "format_only",
             Kind::CommentOnly => "comment_only",
             Kind::Restyle => "restyle",
+            Kind::Reorder => "reorder",
             Kind::DefaultArgument => "default_argument",
             Kind::Rename => "rename",
             Kind::Move => "move",
@@ -314,6 +318,7 @@ const PASSES: &[Pass] = &[
     moves::run,
     extract::run,
     restyle::run,
+    reorder::run,
     defaults::run,
     format::rest,
 ];

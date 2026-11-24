@@ -1,0 +1,23 @@
+{
+  "description": "a hash literal's entries reordered: iteration sees insertion order",
+  "open": true,
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "iteration_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
