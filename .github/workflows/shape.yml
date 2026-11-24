@@ -1,0 +1,63 @@
+name: Shape
+
+# shapr labels its own changes: advisory, never a gate on the verdict.
+on:
+  pull_request:
+    types: [ opened, synchronize ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  shape:
+    name: shapr
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: clone ${{ github.repository }}
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # shapr needs the base commit, not a shallow clone
+
+      # Judge a pull request with its base's build, so a change that breaks
+      # shapr can't grade itself.
+      - name: check out the build to run
+        run: git worktree add --detach "$RUNNER_TEMP/build" "${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD' }}"
+
+      - name: setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ runner.temp }}/build
+
+      - name: build shapr
+        run: cargo build --release --manifest-path "$RUNNER_TEMP/build/Cargo.toml"
+
+      - name: shape of the change
+        env:
+          RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}...HEAD', github.base_ref) || 'HEAD^!' }}
+        run: |
+          shapr="$RUNNER_TEMP/build/target/release/shapr"
+          "$shapr" -J "$RANGE" > shape.ndjson
+          text=$("$shapr" "$RANGE")
+          verdict=$(tail -n1 shape.ndjson | jq -r .verdict)
+          {
+            echo "### shapr: $verdict"
+            echo
+            echo '```'
+            echo "$text"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=shapr::$verdict ($RANGE)"
+
+      - name: keep the JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: shape
+          path: shape.ndjson
