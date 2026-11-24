@@ -4,6 +4,18 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 /// git and shapr with the caller's repository context removed, so a run
 /// under `git rebase --exec` can't write into the real repository.
 fn command(program: &str, dir: &Path) -> Command {
@@ -68,7 +80,7 @@ fn logic_because(report: &Value, why: &str) {
         .as_array()
         .unwrap()
         .iter()
-        .map(|h| h["reason"].as_str().unwrap())
+        .map(|h| lead(h)["reason"].as_str().unwrap())
         .collect();
     assert!(
         reasons.iter().any(|r| r.contains(why)),
@@ -77,7 +89,7 @@ fn logic_because(report: &Value, why: &str) {
 }
 
 fn confidence(hunk: &Value) -> f64 {
-    hunk["confidence"].as_f64().unwrap()
+    lead(hunk)["confidence"].as_f64().unwrap()
 }
 
 /// Lines that separate two edits into two hunks.
@@ -94,12 +106,12 @@ fn a_local_variable_renamed_in_a_def_is_a_rename() {
     let hunk = &report["hunks"][0];
     assert_eq!(confidence(hunk), 1.0);
     assert_eq!(
-        hunk["detail"]["renames"],
+        lead(hunk)["detail"]["renames"],
         serde_json::json!([{"from": "sum", "to": "subtotal", "kind": "local", "occurrences": 3}])
     );
-    assert_eq!(hunk["evidence"]["renamed"], 3);
-    assert_eq!(hunk["evidence"]["uses"], 3);
-    assert_eq!(hunk["evidence"]["unseen_uses"], false);
+    assert_eq!(lead(hunk)["evidence"]["renamed"], 3);
+    assert_eq!(lead(hunk)["evidence"]["uses"], 3);
+    assert_eq!(lead(hunk)["evidence"]["unseen_uses"], false);
     assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
 }
@@ -183,10 +195,10 @@ fn a_method_rename_with_every_call_site_is_a_graded_rename() {
     assert_eq!(kinds(&report), ["rename"]);
     let hunk = &report["hunks"][0];
     assert_eq!(
-        hunk["detail"]["renames"],
+        lead(hunk)["detail"]["renames"],
         serde_json::json!([{"from": "greet", "to": "salute", "kind": "method", "occurrences": 3}])
     );
-    assert_eq!(hunk["evidence"]["unseen_uses"], true);
+    assert_eq!(lead(hunk)["evidence"]["unseen_uses"], true);
     // Callers outside the diff can't be seen: (3 + 1) / (3 + 2).
     assert_eq!(confidence(hunk), 0.8);
 }
@@ -203,7 +215,10 @@ fn a_method_rename_across_files_checks_every_file() {
         ],
     );
     assert_eq!(kinds(&report), ["rename", "rename"]);
-    assert_eq!(report["hunks"][0]["detail"]["renames"][0]["occurrences"], 4);
+    assert_eq!(
+        lead(&report["hunks"][0])["detail"]["renames"][0]["occurrences"],
+        4
+    );
 
     let stale = "class Door\n  def open(g)\n    g.greet(\"x\")\n    g.close\n  end\nend\n";
     let report = classify(
@@ -268,7 +283,7 @@ fn a_class_rename_counts_its_name_once() {
     let before = "class Box\n  def self.build\n    Box.new\n  end\nend\n";
     let report = one(before, &before.replace("Box", "Crate"));
     assert_eq!(kinds(&report), ["rename"]);
-    let rename = &report["hunks"][0]["detail"]["renames"][0];
+    let rename = &lead(&report["hunks"][0])["detail"]["renames"][0];
     assert_eq!(
         (rename["kind"].as_str(), rename["occurrences"].as_u64()),
         (Some("constant"), Some(2))
@@ -283,7 +298,7 @@ fn an_instance_variable_must_be_renamed_in_every_method() {
     );
     let report = one(&before, &before.replace("@heat", "@temp"));
     assert_eq!(kinds(&report), ["rename", "rename"]);
-    assert_eq!(report["hunks"][0]["evidence"]["unseen_uses"], true);
+    assert_eq!(lead(&report["hunks"][0])["evidence"]["unseen_uses"], true);
     logic_because(
         &one(&before, &before.replacen("@heat", "@temp", 1)),
         "@heat is still used",
@@ -304,9 +319,9 @@ fn rename_fields_are_documented() {
     let report = one(TOTAL, &TOTAL.replace("sum", "subtotal"));
     let hunk = &report["hunks"][0];
     let records = [
-        &hunk["evidence"],
-        &hunk["detail"],
-        &hunk["detail"]["renames"][0],
+        &lead(hunk)["evidence"],
+        &lead(hunk)["detail"],
+        &lead(hunk)["detail"]["renames"][0],
     ];
     for record in records {
         for key in record.as_object().unwrap().keys() {

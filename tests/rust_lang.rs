@@ -4,6 +4,18 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 /// git and shapr with the caller's repository context removed, so a run
 /// under `git rebase --exec` can't write into the real repository.
 fn command(program: &str, dir: &Path) -> Command {
@@ -67,18 +79,19 @@ fn assert_kinds(report: &Value, want: &[&str]) {
     assert_eq!(kinds(report), want, "{report:#}");
 }
 
-/// Every hunk is an unchanged body moved under a new `context`: a
-/// `move_with_changes` reviewing only the definitions' first lines.
+/// Every hunk is an unchanged body moved under a new `context`: a `move`
+/// part that isn't structure, so the hunk is `logic`, reviewing only the
+/// definitions' first lines.
 fn assert_context_move(report: &Value, context: &str) {
-    assert!(
-        kinds(report).iter().all(|k| *k == "move_with_changes"),
-        "{report:#}"
-    );
+    assert!(kinds(report).iter().all(|k| *k == "logic"), "{report:#}");
     for hunk in hunks(report) {
-        assert_eq!(hunk["detail"]["context"], serde_json::json!([context]));
-        assert_eq!(hunk["evidence"]["similarity"], 1.0);
+        assert_eq!(
+            lead(hunk)["detail"]["context"],
+            serde_json::json!([context])
+        );
+        assert_eq!(lead(hunk)["evidence"]["similarity"], 1.0);
         // One line per end of a move in this hunk: the definition's first.
-        let ends: usize = hunk["detail"]["moves"]
+        let ends: usize = lead(hunk)["detail"]["moves"]
             .as_array()
             .unwrap()
             .iter()
@@ -160,7 +173,7 @@ fn a_local_rename_is_a_rename() {
         "fn area(w: u32, h: u32) -> u32 {\n    let size = w * h;\n    size + 1\n}\n",
     );
     assert_kinds(&report, &["rename"]);
-    let rename = &hunks(&report)[0]["detail"]["renames"][0];
+    let rename = &lead(&hunks(&report)[0])["detail"]["renames"][0];
     assert_eq!(rename["from"], "n");
     assert_eq!(rename["to"], "size");
     assert_eq!(rename["kind"], "local");
@@ -193,7 +206,7 @@ fn a_function_rename_with_its_call_sites_is_a_rename() {
     let after = "pub fn evaluate(x: u32) -> u32 {\n    x + 1\n}\n\npub fn run() -> u32 {\n    evaluate(2) + evaluate(3)\n}\n";
     let report = change(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "rename"), "{report:#}");
-    let rename = &hunks(&report)[0]["detail"]["renames"][0];
+    let rename = &lead(&hunks(&report)[0])["detail"]["renames"][0];
     assert_eq!(rename["kind"], "method");
     assert_eq!(rename["occurrences"], 3);
 }
@@ -312,7 +325,7 @@ fn extracting_a_helper_is_an_extract() {
     );
     let report = change(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
-    let detail = &hunks(&report)[0]["detail"];
+    let detail = &lead(&hunks(&report)[0])["detail"];
     assert_eq!(detail["method"], "summary");
     assert_eq!(detail["caller"], "render");
 }
@@ -342,7 +355,11 @@ fn extracting_statements_followed_by_more_code_that_bind_locals_is_logic() {
     );
     let report = change(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    assert_eq!(hunks(&report)[0]["detail"]["risk"], "drop", "{report:#}");
+    assert_eq!(
+        lead(&hunks(&report)[0])["detail"]["risk"],
+        "drop",
+        "{report:#}"
+    );
 }
 
 #[test]

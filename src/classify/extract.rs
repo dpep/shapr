@@ -10,11 +10,11 @@
 //! must equal the chunk once its parameters are renamed to the call's
 //! arguments, and a hunk may change nothing else.
 
-use super::{Confidence, Kind, Label, Labels, Part};
-use crate::change::{Change, FileChange, Trees};
+use super::{Claim, Confidence, Kind, Label, Labels, Part, site};
+use crate::change::{Change, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Chunks with fewer syntax nodes than this stay `logic`. Equality of a body
 /// this small says little, and a one-call method is more often a hook for a
@@ -41,7 +41,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                     continue;
                 }
                 match find(change, calls, chunks, b, dir) {
-                    Ok(found) => apply(file, trees, base, &found, &mut labels[f]),
+                    Ok(found) => apply(trees, base, &found, &mut labels[f]),
                     Err(why) => crate::verbose!(
                         "{}: `{}` not an {}: {why}",
                         file.diff.path(),
@@ -313,23 +313,50 @@ fn find(
     })
 }
 
-/// Labels the hunks the refactoring touches, all or none.
-fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
-    // (hunk, whether the refactoring explains all its changed code)
+/// Labels every hunk the refactoring touches, or none when another part
+/// already claims a line it explains: the lines it explains become its
+/// part, and a sibling that changed on its own stays logic.
+fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
+    // (hunk, the lines the refactoring explains)
     let mut touched = Vec::new();
     let [before, after] = &found.regions;
-    for (h, hunk) in file.diff.hunks.iter().enumerate() {
-        let removed = code_bytes(&trees.before, &hunk.removed);
-        let added = code_bytes(&trees.after, &hunk.added);
-        if removed.iter().any(|at| before.touches(at)) || added.iter().any(|at| after.touches(at)) {
-            let explained = removed.iter().all(|at| before.explains(at))
-                && added.iter().all(|at| after.explains(at));
-            touched.push((h, explained));
+    let comments = (site::comments(&trees.before), site::comments(&trees.after));
+    for (h, label) in labels.iter().enumerate() {
+        let free = &label.changed;
+        let bytes = |tree: &Tree, comments: &[&Span], lines: &BTreeSet<usize>| {
+            lines
+                .iter()
+                .map(|&l| (l, site::code_bytes(tree, comments, l)))
+                .collect::<Vec<_>>()
+        };
+        let removed = bytes(&trees.before, &comments.0, &free.before);
+        let added = bytes(&trees.after, &comments.1, &free.after);
+        let touches = |lines: &[(usize, Vec<usize>)], region: &Region| {
+            lines
+                .iter()
+                .flat_map(|(_, b)| b)
+                .any(|at| region.touches(at))
+        };
+        if !touches(&removed, before) && !touches(&added, after) {
+            continue;
         }
+        // A line without code is explained where it starts.
+        let explained = |tree: &Tree, lines: &[(usize, Vec<usize>)], region: &Region| {
+            lines
+                .iter()
+                .filter(|(l, b)| match b.is_empty() {
+                    true => region.explains(&tree.line_span(*l, *l).start),
+                    false => b.iter().all(|at| region.explains(at)),
+                })
+                .map(|(l, _)| *l)
+                .collect::<BTreeSet<usize>>()
+        };
+        let lines = Claim {
+            before: explained(&trees.before, &removed, before),
+            after: explained(&trees.after, &added, after),
+        };
+        touched.push((h, lines));
     }
-    // A hunk an earlier pass proved structural (a reformatted sibling) keeps
-    // its label and doesn't block the refactoring.
-    touched.retain(|&(h, _)| labels[h].parts.iter().all(|p| !p.structure));
     let ids: Vec<usize> = touched.iter().map(|(h, _)| base + h).collect();
     let mut detail = Map::new();
     detail.insert("method".into(), Value::from(found.method.as_str()));
@@ -337,12 +364,6 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
     detail.insert("hunks".into(), json!(ids));
     match &found.outcome {
         Ok(stats) => {
-            let all = touched
-                .iter()
-                .all(|&(h, explained)| explained && labels[h].open());
-            if touched.is_empty() || !all {
-                return;
-            }
             let reason = match found.dir {
                 Dir::Extract => format!(
                     "statements of `{}` moved into new method `{}`, replaced by a call",
@@ -353,8 +374,15 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
                     found.method, found.caller
                 ),
             };
-            for &(h, _) in &touched {
-                let label = &mut labels[h];
+            let contested = touched.iter().any(|(h, lines)| {
+                let taken = labels[*h].changed.minus(&labels[*h].unclaimed());
+                !lines.intersect(&taken).is_empty()
+            });
+            if contested {
+                return;
+            }
+            for (h, lines) in &touched {
+                let label = &mut labels[*h];
                 let mut evidence = label.residual.evidence.clone();
                 let values = &mut evidence.values;
                 values.insert("statements".into(), Value::from(stats.statements));
@@ -364,10 +392,10 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
                 values.insert("returns".into(), Value::from(stats.returns));
                 let part = Part {
                     kind: found.dir.kind(),
-                    structure: true,
-                    lines: label.changed.clone(),
+                    context: Vec::new(),
+                    lines: lines.clone(),
                     // Structure, but where refactoring bugs cluster: still read.
-                    review: label.changed.clone(),
+                    review: lines.clone(),
                     confidence: stats.confidence(),
                     reason: reason.clone(),
                     evidence,
@@ -380,9 +408,9 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
             let near = found.dir.kind().as_str();
             detail.insert("near".into(), Value::from(near));
             detail.insert("risk".into(), Value::from(risk.as_str()));
-            for &(h, _) in &touched {
-                let label = &mut labels[h];
-                if !label.open() || !label.residual.detail.is_empty() {
+            for (h, _) in &touched {
+                let label = &mut labels[*h];
+                if !label.residual.detail.is_empty() {
                     continue;
                 }
                 let residual = &mut label.residual;
@@ -391,23 +419,6 @@ fn apply(file: &FileChange, trees: &Trees, base: usize, found: &Found, labels: &
             }
         }
     }
-}
-
-/// Offsets of the bytes on `lines` that carry code: not whitespace, not in a
-/// comment.
-fn code_bytes(tree: &Tree, lines: &[usize]) -> Vec<usize> {
-    let comments: Vec<&Span> = tree
-        .nodes
-        .iter()
-        .filter(|n| n.comment)
-        .map(|n| &n.extent)
-        .collect();
-    lines
-        .iter()
-        .flat_map(|&line| tree.line_span(line, line))
-        .filter(|&at| !tree.source[at].is_ascii_whitespace())
-        .filter(|at| !comments.iter().any(|c| c.contains(at)))
-        .collect()
 }
 
 fn ids(tree: &Tree) -> impl Iterator<Item = NodeId> + '_ {
@@ -1038,7 +1049,7 @@ fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
     if let Some(name) = name
         && node.role == Role::Bind
     {
-        super::rename::mask(&mut out, name.as_bytes());
+        super::align::mask(&mut out, name.as_bytes());
     }
     out.retain(|b| !b.is_ascii_whitespace());
     if let Some(name) = name

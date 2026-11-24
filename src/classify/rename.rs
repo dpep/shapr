@@ -8,7 +8,8 @@
 //! their confidence is graded down. An opaque name (in a macro's tokens) may
 //! be any of them.
 
-use super::{Claim, Confidence, Kind, Labels, Part};
+use super::align::{Alignment, Diff, align};
+use super::{Claim, Confidence, Kind, Labels, Part, site};
 use crate::change::{Change, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
@@ -75,16 +76,10 @@ struct Pair {
     to: String,
 }
 
-/// An aligned node whose name changed.
-struct Diff {
-    before: NodeId,
-    after: NodeId,
-}
-
 struct Hunk {
     file: usize,
     hunk: usize,
-    diffs: Vec<Diff>,
+    alignment: Alignment,
 }
 
 #[derive(Default)]
@@ -99,6 +94,8 @@ struct Facts {
     /// A method name the language reaches without a visible call.
     reserved: Option<String>,
     after_gates: BTreeSet<NodeId>,
+    /// The renamed nodes on the after side, by file.
+    after_nodes: BTreeSet<(usize, NodeId)>,
 }
 
 type Verdicts<'f> = BTreeMap<&'f Pair, Result<Verdict, String>>;
@@ -122,7 +119,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
     let mut facts: BTreeMap<Pair, Facts> = BTreeMap::new();
     for hunk in &hunks {
         let t = trees(hunk.file);
-        for diff in &hunk.diffs {
+        for diff in &hunk.alignment.diffs {
             let Ok(pair) = pair_of(t, hunk.file, diff) else {
                 continue;
             };
@@ -142,6 +139,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             entry.reads_frame |= method && holds(&t.before, diff.before, Jump::Frame);
             entry.exposed |= role.is_declaration() && exposed(&t.before, diff.before);
             entry.after_gates.insert(gate(&t.after, diff.after));
+            entry.after_nodes.insert((hunk.file, diff.after));
         }
     }
     let verdicts: Verdicts = facts
@@ -152,46 +150,83 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
     for hunk in &hunks {
         let t = trees(hunk.file);
         let label = &mut labels[hunk.file][hunk.hunk];
-        match hunk_pairs(t, hunk, &verdicts) {
-            Err(why) => label.residual.reason = why,
-            Ok(pairs) => {
-                let score = pairs.iter().map(|(_, v)| v.score).fold(1.0, f64::min);
-                let renamed: usize = pairs.iter().map(|(_, v)| v.renamed).sum();
-                let uses: usize = pairs.iter().map(|(_, v)| v.uses).sum();
-                let unseen = pairs.iter().any(|(p, _)| p.space.scope.unseen());
-                let renames: Vec<Value> = pairs
-                    .iter()
-                    .map(|(p, v)| {
-                        json!({
-                            "from": p.from,
-                            "to": p.to,
-                            "kind": p.space.scope.as_str(),
-                            "occurrences": v.renamed,
-                        })
-                    })
-                    .collect();
-                let mut evidence = label.residual.evidence.clone();
-                let values = &mut evidence.values;
-                values.insert("renamed".into(), renamed.into());
-                values.insert("uses".into(), uses.into());
-                values.insert("unseen_uses".into(), unseen.into());
-                let part = Part {
-                    kind: Kind::Rename,
-                    structure: true,
-                    lines: label.changed.clone(),
-                    review: Claim::default(),
-                    confidence: Confidence::new(score),
-                    reason: "only identifiers change, consistently in their scope".into(),
-                    evidence,
-                    detail: Map::from_iter([("renames".to_string(), Value::Array(renames))]),
-                };
-                label.claim(part);
-            }
+        let changed = label.changed.clone();
+        let (accepted, rejected): (Vec<_>, Vec<_>) = hunk
+            .alignment
+            .diffs
+            .iter()
+            .map(|diff| (diff, judged(t, hunk.file, diff, &verdicts)))
+            .partition(|(_, verdict)| verdict.is_ok());
+        if let Some((_, Err(why))) = rejected.first() {
+            label.residual.reason = why.clone();
         }
+        // A line holding code that differs, or a rename that fails, is logic.
+        let lines = |diffs: &[(&Diff, _)]| -> Claim {
+            let own = |tree: &Tree, side: fn(&Diff) -> NodeId| -> BTreeSet<usize> {
+                diffs
+                    .iter()
+                    .flat_map(|(d, _)| tree.own_text(side(d)))
+                    .map(|(line, _)| line)
+                    .collect()
+            };
+            Claim {
+                before: own(&t.before, |d| d.before),
+                after: own(&t.after, |d| d.after),
+            }
+            .intersect(&changed)
+        };
+        let (b, a) = &hunk.alignment.differs;
+        let differs = Claim {
+            before: site::lines_in(&t.before, &changed.before, b),
+            after: site::lines_in(&t.after, &changed.after, a),
+        };
+        let claimed = lines(&accepted).minus(&lines(&rejected)).minus(&differs);
+        if claimed.is_empty() {
+            continue;
+        }
+        let pairs: BTreeMap<&Pair, &Verdict> = accepted
+            .into_iter()
+            .filter_map(|(_, verdict)| verdict.ok())
+            .collect();
+        let score = pairs.values().map(|v| v.score).fold(1.0, f64::min);
+        let renamed: usize = pairs.values().map(|v| v.renamed).sum();
+        let uses: usize = pairs.values().map(|v| v.uses).sum();
+        let unseen = pairs.keys().any(|p| p.space.scope.unseen());
+        let renames: Vec<Value> = pairs
+            .iter()
+            .map(|(p, v)| {
+                json!({
+                    "from": p.from,
+                    "to": p.to,
+                    "kind": p.space.scope.as_str(),
+                    "occurrences": v.renamed,
+                })
+            })
+            .collect();
+        let mut evidence = label.residual.evidence.clone();
+        let values = &mut evidence.values;
+        values.insert("renamed".into(), renamed.into());
+        values.insert("uses".into(), uses.into());
+        values.insert("unseen_uses".into(), unseen.into());
+        label.claim(Part {
+            kind: Kind::Rename,
+            context: Vec::new(),
+            lines: claimed,
+            review: Claim::default(),
+            confidence: Confidence::new(score),
+            reason: "only identifiers change, consistently in their scope".into(),
+            evidence,
+            detail: Map::from_iter([("renames".to_string(), Value::Array(renames))]),
+        });
     }
 }
 
-/// Logic hunks of parsed files whose sides align, with the names that differ.
+/// A name a rename may change.
+pub(super) fn renamable(role: Role) -> bool {
+    Scope::of(role).is_some() || matches!(role, Role::DynamicName | Role::Opaque)
+}
+
+/// Open hunks of cleanly parsed files whose covers align where names differ.
 fn aligned(change: &Change, labels: &Labels) -> Vec<Hunk> {
     let mut out = Vec::new();
     for (file, (fc, labels)) in change.files.iter().zip(labels).enumerate() {
@@ -200,120 +235,20 @@ fn aligned(change: &Change, labels: &Labels) -> Vec<Hunk> {
             continue;
         }
         for (hunk, (site, label)) in trees.sites.iter().zip(labels).enumerate() {
-            if !label.open() {
+            if label.unclaimed().is_empty() {
                 continue;
             }
-            let code = |tree: &Tree, cover: &[NodeId]| -> Vec<NodeId> {
-                let code = cover.iter().filter(|&&id| !tree.node(id).comment);
-                code.copied().collect()
-            };
-            let before = code(&trees.before, &site.before.cover);
-            let after = code(&trees.after, &site.after.cover);
-            if before.is_empty() || before.len() != after.len() {
-                continue;
-            }
-            let mut diffs = Vec::new();
-            let all = before
-                .iter()
-                .zip(&after)
-                .all(|(&b, &a)| align(&trees.before, b, &trees.after, a, &mut diffs));
-            if all && !diffs.is_empty() {
-                out.push(Hunk { file, hunk, diffs });
+            let alignment = align(trees, site);
+            if !alignment.diffs.is_empty() {
+                out.push(Hunk {
+                    file,
+                    hunk,
+                    alignment,
+                });
             }
         }
     }
     out
-}
-
-/// Same shape, same kinds and roles, same text but for names; collects the
-/// nodes whose names differ. Comments are ignored.
-fn align(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, diffs: &mut Vec<Diff>) -> bool {
-    let (bn, an) = (b.node(bi), a.node(ai));
-    if bn.kind != an.kind || bn.role != an.role {
-        return false;
-    }
-    if bn.hash == an.hash {
-        return true;
-    }
-    let code = |t: &Tree, id: NodeId| -> Vec<NodeId> {
-        t.node(id)
-            .children
-            .iter()
-            .copied()
-            .filter(|&c| !t.node(c).comment)
-            .collect()
-    };
-    let (bc, ac) = (code(b, bi), code(a, ai));
-    if bc.len() != ac.len() || own_text(b, bi) != own_text(a, ai) {
-        return false;
-    }
-    if bn.name != an.name {
-        let renamable =
-            Scope::of(bn.role).is_some() || matches!(bn.role, Role::DynamicName | Role::Opaque);
-        let names = [&bn.name, &an.name].map(|n| n.as_deref().is_some_and(is_identifier));
-        if !renamable || names.contains(&false) {
-            return false;
-        }
-        diffs.push(Diff {
-            before: bi,
-            after: ai,
-        });
-    }
-    bc.into_iter()
-        .zip(ac)
-        .all(|(b2, a2)| align(b, b2, a, a2, diffs))
-}
-
-/// The node's own source, outside its children, with whitespace dropped and
-/// its name (where the text spells it) masked, so two nodes differing only
-/// in name compare equal.
-fn own_text(tree: &Tree, id: NodeId) -> Vec<u8> {
-    let node = tree.node(id);
-    let mut text = Vec::new();
-    let mut cursor = node.span.start;
-    for &child in &node.children {
-        let c = tree.node(child);
-        let end = c.extent.start.min(node.span.end);
-        if cursor < end {
-            text.extend_from_slice(&tree.source[cursor..end]);
-        }
-        if !c.comment {
-            text.push(0x01);
-        }
-        cursor = cursor.max(c.extent.end);
-    }
-    if cursor < node.span.end {
-        text.extend_from_slice(&tree.source[cursor..node.span.end]);
-    }
-    if let Some(name) = &node.name {
-        mask(&mut text, name.as_bytes());
-    }
-    text.retain(|b| !b.is_ascii_whitespace());
-    text
-}
-
-/// Replaces the first occurrence of `name` that stands as a whole token.
-pub(super) fn mask(text: &mut Vec<u8>, name: &[u8]) {
-    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
-    let suffixed = name.last().is_some_and(|b| b"?!=".contains(b));
-    let at = (0..text.len()).find(|&i| {
-        text[i..].starts_with(name)
-            && (i == 0 || !(word(text[i - 1]) || b"@$".contains(&text[i - 1])))
-            && text
-                .get(i + name.len())
-                .is_none_or(|&n| !word(n) && (suffixed || !b"?!".contains(&n)))
-    });
-    if let Some(i) = at {
-        text.splice(i..i + name.len(), [0]);
-    }
-}
-
-fn is_identifier(name: &str) -> bool {
-    let bare = name.trim_start_matches(['@', '$']);
-    let bare = bare.strip_suffix(['?', '!', '=']).unwrap_or(bare);
-    let mut chars = bare.chars();
-    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
-        && chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
 /// The rename a diff makes, or why it isn't one shapr can vouch for.
@@ -343,51 +278,48 @@ fn pair_of(trees: &Trees, file: usize, diff: &Diff) -> Result<Pair, String> {
     Ok(Pair { space, from, to })
 }
 
-/// The accepted renames a hunk makes, or why it stays logic.
-fn hunk_pairs<'v>(
+/// The rename a diff makes and its verdict, or why it stays logic.
+fn judged<'v>(
     trees: &Trees,
-    hunk: &Hunk,
+    file: usize,
+    diff: &Diff,
     verdicts: &'v Verdicts,
-) -> Result<Vec<(&'v Pair, &'v Verdict)>, String> {
-    let mut pairs = BTreeMap::new();
-    for diff in &hunk.diffs {
-        let node = trees.before.node(diff.before);
-        let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
-            // Accepted when it follows a rename made elsewhere in the change;
-            // an opaque name may follow a local's, in the same scope.
-            let from = node.name.as_deref().unwrap_or_default();
-            let to = trees.after.node(diff.after).name.as_deref();
-            let local = Space {
-                scope: Scope::Local,
-                file: Some(hunk.file),
-                gate: Some(gate(&trees.before, diff.before)),
-            };
-            let backing = verdicts.iter().find(|(p, v)| {
-                let reaches = match p.space.scope {
-                    Scope::Local => node.role == Role::Opaque && p.space == local,
-                    _ => true,
-                };
-                reaches && p.from == from && Some(p.to.as_str()) == to && v.is_ok()
-            });
-            let Some((pair, verdict)) = backing else {
-                return Err(format!(
-                    "the dynamic reference {from} changes, matching no rename"
-                ));
-            };
-            (*pair, verdict)
-        } else {
-            let pair = pair_of(trees, hunk.file, diff)?;
-            let (pair, verdict) = verdicts
-                .get_key_value(&pair)
-                .expect("every diff's pair was judged");
-            (*pair, verdict)
+) -> Result<(&'v Pair, &'v Verdict), String> {
+    let node = trees.before.node(diff.before);
+    let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
+        // Accepted when it follows a rename made elsewhere in the change;
+        // an opaque name may follow a local's, in the same scope.
+        let from = node.name.as_deref().unwrap_or_default();
+        let to = trees.after.node(diff.after).name.as_deref();
+        let local = Space {
+            scope: Scope::Local,
+            file: Some(file),
+            gate: Some(gate(&trees.before, diff.before)),
         };
-        match verdict {
-            Ok(v) => pairs.insert(pair, v),
-            Err(why) => return Err(format!("renames {} to {}, but {why}", pair.from, pair.to)),
+        let backing = verdicts.iter().find(|(p, v)| {
+            let reaches = match p.space.scope {
+                Scope::Local => node.role == Role::Opaque && p.space == local,
+                _ => true,
+            };
+            reaches && p.from == from && Some(p.to.as_str()) == to && v.is_ok()
+        });
+        let Some((pair, verdict)) = backing else {
+            return Err(format!(
+                "the dynamic reference {from} changes, matching no rename"
+            ));
         };
+        (*pair, verdict)
+    } else {
+        let pair = pair_of(trees, file, diff)?;
+        let (pair, verdict) = verdicts
+            .get_key_value(&pair)
+            .expect("every diff's pair was judged");
+        (*pair, verdict)
+    };
+    match verdict {
+        Ok(v) => Ok((pair, v)),
+        Err(why) => Err(format!("renames {} to {}, but {why}", pair.from, pair.to)),
     }
-    Ok(pairs.into_iter().collect())
 }
 
 /// Whether a rename holds across its whole scope, and how strongly.
@@ -427,7 +359,7 @@ fn judge(
     }
     let scope = pair.space.scope;
     let (before, after) = roots(change, pair, facts);
-    let binding = |&(t, root): &(&Tree, NodeId)| {
+    let binding = |&(_, t, root): &(usize, &Tree, NodeId)| {
         t.descendants(root)
             .any(|d| t.node(d).role == Role::Jump(Jump::Binding))
     };
@@ -438,19 +370,33 @@ fn judge(
     }
     if after
         .iter()
-        .any(|&(t, root)| conflicts(t, root, scope, from))
+        .any(|&(_, t, root)| conflicts(t, root, scope, from))
     {
         return Err(format!("{from} is still used"));
     }
     if before
         .iter()
-        .any(|&(t, root)| conflicts(t, root, scope, to))
+        .any(|&(_, t, root)| conflicts(t, root, scope, to))
     {
         return Err(format!("{to} already exists"));
     }
+    // Every definition of the new name is a renamed one: new code defining
+    // it too would share the name with the renamed code.
+    let defined_anew = after.iter().any(|&(f, t, root)| {
+        t.descendants(root).any(|id| {
+            let n = t.node(id);
+            n.name.as_deref() == Some(to.as_str())
+                && n.role.defines().is_some()
+                && Scope::of(n.role) == Some(scope)
+                && !facts.after_nodes.contains(&(f, id))
+        })
+    });
+    if defined_anew {
+        return Err(format!("{to} is also defined by new code"));
+    }
     let uses: usize = before
         .iter()
-        .map(|&(t, root)| uses(t, root, scope, from))
+        .map(|&(_, t, root)| uses(t, root, scope, from))
         .sum();
     let renamed = facts.renamed;
     let uses = uses.max(renamed);
@@ -468,7 +414,8 @@ fn judge(
     })
 }
 
-type Roots<'c> = Vec<(&'c Tree, NodeId)>;
+/// Subtrees of one side, each with its file.
+type Roots<'c> = Vec<(usize, &'c Tree, NodeId)>;
 
 /// The subtrees a name's scope covers, before and after the change.
 fn roots<'c>(change: &'c Change, pair: &Pair, facts: &Facts) -> (Roots<'c>, Roots<'c>) {
@@ -476,18 +423,31 @@ fn roots<'c>(change: &'c Change, pair: &Pair, facts: &Facts) -> (Roots<'c>, Root
     match (pair.space.file, pair.space.gate) {
         (Some(f), Some(gate)) => {
             let t = parsed(f).expect("a local's file is parsed");
-            let after = facts.after_gates.iter().map(|&g| (&t.after, g)).collect();
-            (vec![(&t.before, gate)], after)
+            let after = facts
+                .after_gates
+                .iter()
+                .map(|&g| (f, &t.after, g))
+                .collect();
+            (vec![(f, &t.before, gate)], after)
         }
         (Some(f), None) => {
             let t = parsed(f).expect("a field's file is parsed");
-            (vec![(&t.before, Tree::ROOT)], vec![(&t.after, Tree::ROOT)])
+            (
+                vec![(f, &t.before, Tree::ROOT)],
+                vec![(f, &t.after, Tree::ROOT)],
+            )
         }
         _ => {
-            let all: Vec<&Trees> = (0..change.files.len()).filter_map(parsed).collect();
+            let all: Vec<(usize, &Trees)> = (0..change.files.len())
+                .filter_map(|f| parsed(f).map(|t| (f, t)))
+                .collect();
             (
-                all.iter().map(|t| (&t.before, Tree::ROOT)).collect(),
-                all.iter().map(|t| (&t.after, Tree::ROOT)).collect(),
+                all.iter()
+                    .map(|&(f, t)| (f, &t.before, Tree::ROOT))
+                    .collect(),
+                all.iter()
+                    .map(|&(f, t)| (f, &t.after, Tree::ROOT))
+                    .collect(),
             )
         }
     }
@@ -600,35 +560,4 @@ fn exposed(tree: &Tree, def: NodeId) -> bool {
 fn holds(tree: &Tree, def: NodeId, jump: Jump) -> bool {
     tree.descendants(def)
         .any(|id| tree.node(id).role == Role::Jump(jump) && gate(tree, id) == def)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn masked(text: &str, name: &str) -> String {
-        let mut bytes = text.as_bytes().to_vec();
-        mask(&mut bytes, name.as_bytes());
-        String::from_utf8_lossy(&bytes).replace('\0', "_")
-    }
-
-    #[test]
-    fn mask_takes_whole_tokens_only() {
-        assert_eq!(masked("def f(", "f"), "def _(");
-        assert_eq!(masked("def de", "de"), "def _");
-        assert_eq!(masked("x += ", "x"), "_ += ");
-        assert_eq!(masked("x? x", "x"), "x? _");
-        assert_eq!(masked(":@x", "@x"), ":_");
-        assert_eq!(masked("@x", "x"), "@x");
-    }
-
-    #[test]
-    fn identifiers_exclude_operators() {
-        for ok in ["a", "@b", "@@c", "d?", "e=", "Foo", "_x1", "é"] {
-            assert!(is_identifier(ok), "{ok}");
-        }
-        for bad in ["+", "[]", "<=>", "", "1a", "a b"] {
-            assert!(!is_identifier(bad), "{bad}");
-        }
-    }
 }

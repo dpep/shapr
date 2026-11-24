@@ -9,6 +9,7 @@
 pub mod facets;
 pub mod site;
 
+mod align;
 mod extract;
 mod format;
 mod moves;
@@ -30,19 +31,17 @@ pub enum Kind {
     CommentOnly,
     Rename,
     Move,
-    MoveWithChanges,
     Extract,
     Inline,
     Logic,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 8] = [
+    pub const ALL: [Kind; 7] = [
         Kind::FormatOnly,
         Kind::CommentOnly,
         Kind::Rename,
         Kind::Move,
-        Kind::MoveWithChanges,
         Kind::Extract,
         Kind::Inline,
         Kind::Logic,
@@ -50,7 +49,7 @@ impl Kind {
 
     /// Changes structure without changing behavior. Says nothing about risk.
     pub fn is_structure(self) -> bool {
-        !matches!(self, Kind::MoveWithChanges | Kind::Logic)
+        self != Kind::Logic
     }
 
     pub fn as_str(self) -> &'static str {
@@ -59,7 +58,6 @@ impl Kind {
             Kind::CommentOnly => "comment_only",
             Kind::Rename => "rename",
             Kind::Move => "move",
-            Kind::MoveWithChanges => "move_with_changes",
             Kind::Extract => "extract",
             Kind::Inline => "inline",
             Kind::Logic => "logic",
@@ -145,10 +143,9 @@ impl Claim {
 #[derive(Clone, Debug)]
 pub struct Part {
     pub kind: Kind,
-    /// Changes structure without changing behavior. False for a part whose
-    /// own lines are explained but whose meaning can still change (code
-    /// moved into a new context).
-    pub structure: bool,
+    /// What differs around the part's code in its new place (a move into
+    /// another class): its lines are explained, but its meaning can change.
+    pub context: Vec<Context>,
     pub lines: Claim,
     /// Of the hunk's changed lines, those a reviewer still reads for this
     /// part; only lines that carry code count.
@@ -158,6 +155,13 @@ pub struct Part {
     pub evidence: Evidence,
     /// Kind-specific facts about the change itself (e.g. rename pairs).
     pub detail: Map<String, Value>,
+}
+
+impl Part {
+    /// Changes structure without changing behavior.
+    pub fn structure(&self) -> bool {
+        self.context.is_empty()
+    }
 }
 
 /// What no part explains: logic.
@@ -196,13 +200,19 @@ impl Label {
         self.parts.is_empty()
     }
 
-    /// Adds `part`, keeping only lines no earlier part claims: an earlier
-    /// pass takes precedence.
-    pub fn claim(&mut self, mut part: Part) {
-        let free = self.unclaimed();
-        part.lines = part.lines.intersect(&free);
-        part.review = part.review.intersect(&part.lines);
-        self.parts.push(part);
+    /// Adds `part` when no other part claims any of its lines: parts are
+    /// disjoint, so a contested line is never silently given to one of
+    /// them. Returns whether it was added.
+    pub fn claim(&mut self, part: Part) -> bool {
+        let taken = self.changed.minus(&self.unclaimed());
+        let fits = !part.lines.is_empty()
+            && part.lines.intersect(&taken).is_empty()
+            && part.lines.minus(&self.changed).is_empty()
+            && part.review.minus(&part.lines).is_empty();
+        if fits {
+            self.parts.push(part);
+        }
+        fits
     }
 
     /// There is logic: lines no part explains, or no part at all.
@@ -210,97 +220,90 @@ impl Label {
         self.parts.is_empty() || !self.residual.lines.is_empty()
     }
 
-    /// Every part is structure and nothing is left over.
-    pub fn structure(&self) -> bool {
-        !self.has_residual() && self.parts.iter().all(|p| p.structure)
+    /// Structure parts only, behavior only (a residual, or a part whose
+    /// meaning can change), or both.
+    pub fn verdict(&self) -> Verdict {
+        let structure = self.parts.iter().any(|p| p.structure());
+        let behavior = self.has_residual() || self.parts.iter().any(|p| !p.structure());
+        Verdict::of(structure, behavior)
     }
 
-    /// The one-word rollup: the latest structural kind (in [`Kind::ALL`]
-    /// order) of a structure hunk, else `logic`.
+    /// The one-word rollup: `logic` unless the hunk is all structure, else
+    /// its most substantial part kind, in [`Kind::ALL`] order (a rename
+    /// beside a reformat is a `rename`).
     pub fn kind(&self) -> Kind {
-        match self.decider() {
-            Decider::Part(p) => p.kind,
-            Decider::Residual(_) => Kind::Logic,
-        }
-    }
-
-    pub fn confidence(&self) -> Confidence {
-        match self.decider() {
-            Decider::Part(p) if self.structure() => self
+        match self.verdict() {
+            Verdict::Structure => self
                 .parts
                 .iter()
-                .map(|q| q.confidence)
-                .fold(p.confidence, |a, b| if b < a { b } else { a }),
-            Decider::Part(p) => p.confidence,
-            Decider::Residual(r) => r.confidence,
-        }
-    }
-
-    pub fn reason(&self) -> &str {
-        match self.decider() {
-            Decider::Part(p) => &p.reason,
-            Decider::Residual(r) => &r.reason,
-        }
-    }
-
-    pub fn evidence(&self) -> &Evidence {
-        match self.decider() {
-            Decider::Part(p) => &p.evidence,
-            Decider::Residual(r) => &r.evidence,
-        }
-    }
-
-    pub fn detail(&self) -> &Map<String, Value> {
-        match self.decider() {
-            Decider::Part(p) => &p.detail,
-            Decider::Residual(r) => &r.detail,
-        }
-    }
-
-    /// Facets of the residual; empty when there is none.
-    pub fn facets(&self) -> &[Facet] {
-        if self.has_residual() {
-            &self.residual.facets
-        } else {
-            &[]
-        }
-    }
-
-    /// The part or residual whose kind, reason, evidence and detail stand
-    /// for the hunk: the residual when there is one, else the first part
-    /// that isn't structure, else the latest structural kind.
-    fn decider(&self) -> Decider<'_> {
-        if self.has_residual() {
-            return Decider::Residual(&self.residual);
-        }
-        match self.parts.iter().find(|p| !p.structure) {
-            Some(p) => Decider::Part(p),
-            None => Decider::Part(
-                self.parts
-                    .iter()
-                    .max_by_key(|p| p.kind)
-                    .expect("a hunk without a residual has a part"),
-            ),
+                .map(|p| p.kind)
+                .max()
+                .expect("a structure hunk has a part"),
+            _ => Kind::Logic,
         }
     }
 }
 
-enum Decider<'l> {
-    Part(&'l Part),
-    Residual(&'l Residual),
+/// Whether a hunk, or a whole change, changes structure, behavior or both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Verdict {
+    /// Structure only.
+    Structure,
+    /// Behavior only.
+    Behavior,
+    Mixed,
+    /// Nothing changed.
+    Empty,
+}
+
+impl Verdict {
+    pub fn of(structure: bool, behavior: bool) -> Verdict {
+        match (structure, behavior) {
+            (false, false) => Verdict::Empty,
+            (true, false) => Verdict::Structure,
+            (false, true) => Verdict::Behavior,
+            (true, true) => Verdict::Mixed,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Verdict::Structure => "structure",
+            Verdict::Behavior => "behavior",
+            Verdict::Mixed => "mixed",
+            Verdict::Empty => "empty",
+        }
+    }
+
+    pub fn exit_code(self) -> u8 {
+        match self {
+            Verdict::Structure | Verdict::Empty => 0,
+            Verdict::Behavior => 1,
+            Verdict::Mixed => 3,
+        }
+    }
 }
 
 /// One label per hunk: `labels[file][hunk]`, parallel to `Change::files`.
 pub type Labels = Vec<Vec<Label>>;
 
 /// A pass proves parts against the whole of both trees and claims the lines
-/// they explain with [`Label::claim`]; the residual is never cut out of the
-/// trees, so a check that new code would break fails and the lines stay
-/// logic. A pass may also leave a near miss on the residual.
+/// they explain with [`Label::claim`], which refuses a part overlapping
+/// another. The residual is never cut out of the trees, so a check that new
+/// code would break fails and the lines stay logic. A pass may also leave a
+/// near miss on the residual.
 type Pass = fn(&Change, &mut Labels);
 
-/// In precedence order: an earlier pass claims a line first.
-const PASSES: &[Pass] = &[format::run, rename::run, moves::run, extract::run];
+/// In order. A pass sees which lines earlier passes claimed and proposes
+/// parts for the rest; `format::rest` takes what is left.
+const PASSES: &[Pass] = &[
+    format::run,
+    rename::run,
+    moves::run,
+    extract::run,
+    format::rest,
+];
 
 pub fn classify(change: &Change) -> Labels {
     let mut labels = defaults(change);
@@ -361,6 +364,62 @@ mod tests {
             serde_json::to_string(&Confidence::new(2.0 / 3.0)).unwrap(),
             "0.67"
         );
+    }
+
+    fn part(kind: Kind, before: &[usize], after: &[usize]) -> Part {
+        Part {
+            kind,
+            context: Vec::new(),
+            lines: Claim {
+                before: before.iter().copied().collect(),
+                after: after.iter().copied().collect(),
+            },
+            review: Claim::default(),
+            confidence: Confidence::new(1.0),
+            reason: String::new(),
+            evidence: Evidence {
+                method: Method::Ast,
+                values: Map::new(),
+            },
+            detail: Map::new(),
+        }
+    }
+
+    #[test]
+    fn parts_never_share_a_line() {
+        let hunk = Hunk {
+            removed: vec![1, 2],
+            added: vec![1, 2],
+            ..Hunk::default()
+        };
+        let mut label = Label {
+            changed: Claim::of(&hunk),
+            parts: Vec::new(),
+            residual: Residual {
+                lines: Claim::default(),
+                confidence: Confidence::new(1.0),
+                reason: String::new(),
+                evidence: Evidence {
+                    method: Method::Ast,
+                    values: Map::new(),
+                },
+                detail: Map::new(),
+                facets: Vec::new(),
+            },
+        };
+        assert!(label.claim(part(Kind::Rename, &[1], &[1])));
+        // Contested: refused whole, not trimmed to line 2.
+        assert!(!label.claim(part(Kind::FormatOnly, &[1, 2], &[2])));
+        assert!(!label.claim(part(Kind::FormatOnly, &[], &[])));
+        assert!(!label.claim(part(Kind::FormatOnly, &[3], &[])));
+        assert_eq!(label.parts.len(), 1);
+        label.residual.lines = label.unclaimed();
+        assert_eq!(label.verdict(), Verdict::Mixed);
+        assert_eq!(label.kind(), Kind::Logic);
+        assert!(label.claim(part(Kind::FormatOnly, &[2], &[2])));
+        label.residual.lines = label.unclaimed();
+        assert_eq!(label.verdict(), Verdict::Structure);
+        assert_eq!(label.kind(), Kind::Rename);
     }
 
     #[test]

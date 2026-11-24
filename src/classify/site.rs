@@ -7,6 +7,7 @@
 
 use crate::diff::{Hunk, Lines};
 use crate::tree::{NodeId, Span, Tree};
+use std::collections::BTreeSet;
 
 #[derive(Debug)]
 pub struct Site {
@@ -149,4 +150,38 @@ fn clip(a: &Span, b: &Span) -> Span {
 
 fn contains(outer: &Span, inner: &Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
+}
+
+/// Offsets of the bytes on `line` that carry code: not whitespace, not in a
+/// comment.
+pub fn code_bytes(tree: &Tree, comments: &[&Span], line: usize) -> Vec<usize> {
+    tree.line_span(line, line)
+        .filter(|&at| !tree.source[at].is_ascii_whitespace())
+        .filter(|at| !comments.iter().any(|c| c.contains(at)))
+        .collect()
+}
+
+pub fn comments(tree: &Tree) -> Vec<&Span> {
+    tree.nodes
+        .iter()
+        .filter(|n| n.comment)
+        .map(|n| &n.extent)
+        .collect()
+}
+
+/// Of `lines`, those holding a code byte inside one of `spans`.
+pub fn lines_in(tree: &Tree, lines: &BTreeSet<usize>, spans: &[Span]) -> BTreeSet<usize> {
+    if spans.is_empty() {
+        return BTreeSet::new();
+    }
+    let comments = comments(tree);
+    lines
+        .iter()
+        .copied()
+        .filter(|&line| {
+            code_bytes(tree, &comments, line)
+                .iter()
+                .any(|at| spans.iter().any(|s| s.contains(at)))
+        })
+        .collect()
 }

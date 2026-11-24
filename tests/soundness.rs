@@ -5,6 +5,18 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 fn command(program: &str, dir: &Path) -> Command {
     let mut cmd = Command::new(program);
     cmd.current_dir(dir)
@@ -72,7 +84,8 @@ fn assert_near(report: &Value, near: &str, risk: Option<&str>) {
     assert!(
         hunks(report)
             .iter()
-            .any(|h| h["detail"]["near"] == near && risk.is_none_or(|r| h["detail"]["risk"] == r)),
+            .any(|h| lead(h)["detail"]["near"] == near
+                && risk.is_none_or(|r| lead(h)["detail"]["risk"] == r)),
         "{report:#}"
     );
 }
@@ -88,8 +101,8 @@ fn a_whitespace_edit_in_a_file_that_doesnt_parse_is_logic() {
     );
     assert_near(&report, "format_only", None);
     let hunk = &hunks(&report)[0];
-    assert_eq!(hunk["evidence"]["method"], "line");
-    let reason = hunk["reason"].as_str().unwrap();
+    assert_eq!(lead(hunk)["evidence"]["method"], "line");
+    let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(reason.contains("compared line by line"), "{reason}");
 }
 
@@ -181,10 +194,9 @@ fn a_doc_moved_to_another_item_is_not_format_only() {
 }
 /// No hunk is structural.
 fn assert_not_structure(report: &Value) {
+    assert!(kinds(report).iter().all(|k| *k == "logic"), "{report:#}");
     assert!(
-        kinds(report)
-            .iter()
-            .all(|k| matches!(*k, "logic" | "move_with_changes")),
+        hunks(report).iter().all(|h| h["verdict"] == "behavior"),
         "{report:#}"
     );
 }
@@ -250,7 +262,12 @@ fn a_rust_chunk_reading_its_line_is_not_extracted() {
 fn contexts(report: &Value) -> Vec<&str> {
     hunks(report)
         .iter()
-        .flat_map(|h| h["detail"]["context"].as_array().into_iter().flatten())
+        .flat_map(|h| {
+            lead(h)["detail"]["context"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
         .map(|c| c.as_str().unwrap())
         .collect()
 }

@@ -4,6 +4,18 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 fn command(program: &str, dir: &Path) -> Command {
     let mut cmd = Command::new(program);
     cmd.current_dir(dir)
@@ -76,7 +88,7 @@ fn assert_near(report: &Value, near: &str, risk: &str) {
     assert!(
         hunks(report)
             .iter()
-            .any(|h| h["detail"]["near"] == near && h["detail"]["risk"] == risk),
+            .any(|h| lead(h)["detail"]["near"] == near && lead(h)["detail"]["risk"] == risk),
         "{report:#}"
     );
 }
@@ -110,15 +122,15 @@ fn a_clean_extract_without_parameters() {
     let (report, code) = classify(RENDER, RENDER_EXTRACTED);
     assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
     let hunk = &hunks(&report)[0];
-    assert_eq!(hunk["detail"]["method"], "rule");
-    assert_eq!(hunk["detail"]["caller"], "render");
-    assert_eq!(hunk["evidence"]["statements"], 2);
-    assert_eq!(hunk["evidence"]["nodes"], 12);
-    assert_eq!(hunk["evidence"]["params"], 0);
-    assert_eq!(hunk["evidence"]["verbatim"], 1.0);
-    assert_eq!(hunk["evidence"]["returns"], false);
+    assert_eq!(lead(hunk)["detail"]["method"], "rule");
+    assert_eq!(lead(hunk)["detail"]["caller"], "render");
+    assert_eq!(lead(hunk)["evidence"]["statements"], 2);
+    assert_eq!(lead(hunk)["evidence"]["nodes"], 12);
+    assert_eq!(lead(hunk)["evidence"]["params"], 0);
+    assert_eq!(lead(hunk)["evidence"]["verbatim"], 1.0);
+    assert_eq!(lead(hunk)["evidence"]["returns"], false);
     // Twelve nodes, under the sixteen that saturate the size factor.
-    assert_eq!(hunk["confidence"], 0.75);
+    assert_eq!(lead(hunk)["confidence"], 0.75);
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(code, 0);
 }
@@ -157,17 +169,17 @@ fn an_extract_with_parameters_and_a_return_value_cross_references_its_hunks() {
     let (report, code) = classify(&before, &after);
     assert_eq!(kinds(&report), ["extract", "extract"], "{report:#}");
     for hunk in hunks(&report) {
-        assert_eq!(hunk["detail"]["method"], "apply_tax");
-        assert_eq!(hunk["detail"]["caller"], "total");
-        assert_eq!(hunk["detail"]["hunks"], serde_json::json!([0, 1]));
+        assert_eq!(lead(hunk)["detail"]["method"], "apply_tax");
+        assert_eq!(lead(hunk)["detail"]["caller"], "total");
+        assert_eq!(lead(hunk)["detail"]["hunks"], serde_json::json!([0, 1]));
     }
-    let evidence = &hunks(&report)[0]["evidence"];
+    let evidence = &lead(&hunks(&report)[0])["evidence"];
     assert_eq!(evidence["params"], 2);
     assert_eq!(evidence["returns"], true);
     assert_eq!(evidence["nodes"], 10);
     // `subtotal` reaches the body as `amount`: one renamed node in ten.
     assert_eq!(evidence["verbatim"], 0.9);
-    assert_eq!(hunks(&report)[0]["confidence"], 0.59);
+    assert_eq!(lead(&hunks(&report)[0])["confidence"], 0.59);
     assert_eq!(code, 0);
 }
 
@@ -178,9 +190,9 @@ fn a_clean_inline_is_the_inverse() {
     let (report, code) = classify(&before, &after);
     assert_eq!(kinds(&report), ["inline", "inline"], "{report:#}");
     let hunk = &hunks(&report)[0];
-    assert_eq!(hunk["detail"]["method"], "apply_tax");
-    assert_eq!(hunk["detail"]["caller"], "total");
-    assert_eq!(hunk["detail"]["hunks"], serde_json::json!([0, 1]));
+    assert_eq!(lead(hunk)["detail"]["method"], "apply_tax");
+    assert_eq!(lead(hunk)["detail"]["caller"], "total");
+    assert_eq!(lead(hunk)["detail"]["hunks"], serde_json::json!([0, 1]));
     assert_eq!(code, 0);
 }
 
@@ -414,7 +426,7 @@ fn a_reformatted_sibling_keeps_its_label_beside_an_extract() {
         "{report:#}"
     );
     assert_eq!(
-        hunks(&report)[0]["detail"]["hunks"],
+        lead(&hunks(&report)[0])["detail"]["hunks"],
         serde_json::json!([0, 2])
     );
     assert_eq!(code, 0);
@@ -445,7 +457,7 @@ fn a_new_method_overriding_one_defined_elsewhere_in_the_change_is_logic() {
     assert!(
         hunks(&report)
             .iter()
-            .any(|h| h["detail"]["risk"] == "collision"),
+            .any(|h| lead(h)["detail"]["risk"] == "collision"),
         "{report:#}"
     );
     assert!(!kinds(&report).contains(&"extract"), "{report:#}");
@@ -463,7 +475,7 @@ fn an_extract_beside_an_edit_to_another_method_is_mixed() {
         "{report:#}"
     );
     assert_eq!(
-        hunks(&report)[0]["detail"]["hunks"],
+        lead(&hunks(&report)[0])["detail"]["hunks"],
         serde_json::json!([0, 2])
     );
     assert_eq!(code, 3);
@@ -478,11 +490,29 @@ fn an_extract_sharing_a_hunk_with_another_edit_is_logic() {
 }
 
 #[test]
-fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_is_logic() {
+fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_leaves_the_edit_as_logic() {
     let before = invoice(TOTAL, None);
     let after = invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("    4\n", "    40\n");
-    let (report, _) = classify(&before, &after);
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+    let (report, code) = classify(&before, &after);
+    assert_eq!(kinds(&report), ["extract", "logic"], "{report:#}");
+    let parts: Vec<&str> = hunks(&report)[1]["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(parts, ["extract", "logic"], "{report:#}");
+    // The sibling's edited line, `4` becoming `40`, is the residual's only code.
+    let line = |text: &str| {
+        text.lines()
+            .position(|l| l == "    40" || l == "    4")
+            .unwrap()
+            + 1
+    };
+    let residual = &hunks(&report)[1]["parts"][1]["lines"];
+    assert_eq!(residual["before"][0]["start"], line(&before));
+    assert_eq!(residual["after"][0]["start"], line(&after));
+    assert_eq!(code, 3);
 }
 
 #[test]

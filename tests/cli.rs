@@ -5,6 +5,18 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 /// git and shapr with the caller's repository context removed, so a run
 /// under `git rebase --exec` can't write into the real repository.
 fn command(program: &str, dir: &Path) -> Command {
@@ -94,9 +106,9 @@ fn reformatting_is_format_only() {
     let (report, code) = classify(&[("a.rb", METHOD)], &[("a.rb", after)]);
     assert_eq!(kinds(&report), ["format_only"]);
     let hunk = &report["hunks"][0];
-    assert_eq!(hunk["confidence"], 1.0);
+    assert_eq!(lead(hunk)["confidence"], 1.0);
     assert_eq!(hunk["parsed"], true);
-    assert_eq!(hunk["evidence"]["method"], "ast");
+    assert_eq!(lead(hunk)["evidence"]["method"], "ast");
     assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
     assert_eq!(report["summary"]["structure_share"], 1.0);
@@ -139,7 +151,7 @@ fn changing_code_is_logic_with_its_evidence() {
     assert_eq!(kinds(&report), ["logic"]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["review_lines"], 2);
-    assert!(hunk["evidence"]["similarity"].as_f64().unwrap() < 1.0);
+    assert!(lead(hunk)["evidence"]["similarity"].as_f64().unwrap() < 1.0);
     assert_eq!(report["summary"]["verdict"], "behavior");
     assert_eq!(report["summary"]["behavior_lines"], 2);
     assert_eq!(code, 1);
@@ -192,7 +204,7 @@ fn an_extract_is_structure_but_still_read() {
 }
 
 #[test]
-fn a_move_with_changes_reviews_only_the_changed_lines() {
+fn a_moved_method_with_an_edit_reviews_only_the_changed_lines() {
     let method = |name: &str, call: &str| {
         format!("  def {name}(x)\n    y = x * 2\n    {call}(y)\n    y + 1\n  end\n")
     };
@@ -208,11 +220,8 @@ fn a_move_with_changes_reviews_only_the_changed_lines() {
         method("moved", "warn")
     );
     let (report, _) = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
-    assert_eq!(
-        kinds(&report),
-        ["move_with_changes", "move_with_changes"],
-        "{report:#}"
-    );
+    // Moved and edited: a move part and the edited line as logic.
+    assert_eq!(kinds(&report), ["logic", "logic"], "{report:#}");
     // `log(y)` out of the removed body, `warn(y)` into the added one.
     assert_eq!(review_lines(&report), [1, 1]);
     assert_eq!(report["summary"]["behavior_lines"], 2);
@@ -287,10 +296,10 @@ fn a_syntax_error_falls_back_to_lines_and_proves_no_structure() {
     let (report, _) = classify(&[("a.rb", before)], &[("a.rb", after)]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
-    assert_eq!(hunk["detail"]["near"], "format_only");
+    assert_eq!(lead(hunk)["detail"]["near"], "format_only");
     assert_eq!(hunk["parsed"], false);
-    assert_eq!(hunk["evidence"]["method"], "line");
-    assert_eq!(hunk["confidence"], 0.0);
+    assert_eq!(lead(hunk)["evidence"]["method"], "line");
+    assert_eq!(lead(hunk)["confidence"], 0.0);
     assert_eq!(report["summary"]["unparsed_hunks"], 1);
 }
 
@@ -299,9 +308,9 @@ fn other_languages_are_unparsed_logic() {
     let (report, code) = classify(&[("notes.md", "a\n")], &[("notes.md", "b\n")]);
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
-    assert_eq!(hunk["confidence"], 0.0);
+    assert_eq!(lead(hunk)["confidence"], 0.0);
     assert_eq!(hunk["language"], Value::Null);
-    assert_eq!(hunk["evidence"]["method"], "none");
+    assert_eq!(lead(hunk)["evidence"]["method"], "none");
     assert_eq!(code, 1);
 }
 
@@ -425,7 +434,9 @@ fn every_output_field_is_documented() {
     let records = [
         &report["files"][0],
         &report["hunks"][0],
-        &report["hunks"][0]["evidence"],
+        &report["hunks"][0]["parts"][0],
+        &report["hunks"][0]["parts"][0]["evidence"],
+        &report["hunks"][0]["parts"][0]["lines"],
         &report["hunks"][0]["before"],
         &report["summary"],
         &report["summary"]["kinds"],

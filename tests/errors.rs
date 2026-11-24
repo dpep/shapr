@@ -5,6 +5,18 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 fn command(program: &str, dir: &Path) -> Command {
     let mut cmd = Command::new(program);
     cmd.current_dir(dir)
@@ -164,8 +176,8 @@ fn a_syntax_error_is_named_in_the_reason() {
     let report: Value = serde_json::from_slice(&out.stdout).unwrap();
     let hunk = &report["hunks"][0];
     assert_eq!(hunk["kind"], "logic");
-    assert_eq!(hunk["evidence"]["method"], "line");
-    let reason = hunk["reason"].as_str().unwrap();
+    assert_eq!(lead(hunk)["evidence"]["method"], "line");
+    let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(
         reason.contains("syntax error on the after side; compared line by line"),
         "{reason}"

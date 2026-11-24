@@ -6,7 +6,7 @@
 //! changed, on each side: a construct present on one side and not the other
 //! (by kind, name, own text and what it tests) is a change to it.
 
-use super::{Labels, Method};
+use super::{Label, Labels, Method};
 use crate::change::{Change, Trees};
 use crate::diff::{Hunk, Lines};
 use crate::frontend::{self, Construct, Frontend};
@@ -85,10 +85,39 @@ pub fn run(change: &Change, labels: &mut Labels) {
                 .as_ref()
                 .filter(|_| label.residual.evidence.method == Method::Ast)
             {
-                parsed.facets(hunk, &mut facets);
+                parsed.facets(&residual(hunk, label), &mut facets);
             }
             label.residual.facets = facets.into_iter().collect();
         }
+    }
+}
+
+/// The hunk narrowed to its residual's lines: what the facets describe.
+fn residual(hunk: &Hunk, label: &Label) -> Hunk {
+    let lines = &label.residual.lines;
+    if *lines == label.changed {
+        return Hunk {
+            before: hunk.before,
+            after: hunk.after,
+            removed: hunk.removed.clone(),
+            added: hunk.added.clone(),
+        };
+    }
+    let run = |lines: &BTreeSet<usize>, region: Lines| match (lines.first(), lines.last()) {
+        (Some(&first), Some(&last)) => Lines {
+            start: first,
+            count: last - first + 1,
+        },
+        _ => Lines {
+            start: region.start,
+            count: 0,
+        },
+    };
+    Hunk {
+        before: run(&lines.before, hunk.before),
+        after: run(&lines.after, hunk.after),
+        removed: lines.before.iter().copied().collect(),
+        added: lines.after.iter().copied().collect(),
     }
 }
 
@@ -216,15 +245,18 @@ impl Side<'_> {
         self.touches(lines_of(self.tree(), span))
     }
 
-    /// Definitions here, touched by the change, whose name the other side
-    /// doesn't define.
+    /// Definitions here whose own syntax (the line naming it) the change
+    /// touches, and whose name the other side doesn't define.
     fn unmatched_definitions(&self, other: &Side) -> Vec<NodeId> {
         self.facts
             .definitions
             .iter()
             .filter(|(key, _)| !other.facts.definitions.contains_key(*key))
             .flat_map(|(_, ids)| ids.iter().copied())
-            .filter(|&id| self.touches_span(&self.tree().node(id).extent))
+            .filter(|&id| {
+                let own = self.tree().own_text(id);
+                own.iter().any(|&(line, _)| self.touches((line, line)))
+            })
             .collect()
     }
 }

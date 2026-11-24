@@ -1,5 +1,5 @@
-//! `move` and `move_with_changes`: a declaration that leaves one place and
-//! reappears in another, in the same file or another.
+//! `move`: a declaration that leaves one place and reappears in another, in
+//! the same file or another.
 //!
 //! Each file's two trees are aligned container by container (the file, then
 //! each class or module body): a heaviest common subsequence over the
@@ -7,23 +7,25 @@
 //! aligns, and a namespace's body aligns in turn), other statements by hash.
 //! A declaration (`Role::is_declaration`) left out of the alignment is a
 //! *unit*, removed or added. A removed unit pairs with an
-//! added one by equal hash (`move`) or by name and subtree similarity
-//! (`move_with_changes`). A pair is a `move` only when the code around it
-//! means the same in both places: the same owner, the same visibility
-//! section, the same order relative to statements that name it at load time
-//! and, across files, the same file-level directives, in a language whose
-//! files aren't modules of their own. Otherwise it is a `move_with_changes`
-//! naming each [`Context`] that differs: relocated code, but not structure.
+//! added one by equal hash or by name and subtree similarity (a body that
+//! also changed). A pair is structure only when the code around it means the
+//! same in both places: the same owner, the same visibility section, the
+//! same order relative to statements that name it at load time and, across
+//! files, the same file-level directives, in a language whose files aren't
+//! modules of their own. Otherwise its part names each [`Context`] that
+//! differs: relocated code, but not structure.
 //!
-//! A hunk is labeled from the trees, not from git's line placement: it is a
-//! move when every changed code line lies in a paired unit or in a node the
-//! alignment kept unchanged (git may slide a removal across identical lines).
+//! A hunk's part comes from the trees, not from git's line placement: it
+//! holds the changed lines in a paired unit or in a node the alignment kept
+//! unchanged (git may slide a removal across identical lines), except the
+//! unit's lines that changed in the move, which stay logic.
 
 use super::format::{dice, subtree_hashes};
 use super::{Claim, Confidence, Kind, Labels, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility, spells};
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, json};
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
@@ -41,7 +43,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
     let mut kept: HashMap<(usize, Side), Vec<RangeInclusive<usize>>> = HashMap::new();
     for (f, file) in change.files.iter().enumerate() {
         let Ok(trees) = &file.trees else { continue };
-        if !trees.clean() || labels[f].iter().all(|l| !l.open()) {
+        if !trees.clean() || labels[f].iter().all(|l| l.unclaimed().is_empty()) {
             continue;
         }
         let mut aligner = Aligner {
@@ -77,39 +79,38 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
         by_unit.insert(pair.to, p);
     }
 
-    for (f, file) in change.files.iter().enumerate() {
+    for (f, (file, labels)) in change.files.iter().zip(labels.iter_mut()).enumerate() {
         let Ok(trees) = &file.trees else { continue };
-        for (h, hunk) in file.diff.hunks.iter().enumerate() {
-            if !labels[f][h].open() || !kept.contains_key(&(f, Side::Removed)) {
+        for (h, label) in labels.iter_mut().enumerate() {
+            if label.unclaimed().is_empty() || !kept.contains_key(&(f, Side::Removed)) {
                 continue;
             }
             let sides = [
-                (Side::Removed, &trees.before, &hunk.removed),
-                (Side::Added, &trees.after, &hunk.added),
+                (Side::Removed, &trees.before, &label.changed.before),
+                (Side::Added, &trees.after, &label.changed.after),
             ];
             let mut mine = Vec::new();
-            let mut explained = true;
+            // Changed lines in a paired unit or in code the alignment kept
+            // (git may slide a removal across identical lines).
+            let mut explained = Claim::default();
             for (side, tree, changed) in sides {
-                let code: Vec<usize> = changed
-                    .iter()
-                    .copied()
-                    .filter(|&l| tree.line(l).code)
-                    .collect();
                 let here: Vec<(usize, RangeInclusive<usize>)> = (0..units.len())
                     .filter(|&u| units[u].file == f && units[u].side == side)
+                    .filter(|u| by_unit.contains_key(u))
                     .map(|u| (u, lines(tree, units[u].node)))
-                    .filter(|(_, r)| code.iter().any(|l| r.contains(l)))
+                    .filter(|(_, r)| changed.iter().any(|&l| r.contains(&l) && tree.line(l).code))
                     .collect();
                 mine.extend(here.iter().filter_map(|(u, _)| by_unit.get(u).copied()));
                 let ranges = &kept[&(f, side)];
-                explained &= code.iter().all(|l| {
-                    ranges.iter().any(|r| r.contains(l))
-                        || here
-                            .iter()
-                            .any(|(u, r)| r.contains(l) && by_unit.contains_key(u))
+                let lines = changed.iter().copied().filter(|l| {
+                    ranges.iter().any(|r| r.contains(l)) || here.iter().any(|(_, r)| r.contains(l))
                 });
+                match side {
+                    Side::Removed => explained.before.extend(lines),
+                    Side::Added => explained.after.extend(lines),
+                }
             }
-            if !explained || mine.is_empty() {
+            if mine.is_empty() {
                 continue;
             }
             mine.sort_unstable();
@@ -119,11 +120,6 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let mut context: Vec<Context> = mine.iter().flat_map(|p| p.context.clone()).collect();
             context.sort_unstable();
             context.dedup();
-            let kind = if exact && context.is_empty() {
-                Kind::Move
-            } else {
-                Kind::MoveWithChanges
-            };
             let mut reason: String = if exact {
                 "declarations moved unchanged".into()
             } else {
@@ -138,7 +134,6 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                     .map(|p| p.confidence())
                     .fold(f64::INFINITY, f64::min),
             );
-            let label = &mut labels[f][h];
             let mut evidence = label.residual.evidence.clone();
             let values = &mut evidence.values;
             values.clear();
@@ -149,62 +144,49 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 "candidates".into(),
                 json!(mine.iter().map(|p| p.candidates).max()),
             );
-            let entries: Vec<Value> = mine
+            let entries: Vec<Entry> = mine
                 .iter()
                 .map(|p| entry(change, &units, &ids, p))
                 .collect();
-            let review = match kind {
-                Kind::Move => Claim::default(),
-                _ => moved_changes(&entries, ids[f] + h),
-            };
-            let context: Vec<&str> = context.iter().map(|c| c.as_str()).collect();
+            let (changed, first) = moved_changes(&entries, ids[f] + h);
+            let names: Vec<&str> = context.iter().map(|c| c.as_str()).collect();
+            let lines = explained.minus(&changed);
             let part = Part {
-                kind,
-                structure: kind.is_structure(),
-                lines: label.changed.clone(),
-                review,
+                kind: Kind::Move,
+                review: first.intersect(&lines),
+                lines,
                 confidence,
                 reason,
                 evidence,
                 detail: Map::from_iter([
-                    ("moves".to_string(), Value::from(entries)),
-                    ("context".to_string(), json!(context)),
+                    ("moves".to_string(), json!(entries)),
+                    ("context".to_string(), json!(names)),
                 ]),
+                context,
             };
             label.claim(part);
         }
     }
 }
 
-/// The lines inside the hunk's moved units that changed in the move:
-/// before-side lines of the units it removed, after-side lines of the units
-/// it added. A unit moved into a new context adds its first line, where that
-/// context shows.
-fn moved_changes(entries: &[Value], id: usize) -> Claim {
-    let mut out = Claim::default();
+/// The lines inside the hunk's moved units that changed in the move
+/// (before-side lines of the units it removed, after-side lines of the units
+/// it added), and the first line of each unit moved into a new context,
+/// where that context shows.
+fn moved_changes(entries: &[Entry], id: usize) -> (Claim, Claim) {
+    let (mut changed, mut first) = (Claim::default(), Claim::default());
     for entry in entries {
-        let lines = |key: &str| {
-            entry[key]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_u64)
-                .map(|l| l as usize)
-                .collect::<Vec<_>>()
-        };
-        let id = Some(id as u64);
-        let context = entry["context"].as_array().is_some_and(|c| !c.is_empty());
-        let first = |key: &str| entry[key].as_u64().filter(|_| context).map(|l| l as usize);
-        if entry["from_hunk"].as_u64() == id {
-            out.before.extend(lines("changed_before"));
-            out.before.extend(first("from_line"));
+        let start = |line: Option<usize>| line.filter(|_| !entry.context.is_empty());
+        if entry.from_hunk == Some(id) {
+            changed.before.extend(&entry.changed_before);
+            first.before.extend(start(entry.from_line));
         }
-        if entry["to_hunk"].as_u64() == id {
-            out.after.extend(lines("changed_after"));
-            out.after.extend(first("to_line"));
+        if entry.to_hunk == Some(id) {
+            changed.after.extend(&entry.changed_after);
+            first.after.extend(start(entry.to_line));
         }
     }
-    out
+    (changed, first)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -827,7 +809,26 @@ fn hunk_ids(change: &Change) -> Vec<usize> {
         .collect()
 }
 
-fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Value {
+/// One pair touching a hunk, as `detail.moves` lists it.
+#[derive(Serialize)]
+struct Entry {
+    name: Option<String>,
+    from_hunk: Option<usize>,
+    to_hunk: Option<usize>,
+    from_line: Option<usize>,
+    to_line: Option<usize>,
+    #[serde(serialize_with = "context_names")]
+    context: Vec<Context>,
+    similarity: f64,
+    changed_before: Vec<usize>,
+    changed_after: Vec<usize>,
+}
+
+fn context_names<S: serde::Serializer>(context: &[Context], s: S) -> Result<S::Ok, S::Error> {
+    s.collect_seq(context.iter().map(|c| c.as_str()))
+}
+
+fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Entry {
     let (from, to) = (&units[pair.from], &units[pair.to]);
     let id = |u: &Unit| u.hunk(change).map(|h| ids[u.file] + h);
     let first = |u: &Unit| {
@@ -839,17 +840,22 @@ fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Value {
     } else {
         (Vec::new(), Vec::new())
     };
-    json!({
-        "name": from.tree(change).node(from.node).name.as_deref(),
-        "from_hunk": id(from),
-        "to_hunk": id(to),
-        "from_line": first(from),
-        "to_line": first(to),
-        "context": pair.context.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
-        "similarity": pair.similarity,
-        "changed_before": changed_before,
-        "changed_after": changed_after,
-    })
+    Entry {
+        name: from
+            .tree(change)
+            .node(from.node)
+            .name
+            .as_deref()
+            .map(str::to_string),
+        from_hunk: id(from),
+        to_hunk: id(to),
+        from_line: first(from),
+        to_line: first(to),
+        context: pair.context.clone(),
+        similarity: pair.similarity,
+        changed_before,
+        changed_after,
+    }
 }
 
 /// Lines of each unit, whitespace aside, that the other doesn't share: a

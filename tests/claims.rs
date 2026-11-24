@@ -6,6 +6,18 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 /// git and shapr with the caller's repository context removed, so a run
 /// under `git rebase --exec` can't write into the real repository.
 fn command(program: &str, dir: &Path) -> Command {
@@ -90,7 +102,7 @@ fn a_fix_commit_is_a_claim_beside_the_code_facts() {
     assert_eq!(claims["conflicts"], json!([]));
     // The claim never touches the code's labels.
     assert_eq!(report["hunks"][0]["kind"], "logic");
-    assert_eq!(report["hunks"][0]["facets"], json!(["condition"]));
+    assert_eq!(lead(&report["hunks"][0])["facets"], json!(["condition"]));
 }
 
 #[test]

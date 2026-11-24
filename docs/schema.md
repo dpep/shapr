@@ -37,21 +37,36 @@ Every field below is always present. Fields that can be `null` say so.
   (`#!/usr/bin/env ruby`) are code. In a file shapr didn't
   parse, every changed line counts as code.
 
-## Hunk kinds
+## Parts
 
 A hunk is one `@@` section of the diff, narrowed to its changed region:
 first changed line to last, with the context between them.
 
+A hunk is made of *parts*. Each part is a structural change shapr proved,
+with the changed lines it explains; the *residual* is a last part, of kind
+`logic`, holding exactly the changed lines no proven part explains. Parts
+never share a line, and together they hold every changed line. A hunk with
+nothing proven is one `logic` part.
+
 | kind | structure? | meaning |
 |---|---|---|
-| `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. |
+| `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic. |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
-| `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. See [Moves](#moves). |
-| `move_with_changes` | no | A move whose body also changed, or whose body is unchanged but now runs among different code (another owner, visibility section, load order, file-level directives, or Rust module): read the changed lines and where it landed. See [Moves](#moves). |
+| `move` | yes, unless its `detail.context` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
 | `extract` | yes | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
 | `inline` | yes | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
-| `logic` | no | Anything else. The default: a hunk shapr can't prove structural is `logic`. |
+| `logic` | no | The residual: anything else. A line shapr can't prove structural is `logic`. |
+
+Each part is proven against the whole of both trees, residual included, so
+new code in the residual can break a part's proof (a rename whose new name
+new code also defines): the part is then not claimed and its lines stay
+`logic`.
+
+A hunk's `verdict` is `structure` when every part is structure, `behavior`
+when none is, and `mixed` otherwise. Its `kind` is a one-word rollup:
+`logic` unless the verdict is `structure`, else its most substantial part
+kind in the table's order (a rename beside a reformat is a `rename`).
 
 "Structure" describes the shape of a change, not its risk: extracts and
 inlines in particular are linked to later bug fixes and still deserve review.
@@ -64,9 +79,12 @@ any reordering is `logic`.
 
 ## Renames
 
-A hunk is a `rename` when its two sides align node for node (same kinds,
-roles and child order, same source text apart from names and whitespace)
-and every name that differs passes these checks:
+A hunk's two sides are aligned node for node: two nodes align when their
+kinds, roles, child counts and source text apart from names and whitespace
+match, and their children then align in turn; a pair that doesn't align
+differs as a whole, and its lines are `logic`. A changed line holding a
+renamed name, and no code that differs otherwise, is a `rename` part when
+every name that differs passes these checks:
 
 - Each old name becomes one new name, and each new name comes from one old
   name, within the scope.
@@ -94,6 +112,9 @@ and every name that differs passes these checks:
   language calls those without a call site shapr can see.
 - A renamed dynamic reference (`send(:old)` → `send(:new)`) follows a method,
   constant or field rename that passes.
+- Every definition of the new name in its scope after the change is a
+  renamed one: new code defining it too (a second `def new` in another
+  class, a new `let new`) would share the name with the renamed code.
 
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
 class or module; a `field` in its file when it is a Ruby instance or class
@@ -105,7 +126,7 @@ parsed file of the change.
 
 | key | type | meaning |
 |---|---|---|
-| `renames` | array | One object per rename the hunk makes. |
+| `renames` | array | One object per rename the part makes. |
 | `from`, `to` | string | The old and new name. |
 | `kind` | string | `local`, `field`, `method` or `constant`. |
 | `occurrences` | int | Uses renamed across the change, the definition included; a class or module name counts once. |
@@ -114,7 +135,7 @@ parsed file of the change.
 
 | key | type | meaning |
 |---|---|---|
-| `renamed` | int | Sum of the hunk's renames' `occurrences`. |
+| `renamed` | int | Sum of the part's renames' `occurrences`. |
 | `uses` | int | Uses of the old names shapr saw in their scopes before the change. More than `renamed` when another hunk deleted some. |
 | `unseen_uses` | bool | Some name can be used in code shapr doesn't see (fields, methods, constants: other files, subclasses, templates). |
 
@@ -203,8 +224,8 @@ are stated in Ruby's terms; for Rust:
   don't read names.
 - Moves: a unit is a function, struct, enum, union, trait, `impl`, module,
   constant, static or type alias. Each file is its own module, so a
-  definition moved to another file is a `move_with_changes` with context
-  `module`. Struct fields, enum
+  definition moved to another file is a `move` part with context
+  `module`, which isn't structure. Struct fields, enum
   variants and `macro_rules!` don't move. An `impl` is its methods' owner,
   told apart from another by its header.
 - Extract and inline: a `self` parameter rides on the call's receiver, and
@@ -236,16 +257,27 @@ are stated in Ruby's terms; for Rust:
 | `parsed` | bool | Compared as trees. `false` when either side has a syntax error (compared as text instead) or the file wasn't parsed at all. |
 | `generated` | bool | The hunk's file is generated: its `review_lines` is 0 and the summary's size sums leave it out. See [Generated files](#generated-files). |
 | `before`, `after` | line run | The changed region on each side. |
-| `kind` | string | See [Hunk kinds](#hunk-kinds). |
-| `confidence` | number 0–1 | How strongly the evidence supports `kind`. See [Confidence](#confidence). |
-| `reason` | string | One short human-readable sentence. Not a contract: don't match on it. |
-| `evidence` | object | What the label rests on. Always has `method`; other keys depend on the kind. See [Evidence](#evidence). |
+| `kind` | string | The one-word rollup: `logic` unless `verdict` is `structure`, else the most substantial part kind. See [Parts](#parts). |
+| `verdict` | string | `structure` (every part is structure), `behavior` (none is) or `mixed`. |
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), plus, for an entry with a `context`, its `from_line` or `to_line` (the unit's first code line, where the new context shows), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. 0 in a `generated` file. |
-| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A `logic` hunk that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
-| `facets` | string array | What kind of logic change a `logic` hunk is, in the table's order; empty for every other kind. See [Facets](#facets). |
+| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `generated` file. |
+| `parts` | array | The hunk's parts in the [Parts](#parts) table's order, the residual (`logic`) last. Below. |
+
+Each part:
+
+| field | type | meaning |
+|---|---|---|
+| `kind` | string | See [Parts](#parts). |
+| `structure` | bool | Changes structure without changing behavior: false for `logic` and for a `move` into new surroundings. |
+| `lines` | object | The changed lines the part explains: `before`, the `-` lines, and `after`, the `+` lines, each an array of line runs. |
+| `confidence` | number 0–1 | How strongly the evidence supports the part. See [Confidence](#confidence). |
+| `reason` | string | One short human-readable sentence. Not a contract: don't match on it. A residual's names the structural kind it resembles and why it isn't one, when a pass came close. |
+| `evidence` | object | What the part rests on. Always has `method`; other keys depend on the kind. See [Evidence](#evidence). |
+| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
+| `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
+| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `move` into new surroundings: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. |
 
 ## Evidence
 
@@ -256,9 +288,9 @@ are stated in Ruby's terms; for Rust:
 
 ## Extract and inline
 
-An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and the methods' container still holds the same other code, in order, apart from siblings that changed on their own. Those siblings' hunks keep their own label; a hunk mixing the refactoring with any other change stays `logic`. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets the label, or none does.
+An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and the methods' container still holds the same other code, in order, apart from siblings that changed on their own. A sibling's changed lines aren't part of the refactoring: they stay `logic`, beside the refactoring's part when they share its hunk. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets a part, or none does (when another part already explains a line it would).
 
-`detail` on each labeled hunk:
+`detail` on each part:
 
 | key | type | meaning |
 |---|---|---|
@@ -278,7 +310,7 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 
 Confidence is `size × (1 + verbatim) / 2`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
 
-A hunk that matches this shape but would change behavior stays `logic` and says why in `detail`, beside `method`, `caller` and `hunks`:
+A hunk that matches this shape but would change behavior stays `logic`, and its residual says why in `detail`, beside `method`, `caller` and `hunks`:
 
 | key | type | meaning |
 |---|---|---|
@@ -289,23 +321,24 @@ shapr sees only the files in the diff: a subclass override or a caller elsewhere
 
 ## Facets
 
-A `logic` hunk's `facets` say what kind of logic change it is: facts the code
-shows, never what a commit message claims. They don't change `kind` or the
-verdict, and a hunk can carry several or none. Path facets apply to any file;
-the others need both sides parsed cleanly (`evidence.method` `"ast"`).
+A residual's `facets` say what kind of logic change it is: facts the code
+shows on the residual's lines, never what a commit message claims. They
+don't change `kind` or the verdict, and a residual can carry several or
+none. Path facets apply to any file; the others need both sides parsed
+cleanly (`evidence.method` `"ast"`).
 
 | facet | meaning | how it is found |
 |---|---|---|
 | `test` | Test code. | The path is under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `test_*.rb`, `*_test.rs`, `tests.rs`; or every changed code line lies inside a Rust `#[test]` (`#[tokio::test]`, `#[rstest]`) fn or `#[cfg(test)]` mod. |
 | `manifest` | A dependency manifest. | By name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, and the manifests beside the other [lockfiles](#generated-files) (`package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`). |
-| `adds_definition` | A method, class or module that didn't exist. | A definition the hunk touches whose name, qualified by its enclosing definitions, the other side of the file doesn't define. A Rust `impl` is named by its header. |
-| `removes_definition` | A method, class or module that no longer exists. | The same, before side. A method renamed and edited both adds and removes. |
-| `signature` | An existing method's interface. | A method on both sides, touched by the hunk, whose parameter list or annotations (Rust: return type, generics, visibility) differ, whitespace aside. |
+| `adds_definition` | A method, class or module that didn't exist. | A definition whose own syntax (the line naming it) is on a residual line, and whose name, qualified by its enclosing definitions, the other side of the file doesn't define. A Rust `impl` is named by its header. |
+| `removes_definition` | A method, class or module that no longer exists. | The same, before side. A method renamed and edited, where the rename isn't proven, both adds and removes. |
+| `signature` | An existing method's interface. | A method on both sides, touched by the residual, whose parameter list or annotations (Rust: return type, generics, visibility) differ, whitespace aside. |
 | `condition` | What the code branches on. | A conditional (`if`, `unless`, `while`, `until`, `case`, `when`, `in`; Rust `if`, `while`, `match`, a match arm) whose test sits on a changed line, or a comparison or boolean operator (`==`, `<`, `>=`, `&&`, `and`, `!`, …) whose operator does, is on one side and not the other: added, removed, or testing something else. A line added inside a branch's body is not a condition change. |
 | `error_handling` | How errors are raised, propagated or recovered. | An error construct with its own syntax on a changed line is on one side and not the other, compared by kind, name, operator text and the classes it names. Ruby: `raise`/`fail`, `rescue` (clause and modifier), `ensure`. Rust: `?`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`, `bail!`, `ensure!`, `anyhow!`, `Err(…)` built or matched, and `unwrap`, `expect`, `unwrap_err`, `expect_err`, `map_err`, `ok_or`, `ok_or_else`, `unwrap_or`, `unwrap_or_else`, `unwrap_or_default`, `context`, `with_context`. Changing an argument under a `?` is not. |
 | `literal_only` | Only literal values changed: config-like. | The changed regions are equal once every literal (number, string, symbol, boolean, nil, regexp; a string's text inside an interpolation) and comment is masked, and hold the same number of literals. A symbol naming code (`send(:x)`, see `DynamicName` in the rename rules) is not a literal here. |
 
-Code inside a definition the hunk adds or removes doesn't add `condition` or
+Code inside a definition the residual adds or removes doesn't add `condition` or
 `error_handling`: `adds_definition` already says all of it is new.
 
 Facets describe; they don't judge intent. A fix and a feature both change
@@ -350,7 +383,7 @@ Each conflict is a count of what the code shows, not a verdict on the author:
 | key | type | meaning |
 |---|---|---|
 | `claim` | string | The claimed category. |
-| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` compared hunks structural. `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks without the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and every hunk is structure. |
+| `finding` | string | `behavior_hunks`: the claim is `refactor` or `docs`, no message claims `fix`, `feature` or `perf`, and shapr couldn't prove `count` compared hunks structural (their `verdict` is `behavior` or `mixed`). `non_test_behavior_hunks`: the same for a `test` claim, counting behavior hunks whose residual lacks the `test` facet. `no_behavior_hunks`: the claim is `fix`, `feature` or `perf` and every hunk is structure. |
 | `count` | int | Behavior hunks behind the finding (0 for `no_behavior_hunks`). Hunks in files shapr didn't compare (`evidence.method` `"none"`) aren't counted: their `logic` is unknown, not evidence. |
 
 "Couldn't prove structural" is not "changes behavior": a `refactor` claim with
@@ -359,21 +392,21 @@ where to look.
 
 ## Confidence
 
-Confidence is computed from the evidence, not assigned per kind.
+Each part's confidence is computed from the evidence, not assigned per kind.
 
 - `method` `"ast"`: 1 for `format_only`, `comment_only` and `logic`. Tree
   comparison is exact, so it settles those three. `rename`, `move`,
-  `move_with_changes`, `extract` and `inline` compute their own score: see
+  `extract` and `inline` compute their own score: see
   [Renames](#renames), [Moves](#moves) and
   [Extract and inline](#extract-and-inline).
 - `method` `"line"`: text equality can't see a change in how whitespace
   parses (`puts -x` and `puts - x`), so it never proves structure. A hunk
-  whose code text matches is `logic` with confidence 0 and `detail.near`
-  naming the kind it resembles, `"format_only"` or `"comment_only"`. One
-  whose code text differs is `logic` at most **0.5** (the line cap), falling in
-  proportion to the region's lines that hold a syntax error: `0.5 × (1 − lines
-  with an error / lines in both regions)`.
-- `method` `"none"`: 0. The `logic` label is the safe default, not a finding.
+  whose code text matches is one `logic` part with confidence 0 and
+  `detail.near` naming the kind it resembles, `"format_only"` or
+  `"comment_only"`. One whose code text differs is `logic` at most **0.5**
+  (the line cap), falling in proportion to the region's lines that hold a
+  syntax error: `0.5 × (1 − lines with an error / lines in both regions)`.
+- `method` `"none"`: 0. The `logic` part is the safe default, not a finding.
 
 ## Moves
 
@@ -381,13 +414,13 @@ A *unit* is a method, class, module or constant definition of at least 3
 syntax nodes, sitting directly in a file or a class or module body (not in
 a block or conditional). Each file's trees are aligned body by body, larger
 nodes first; a unit the alignment leaves out was removed or added. A removed unit pairs with an
-added one, in the same file or another, by equal tree (`move`) or, failing
-that, by equal name and kind with `similarity` at least 0.5
-(`move_with_changes`). Definitions align by name, so one that keeps its
-place among its siblings was edited, not moved.
+added one, in the same file or another, by equal tree or, failing that, by
+equal name and kind with `similarity` at least 0.5 (a move whose body also
+changed). Definitions align by name, so one that keeps its place among its
+siblings was edited, not moved.
 
-A pair is a `move_with_changes`, even with an unchanged body, when the code
-around its new place differs. Its `context` names each difference:
+A pair is not structure, even with an unchanged body, when the code around
+its new place differs. Its `context` names each difference:
 
 | context | meaning |
 |---|---|
@@ -399,26 +432,29 @@ around its new place differs. Its `context` names each difference:
 | `position` | The unit reads its own line (`__LINE__`, Rust's `line!()`), or its own file (`__FILE__`, `__dir__`, `require_relative`, Rust's `file!()`) and moved to another file. |
 
 The body is relocated, not rewritten, so a reviewer reads where it landed
-rather than every line of it; but its meaning can change, so it is never a
-`move`. Code that isn't a unit (a DSL call, a definition under the size floor
-or inside a block) never pairs: reordering it is `logic`.
+rather than every line of it; but its meaning can change, so the part isn't
+structure. Code that isn't a unit (a DSL call, a definition under the size
+floor or inside a block) never pairs: reordering it is `logic`.
 
-A hunk is a move when every changed code line lies in a paired unit or in
-code the alignment kept unchanged. Both halves are labeled.
+A hunk's `move` part holds its changed lines that lie in a paired unit or in
+code the alignment kept unchanged (git may slide a removal across identical
+lines), except the lines of a unit that changed in the move
+(`changed_before`, `changed_after`), which stay `logic`. Both halves get a
+part.
 
-`evidence` keys for `move` and `move_with_changes`:
+`evidence` keys for `move`:
 
 | key | type | meaning |
 |---|---|---|
-| `similarity` | number 0–1 | The lowest similarity among the hunk's pairs: Dice coefficient over the two units' subtrees. 1 for `move`. |
+| `similarity` | number 0–1 | The lowest similarity among the hunk's pairs: Dice coefficient over the two units' subtrees. 1 when every body is unchanged. |
 | `nodes` | int | Syntax nodes in the smallest unit moved. |
 | `candidates` | int | The most units, among the hunk's pairs, that matched equally well; 1 when every match is unique. |
 
-`detail` for `move` and `move_with_changes`:
+`detail` for `move`:
 
 | key | type | meaning |
 |---|---|---|
-| `context` | string array | Every `context` among the hunk's entries, in the table's order; empty for a `move`. |
+| `context` | string array | Every `context` among the hunk's entries, in the table's order; empty for a part that is structure. |
 | `moves` | array | One entry per pair touching the hunk, below. |
 
 Each `moves` entry:
@@ -442,20 +478,20 @@ enough to match by chance, and when several units could be its other half.
 |---|---|---|
 | `record` | `"summary"` | |
 | `schema` | int | This schema's version. |
-| `verdict` | string | `"structure"`: every hunk is a structural kind. `"behavior"`: none is. `"mixed"`: both. `"empty"`: no hunks. The exit code carries it too. |
+| `verdict` | string | `"structure"`: every part of every hunk is structure. `"behavior"`: no part is. `"mixed"`: both, in one hunk or across hunks. `"empty"`: no hunks. The exit code carries it too. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
 | `generated_hunks` | int | Hunks with `generated: true`. They count in `hunks`, `kinds` and `verdict`, and nowhere below. |
-| `kinds` | object | Hunk count per kind, every kind present. |
-| `move_contexts` | object | `move_with_changes` hunk count per `context` (see [Moves](#moves)), every context present; a hunk with two contexts counts under both. |
-| `facets` | object | `logic` hunk count per facet (see [Facets](#facets)), every facet present; a hunk with two facets counts under both. |
+| `kinds` | object | Part count per kind, every kind present: `logic` counts residuals. A hunk that is one part counts once. |
+| `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
+| `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
 | `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated. 0 for one file. |
 | `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated. |
-| `behavior_lines` | int | `review_lines` summed over hunks of behavior kinds (`logic`, `move_with_changes`): the behavior change's size, comments and unchanged moved lines excluded. |
-| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structural hunks over all changed lines, generated hunks left out; 0 when nothing changed. |
+| `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings): the behavior change's size, comments and unchanged moved lines excluded. |
+| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts over all changed lines, generated hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
 | `source` | object or null | The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local range or stdin. |
 

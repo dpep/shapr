@@ -1,9 +1,10 @@
 # shapr development conventions
 
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
-says what kind of change it is (`format_only`, `comment_only`, `rename`,
-`move`, `move_with_changes`, `extract`, `inline`, `logic`), and it gives the
-whole change a verdict: structure, behavior, or mixed (structure and
+says which structural changes it holds (`format_only`, `comment_only`,
+`rename`, `move`, `extract`, `inline`), each as a part with the lines it
+explains, and the residual `logic` lines no part explains; it gives each hunk
+and the whole change a verdict: structure, behavior, or mixed (structure and
 behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
 agents and classifier prompts consume its JSON. shapr never calls an LLM.
 
@@ -57,14 +58,16 @@ src/
   change.rs         assembles a Change: per file, both trees, a Site per hunk, and whether
                     it is generated (lockfiles, minified assets, linguist-generated)
   classify/
-    mod.rs          Kind, Method, Confidence, Part, Label (parts, residual, rollup), the pass pipeline
+    mod.rs          Kind, Method, Confidence, Part, Label (parts, residual, verdict), the pass pipeline
+    align.rs        a hunk's two covers aligned node for node: renamed names, differing code, kept code
     site.rs         hunk → tree mapping: each side's significant span and cover
-    format.rs       the format_only / comment_only pass (tree or line method)
+    format.rs       the format_only / comment_only passes: a whole hunk first (tree or line
+                    method), and last, the reformatted lines the other passes left
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
-    moves.rs        the move / move_with_changes pass: unaligned declarations paired across files
+    moves.rs        the move pass: unaligned declarations paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
-    facets.rs       facets on logic hunks (condition, signature, ...), from Frontend::construct;
-                    runs after the passes and never relabels
+    facets.rs       facets on the residual's lines (condition, signature, ...), from
+                    Frontend::construct; runs after the passes and changes no part
   claims.rs         summary.claims: hints read from commit messages and --message, and
                     conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON

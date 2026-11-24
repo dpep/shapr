@@ -1,8 +1,20 @@
-//! End to end: move and move_with_changes detection.
+//! End to end: move detection, alone and beside an edit or a new context.
 
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
+
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
 
 /// git and shapr with the caller's repository context removed, so a run
 /// under `git rebase --exec` can't write into the real repository.
@@ -72,7 +84,7 @@ fn class(name: &str, body: &[&str]) -> String {
 fn assert_cross_referenced(report: &Value) {
     let hunks = hunks(report);
     for hunk in hunks {
-        let moves = hunk["detail"]["moves"].as_array().unwrap();
+        let moves = lead(hunk)["detail"]["moves"].as_array().unwrap();
         assert!(!moves.is_empty());
         for entry in moves {
             let (from, to) = (entry["from_hunk"].as_u64(), entry["to_hunk"].as_u64());
@@ -85,19 +97,33 @@ fn assert_cross_referenced(report: &Value) {
     }
 }
 
-/// Every hunk is a `move_with_changes` naming `context`, and reviews only
-/// its moved definitions' first lines (where the context shows).
+/// The hunk's `move` part.
+fn move_part(hunk: &Value) -> &Value {
+    hunk["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["kind"] == "move")
+        .unwrap_or_else(|| panic!("no move part: {hunk:#}"))
+}
+
+/// Every hunk is a move into a new `context`: a `move` part that isn't
+/// structure, so the hunk is `logic`, reviewing only its moved definitions'
+/// first lines (where the context shows).
 fn assert_context_move(report: &Value, context: &str) {
-    assert!(
-        kinds(report).iter().all(|k| *k == "move_with_changes"),
-        "{report:#}"
-    );
+    assert!(kinds(report).iter().all(|k| *k == "logic"), "{report:#}");
+    for hunk in hunks(report) {
+        assert_eq!(move_part(hunk)["structure"], false, "{hunk:#}");
+    }
     assert_cross_referenced(report);
     for hunk in hunks(report) {
-        assert_eq!(hunk["detail"]["context"], serde_json::json!([context]));
-        assert_eq!(hunk["evidence"]["similarity"], 1.0);
+        assert_eq!(
+            lead(hunk)["detail"]["context"],
+            serde_json::json!([context])
+        );
+        assert_eq!(lead(hunk)["evidence"]["similarity"], 1.0);
         // One line per end of a move in this hunk: the definition's first.
-        let ends: usize = hunk["detail"]["moves"]
+        let ends: usize = lead(hunk)["detail"]["moves"]
             .as_array()
             .unwrap()
             .iter()
@@ -123,9 +149,9 @@ fn swapping_two_methods_is_a_move() {
     assert!(kinds(&report).iter().all(|k| *k == "move"), "{report:#}");
     assert_cross_referenced(&report);
     let hunk = &hunks(&report)[0];
-    assert_eq!(hunk["evidence"]["similarity"], 1.0);
-    assert_eq!(hunk["evidence"]["candidates"], 1);
-    assert!(hunk["confidence"].as_f64().unwrap() > 0.8);
+    assert_eq!(lead(hunk)["evidence"]["similarity"], 1.0);
+    assert_eq!(lead(hunk)["evidence"]["candidates"], 1);
+    assert!(lead(hunk)["confidence"].as_f64().unwrap() > 0.8);
     assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
 }
@@ -147,7 +173,7 @@ fn a_method_moved_to_another_file_is_a_move() {
     );
     assert_eq!(kinds(&report), ["move", "move"], "{report:#}");
     assert_cross_referenced(&report);
-    let entry = &hunks(&report)[0]["detail"]["moves"][0];
+    let entry = &lead(&hunks(&report)[0])["detail"]["moves"][0];
     assert_eq!(entry["name"], "perimeter");
     assert_eq!(
         (entry["from_hunk"].as_u64(), entry["to_hunk"].as_u64()),
@@ -156,7 +182,7 @@ fn a_method_moved_to_another_file_is_a_move() {
 }
 
 #[test]
-fn a_moved_method_with_a_changed_line_is_move_with_changes() {
+fn a_moved_method_with_a_changed_line_is_a_move_part_and_logic() {
     let a = method("first", "2");
     let filler: Vec<String> = (0..3).map(|i| method(&format!("m{i}"), "5")).collect();
     let b = method("second", "3");
@@ -171,19 +197,19 @@ fn a_moved_method_with_a_changed_line_is_move_with_changes() {
         &[("shape.rb", &class("Shape", &before))],
         &[("shape.rb", &after)],
     );
-    assert_eq!(
-        kinds(&report),
-        ["move_with_changes", "move_with_changes"],
-        "{report:#}"
-    );
-    assert_cross_referenced(&report);
+    assert_eq!(kinds(&report), ["logic", "logic"], "{report:#}");
     let added = &hunks(&report)[1];
-    let entry = &added["detail"]["moves"][0];
+    assert_eq!(move_part(added)["structure"], true);
+    let entry = &move_part(added)["detail"]["moves"][0];
     let similarity = entry["similarity"].as_f64().unwrap();
     assert!(similarity < 1.0 && similarity > 0.5);
     let line = after.lines().position(|l| l.contains("warn(y)")).unwrap() + 1;
     assert_eq!(entry["changed_after"], serde_json::json!([line]));
-    assert_eq!(report["summary"]["verdict"], "behavior");
+    // The edited line is the residual; the rest of the body moved.
+    let residual = added["parts"].as_array().unwrap().last().unwrap();
+    assert_eq!(residual["kind"], "logic");
+    assert_eq!(added["review_lines"], 1);
+    assert_eq!(report["summary"]["verdict"], "mixed");
 }
 
 #[test]
@@ -246,13 +272,12 @@ fn a_method_changed_on_its_way_to_another_class_reviews_both() {
         )
     );
     let report = classify(&[("shape.rb", &source)], &[("shape.rb", &target)]);
-    assert!(
-        kinds(&report).iter().all(|k| *k == "move_with_changes"),
-        "{report:#}"
-    );
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
     let added = &hunks(&report)[1];
-    assert_eq!(added["detail"]["context"], serde_json::json!(["owner"]));
-    let entry = &added["detail"]["moves"][0];
+    let moved = move_part(added);
+    assert_eq!(moved["detail"]["context"], serde_json::json!(["owner"]));
+    assert_eq!(moved["structure"], false);
+    let entry = &moved["detail"]["moves"][0];
     let line = target.lines().position(|l| l.contains("warn(y)")).unwrap() + 1;
     assert_eq!(entry["changed_after"], serde_json::json!([line]));
     // The changed line, and the definition's first line in its new owner.
@@ -397,7 +422,7 @@ fn a_method_edited_where_neighbors_swap_around_it_stays_put() {
         &[("shape.rb", &class("Shape", &[&last, &edited, &first]))],
     );
     let names_middle = hunks(&report).iter().any(|h| {
-        h["detail"]["moves"]
+        lead(h)["detail"]["moves"]
             .as_array()
             .is_some_and(|m| m.iter().any(|e| e["name"] == "middle"))
     });
@@ -440,7 +465,7 @@ fn a_duplicate_candidate_lowers_confidence() {
         hunks(r)
             .iter()
             .filter(|h| h["file"] == file && h["kind"] == "move")
-            .map(|h| h["confidence"].as_f64().unwrap())
+            .map(|h| lead(h)["confidence"].as_f64().unwrap())
             .fold(f64::INFINITY, f64::min)
     };
     // The copy added to `Other` is new code, and the move it might have been
@@ -454,7 +479,7 @@ fn a_duplicate_candidate_lowers_confidence() {
         .iter()
         .find(|h| h["file"] == "shape.rb" && h["kind"] == "move")
         .unwrap();
-    assert_eq!(moved["evidence"]["candidates"], 2);
+    assert_eq!(lead(moved)["evidence"]["candidates"], 2);
     assert!(confidence(&ambiguous, "shape.rb") < confidence(&unique, "shape.rb"));
 }
 
@@ -470,12 +495,11 @@ fn move_fields_are_documented() {
         &[("shape.rb", &class("Shape", &[&b, &a, &filler]))],
         &[("shape.rb", &class("Shape", &[&a, &filler, &changed]))],
     );
-    let hunk = &hunks(&report)[0];
-    assert_eq!(hunk["kind"], "move_with_changes", "{report:#}");
+    let moved = move_part(&hunks(&report)[0]);
     let records = [
-        &hunk["evidence"],
-        &hunk["detail"],
-        &hunk["detail"]["moves"][0],
+        &moved["evidence"],
+        &moved["detail"],
+        &moved["detail"]["moves"][0],
         &report["summary"]["move_contexts"],
     ];
     for record in records {

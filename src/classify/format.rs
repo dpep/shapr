@@ -1,12 +1,13 @@
 //! `format_only` and `comment_only`: the same code before and after, ignoring
 //! whitespace (and, for `comment_only`, comment text).
 
-use super::site::{Side, Significance};
-use super::{Claim, Confidence, Kind, LINE_CAP, Labels, Part};
+use super::align::{Alignment, align};
+use super::site::{self, Side, Significance};
+use super::{Claim, Confidence, Evidence, Kind, LINE_CAP, Labels, Method, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{NodeId, Span, Tree};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub(super) fn run(change: &Change, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
@@ -65,7 +66,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             }
             let part = Part {
                 kind,
-                structure: true,
+                context: Vec::new(),
                 lines: label.changed.clone(),
                 review: Claim::default(),
                 confidence,
@@ -76,6 +77,132 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             label.claim(part);
         }
     }
+}
+
+/// What the other passes leave of a cleanly parsed hunk. A changed code line
+/// whose code the alignment keeps (only whitespace differs) is reformatted.
+/// With no logic in the hunk, the remaining lines (blank lines, comments)
+/// join it, as `comment_only` when comment text differs. Beside logic (a
+/// residual, or a part that isn't structure) a changed comment or blank line
+/// is read with the logic, so only reformatted code lines without a comment
+/// form a part.
+pub(super) fn rest(change: &Change, labels: &mut Labels) {
+    for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
+        let Ok(trees) = &file.trees else { continue };
+        if !trees.clean() {
+            continue;
+        }
+        for (site, label) in trees.sites.iter().zip(labels.iter_mut()) {
+            let free = label.unclaimed();
+            if free.is_empty() {
+                continue;
+            }
+            let logic = differing(trees, &align(trees, site), &label.changed, &free);
+            let code = |tree: &Tree, lines: &BTreeSet<usize>, comment: bool| -> BTreeSet<usize> {
+                let pick = |l: &&usize| tree.line(**l).code && (comment || !tree.line(**l).comment);
+                lines.iter().filter(pick).copied().collect()
+            };
+            // The hunk's logic: code no part explains, or a part whose
+            // meaning can change.
+            let beside = label.parts.iter().position(|p| !p.structure());
+            if logic.is_empty() && beside.is_none() {
+                let kind = match comment_texts(&trees.before, &free.before)
+                    == comment_texts(&trees.after, &free.after)
+                {
+                    true => Kind::FormatOnly,
+                    false => Kind::CommentOnly,
+                };
+                label.claim(reformat(kind, free));
+                continue;
+            }
+            let reformatted = Claim {
+                before: code(&trees.before, &free.before, false),
+                after: code(&trees.after, &free.after, false),
+            };
+            label.claim(reformat(Kind::FormatOnly, reformatted.minus(&logic)));
+            // Blank lines and comments go with the logic.
+            if let (true, Some(i)) = (logic.is_empty(), beside) {
+                let left = label.unclaimed();
+                let part = &mut label.parts[i];
+                part.lines.before.extend(left.before);
+                part.lines.after.extend(left.after);
+            }
+        }
+    }
+}
+
+fn reformat(kind: Kind, lines: Claim) -> Part {
+    let reason = match kind {
+        Kind::FormatOnly => "same code; whitespace differs",
+        _ => "same code; comments differ",
+    };
+    Part {
+        kind,
+        context: Vec::new(),
+        lines,
+        review: Claim::default(),
+        confidence: Confidence::new(1.0),
+        reason: reason.into(),
+        evidence: Evidence {
+            method: Method::Ast,
+            values: Map::new(),
+        },
+        detail: Map::new(),
+    }
+}
+
+/// Of the changed lines, those holding code that differs beyond whitespace:
+/// code the alignment couldn't match, a renamed node no part explains, or
+/// code it kept that also sits on such a line, or changed on one side only
+/// (a reformat closes on both sides).
+fn differing(trees: &Trees, alignment: &Alignment, changed: &Claim, free: &Claim) -> Claim {
+    let lines = |(b, a): &(Vec<Span>, Vec<Span>), within: &Claim| Claim {
+        before: site::lines_in(&trees.before, &within.before, b),
+        after: site::lines_in(&trees.after, &within.after, a),
+    };
+    let renamed = lines(&alignment.renamed(trees), free);
+    let mut logic = lines(&alignment.differs, changed);
+    logic.before.extend(renamed.before);
+    logic.after.extend(renamed.after);
+    let kept: Vec<Claim> = alignment
+        .kept
+        .iter()
+        .map(|pair| lines(pair, changed))
+        .filter(|k| !k.is_empty())
+        .collect();
+    loop {
+        let before = logic.before.len() + logic.after.len();
+        for k in &kept {
+            // Changed on one side only: code moved onto or off a line.
+            let one_sided = k.before.is_empty() || k.after.is_empty();
+            if one_sided || !k.intersect(&logic).is_empty() {
+                logic.before.extend(&k.before);
+                logic.after.extend(&k.after);
+            }
+        }
+        if logic.before.len() + logic.after.len() == before {
+            return logic.intersect(free);
+        }
+    }
+}
+
+/// The text of each comment on `lines`, sorted.
+fn comment_texts(tree: &Tree, lines: &BTreeSet<usize>) -> Vec<String> {
+    let mut texts: Vec<String> = tree
+        .nodes
+        .iter()
+        .filter(|n| n.comment)
+        .filter(|n| {
+            let (first, last) = (
+                tree.line_of(n.extent.start),
+                tree.line_of(n.extent.end.saturating_sub(1).max(n.extent.start)),
+            );
+            lines.range(first..=last).next().is_some()
+        })
+        .map(|n| comment_text(tree, &n.extent))
+        .collect();
+    texts.sort();
+    texts
 }
 
 /// Which sides hold a syntax error, for a reason naming the line method.

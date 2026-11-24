@@ -4,6 +4,18 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 
+/// The part a hunk's kind stands for: the last of that kind (the residual,
+/// for `logic`), else the first that isn't structure.
+fn lead(hunk: &Value) -> &Value {
+    let parts = hunk["parts"].as_array().unwrap();
+    parts
+        .iter()
+        .rev()
+        .find(|p| p["kind"] == hunk["kind"])
+        .or_else(|| parts.iter().find(|p| p["structure"] == false))
+        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
+}
+
 /// git and shapr with the caller's repository context removed, so a run
 /// under `git rebase --exec` can't write into the real repository.
 fn command(program: &str, dir: &Path) -> Command {
@@ -57,7 +69,9 @@ fn facets(path: &str, before: &str, after: &str) -> Vec<Vec<String>> {
         .unwrap()
         .iter()
         .map(|h| {
-            let facets = h["facets"].as_array().unwrap_or_else(|| panic!("{h:#}"));
+            let facets = lead(h)["facets"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{h:#}"));
             facets
                 .iter()
                 .map(|f| f.as_str().unwrap().to_string())
@@ -180,7 +194,7 @@ fn structure_has_no_facets() {
     let after = GATE.replace("    if n > 1", "    if n >   1");
     let report = classify(&[("gate.rb", GATE)], &[("gate.rb", &after)]);
     assert_eq!(report["hunks"][0]["kind"], "format_only");
-    assert_eq!(report["hunks"][0]["facets"], serde_json::json!([]));
+    assert_eq!(lead(&report["hunks"][0])["facets"], serde_json::json!([]));
 }
 
 #[test]
