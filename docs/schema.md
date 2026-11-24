@@ -57,8 +57,8 @@ inlines in particular are linked to later bug fixes and still deserve review.
 Tree equality is exact: node kinds, child order, and every non-whitespace
 byte of each node's source must match, and leaves (string content, heredoc
 bodies, symbols, numbers) match byte for byte, whitespace included. So
-`do…end` versus `{…}`, a change of quote style, a trailing comma, or any
-reordering is `logic`.
+`do…end` versus `{…}`, a change of quote style, a trailing comma in Ruby, or
+any reordering is `logic`.
 
 ## Renames
 
@@ -84,9 +84,10 @@ and every name that differs passes these checks:
   constant or field rename that passes.
 
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
-class or module; a `field` (instance or class variable) in its file; a
-`method` or `constant` (class and module names included) in every parsed file
-of the change.
+class or module; a `field` in its file when it is a Ruby instance or class
+variable, and in every parsed file of the change when it is a Rust struct
+field; a `method` or `constant` (class and module names included) in every
+parsed file of the change.
 
 `detail`:
 
@@ -167,9 +168,8 @@ are stated in Ruby's terms; for Rust:
   told apart from another by its header.
 - Extract and inline: a `self` parameter rides on the call's receiver, and
   parameter types are allowed. Values are dropped when their block ends, so
-  when code follows the chunk in its block and the chunk binds a local (other
-  than the returned one) or takes arguments, the match is risk `drop`: the
-  value would be dropped at another point.
+  moving statements into a function can move a drop: risk `drop` (see
+  [Extract and inline](#extract-and-inline)).
 
 ## `file` record
 
@@ -178,7 +178,7 @@ are stated in Ruby's terms; for Rust:
 | `record` | `"file"` | |
 | `file` | string | Path after the change; the old path for a deleted file. |
 | `old_file` | string or null | Path before the change; `null` for an added file. Differs from `file` on a rename. |
-| `language` | string or null | The frontend that parsed it (`"ruby"`); `null` when none did. |
+| `language` | string or null | The frontend that parsed it (`"ruby"` or `"rust"`, see [Languages](#languages)); `null` when none did. |
 | `parsed` | bool | Every hunk in the file was compared as trees (`evidence.method` `"ast"`). |
 | `generated` | bool | A lockfile or generated file. See [Generated files](#generated-files). |
 | `lines_before` | int or null | Lines in the file before the change (Kamei's LT); 0 for an added file; `null` when its content couldn't be read. |
@@ -241,7 +241,7 @@ A hunk that matches this shape but would change behavior stays `logic` and says 
 | key | type | meaning |
 |---|---|---|
 | `near` | string | `"extract"` or `"inline"`. |
-| `risk` | string | `"jump"`: the chunk holds `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` or `block_given?`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"tiny"`: under 8 nodes. |
+| `risk` | string | `"jump"`: the chunk holds `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` or `block_given?`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
 
 shapr sees only the files in the diff: a subclass override or a caller elsewhere of the new or removed method is invisible to it.
 
@@ -249,10 +249,11 @@ shapr sees only the files in the diff: a subclass override or a caller elsewhere
 
 Confidence is computed from the evidence, not assigned per kind.
 
-- `method` `"ast"`: 1. Tree comparison is exact, so it settles
-  `format_only`/`comment_only` versus `logic`. Detectors for rename, move,
-  extract and inline will lower a `logic` hunk's confidence when they find
-  partial evidence of a structural kind.
+- `method` `"ast"`: 1 for `format_only`, `comment_only` and `logic`. Tree
+  comparison is exact, so it settles those three. `rename`, `move`,
+  `move_with_changes`, `extract` and `inline` compute their own score: see
+  [Renames](#renames), [Moves](#moves) and
+  [Extract and inline](#extract-and-inline).
 - `method` `"line"`: at most **0.5** (the line cap): text equality can't see a
   change in how whitespace parses. It falls in proportion to the region's lines
   that hold a syntax error: `0.5 × (1 − lines with an error / lines in both
