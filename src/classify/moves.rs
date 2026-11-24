@@ -8,11 +8,12 @@
 //! A declaration (`Role::is_declaration`) left out of the alignment is a
 //! *unit*, removed or added. A removed unit pairs with an
 //! added one by equal hash (`move`) or by name and subtree similarity
-//! (`move_with_changes`). A pair is a move only when the code around it means
-//! the same in both places: the same owner, the same visibility section, the
-//! same order relative to statements that name it at load time and, across
-//! files, the same file-level directives, in a language whose files aren't
-//! modules of their own. Otherwise both halves stay `logic`.
+//! (`move_with_changes`). A pair is a `move` only when the code around it
+//! means the same in both places: the same owner, the same visibility
+//! section, the same order relative to statements that name it at load time
+//! and, across files, the same file-level directives, in a language whose
+//! files aren't modules of their own. Otherwise it is a `move_with_changes`
+//! naming each [`Context`] that differs: relocated code, but not structure.
 //!
 //! A hunk is labeled from the trees, not from git's line placement: it is a
 //! move when every changed code line lies in a paired unit or in a node the
@@ -115,12 +116,11 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             mine.dedup();
             let mine: Vec<&Pair> = mine.iter().map(|&p| &pairs[p]).collect();
             let label = &mut labels[f][h];
-            if let Some(why) = mine.iter().find_map(|p| p.rejected.as_deref()) {
-                label.reason = format!("moved, but {why}");
-                continue;
-            }
             let exact = mine.iter().all(|p| p.similarity == 1.0);
-            label.kind = if exact {
+            let mut context: Vec<Context> = mine.iter().flat_map(|p| p.context.clone()).collect();
+            context.sort_unstable();
+            context.dedup();
+            label.kind = if exact && context.is_empty() {
                 Kind::Move
             } else {
                 Kind::MoveWithChanges
@@ -130,6 +130,10 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             } else {
                 "declarations moved, and their bodies changed".into()
             };
+            if !context.is_empty() {
+                let why: Vec<&str> = context.iter().map(|c| c.reason()).collect();
+                label.reason = format!("{}, but {}", label.reason, why.join("; "));
+            }
             label.confidence = Confidence::new(
                 mine.iter()
                     .map(|p| p.confidence())
@@ -148,7 +152,11 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 .iter()
                 .map(|p| entry(change, &units, &ids, p))
                 .collect();
-            label.detail = Map::from_iter([("moves".to_string(), Value::from(entries))]);
+            let context: Vec<&str> = context.iter().map(|c| c.as_str()).collect();
+            label.detail = Map::from_iter([
+                ("moves".to_string(), Value::from(entries)),
+                ("context".to_string(), json!(context)),
+            ]);
         }
     }
 }
@@ -409,6 +417,55 @@ fn transparent(tree: &Tree, id: NodeId) -> bool {
     })
 }
 
+/// What differs around a moved unit in its new place: the code it runs
+/// among, apart from any change to its own body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Context {
+    /// Each file is a module (Rust): another file is another module.
+    Module,
+    /// Another enclosing class, module or `impl`.
+    Owner,
+    /// Another visibility section (it crossed `private`).
+    Visibility,
+    /// Another order relative to a sibling that names it, or that it names,
+    /// at load time.
+    LoadOrder,
+    /// Files with different file-level directives.
+    Directives,
+}
+
+impl Context {
+    pub const ALL: [Context; 5] = [
+        Context::Module,
+        Context::Owner,
+        Context::Visibility,
+        Context::LoadOrder,
+        Context::Directives,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Context::Module => "module",
+            Context::Owner => "owner",
+            Context::Visibility => "visibility",
+            Context::LoadOrder => "load_order",
+            Context::Directives => "directives",
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Context::Module => "its file is its module",
+            Context::Owner => "its owner (class or module) changes",
+            Context::Visibility => "its visibility section changes",
+            Context::LoadOrder => {
+                "it moves past a statement that names it or that it names at load time"
+            }
+            Context::Directives => "the files' file-level directives differ",
+        }
+    }
+}
+
 /// A matched removal and addition.
 struct Pair {
     from: usize,
@@ -418,8 +475,8 @@ struct Pair {
     candidates: usize,
     /// The smaller unit's node count.
     nodes: usize,
-    /// Why the code around the unit means something else in its new place.
-    rejected: Option<String>,
+    /// What differs around the unit in its new place.
+    context: Vec<Context>,
 }
 
 impl Pair {
@@ -497,17 +554,17 @@ fn claim(
     pairs: &mut Vec<Pair>,
     nodes: impl Fn(usize) -> usize,
 ) {
-    let mut ranked: Vec<(Candidate, Option<String>)> = candidates
+    let mut ranked: Vec<(Candidate, Vec<Context>)> = candidates
         .into_iter()
         .map(|c| (c, check(change, &units[c.0], &units[c.1])))
         .collect();
     ranked.sort_by(|((r1, a1, s1, _), w1), ((r2, a2, s2, _), w2)| {
         let same_file = |r: &usize, a: &usize| units[*r].file == units[*a].file;
         s2.total_cmp(s1)
-            .then(w1.is_some().cmp(&w2.is_some()))
+            .then((!w1.is_empty()).cmp(&!w2.is_empty()))
             .then(same_file(r2, a2).cmp(&same_file(r1, a1)))
     });
-    for ((from, to, similarity, candidates), rejected) in ranked {
+    for ((from, to, similarity, candidates), context) in ranked {
         if taken[from] || taken[to] {
             continue;
         }
@@ -519,37 +576,37 @@ fn claim(
             similarity,
             candidates,
             nodes: nodes(from).min(nodes(to)),
-            rejected,
+            context,
         });
     }
 }
 
-/// Why the unit means something else in its new place, if it does.
-fn check(change: &Change, from: &Unit, to: &Unit) -> Option<String> {
+/// What differs around the unit in its new place.
+fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
     let (tb, ta) = (from.tree(change), to.tree(change));
-    if from.file != to.file && (tb.semantics.file_scoped || ta.semantics.file_scoped) {
-        return Some("its file is its module, so its owner changes".into());
-    }
-    if owner(tb, from.node) != owner(ta, to.node) {
-        return Some("its owner (class or module) changes".into());
-    }
-    let (vb, va) = (visibility(tb, from.node), visibility(ta, to.node));
-    if vb != va {
-        return Some(format!(
-            "its visibility changes from {} to {}",
-            visibility_name(vb),
-            visibility_name(va)
-        ));
-    }
-    if dependencies(tb, from.node) != dependencies(ta, to.node) {
-        return Some(
-            "it moves past a statement that names it or that it names at load time".into(),
-        );
-    }
-    if from.file != to.file && directives(tb) != directives(ta) {
-        return Some("the files' file-level directives differ".into());
-    }
-    None
+    let across = from.file != to.file;
+    [
+        (
+            Context::Module,
+            across && (tb.semantics.file_scoped || ta.semantics.file_scoped),
+        ),
+        (Context::Owner, owner(tb, from.node) != owner(ta, to.node)),
+        (
+            Context::Visibility,
+            visibility(tb, from.node) != visibility(ta, to.node),
+        ),
+        (
+            Context::LoadOrder,
+            dependencies(tb, from.node) != dependencies(ta, to.node),
+        ),
+        (
+            Context::Directives,
+            across && directives(tb) != directives(ta),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(context, differs)| differs.then_some(context))
+    .collect()
 }
 
 /// The section a declaration sits in: the last bare visibility statement
@@ -567,15 +624,6 @@ fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
             _ => None,
         })
         .last()
-}
-
-fn visibility_name(v: Option<Visibility>) -> &'static str {
-    match v {
-        None | Some(Visibility::Public) => "public",
-        Some(Visibility::Protected) => "protected",
-        Some(Visibility::Private) => "private",
-        Some(Visibility::ModuleFunction) => "module_function",
-    }
 }
 
 /// Siblings whose order relative to `node` matters, as (hash, comes first),
@@ -677,6 +725,10 @@ fn hunk_ids(change: &Change) -> Vec<usize> {
 fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Value {
     let (from, to) = (&units[pair.from], &units[pair.to]);
     let id = |u: &Unit| u.hunk(change).map(|h| ids[u.file] + h);
+    let first = |u: &Unit| {
+        let tree = u.tree(change);
+        lines(tree, u.node).find(|&l| tree.line(l).code)
+    };
     let (changed_before, changed_after) = if pair.similarity < 1.0 {
         changed_lines(from.tree(change), from.node, to.tree(change), to.node)
     } else {
@@ -686,6 +738,9 @@ fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Value {
         "name": from.tree(change).node(from.node).name.as_deref(),
         "from_hunk": id(from),
         "to_hunk": id(to),
+        "from_line": first(from),
+        "to_line": first(to),
+        "context": pair.context.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
         "similarity": pair.similarity,
         "changed_before": changed_before,
         "changed_after": changed_after,

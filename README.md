@@ -6,7 +6,7 @@ shapr is a deterministic evidence tool: it parses both sides of every hunk, comp
 
 Status: early development. Ruby (with [prism](https://github.com/ruby/prism)) and Rust (with [tree-sitter](https://tree-sitter.github.io/)) are parsed, and every kind below is detected in both; JavaScript, TypeScript and Python are to follow. Hunks in other files are `logic`.
 
-Rust follows its own rules where the languages differ: each file is a module, so a definition moved to another file is `logic`; doc comments are comments, and attributes are code. [docs/schema.md](docs/schema.md#languages) has the full list.
+Rust follows its own rules where the languages differ: each file is a module, so a definition moved to another file is a `move_with_changes` (context `module`), not a `move`; doc comments are comments, and attributes are code. [docs/schema.md](docs/schema.md#languages) has the full list.
 
 ## Kinds
 
@@ -16,7 +16,7 @@ Rust follows its own rules where the languages differ: each file is a module, so
 | `comment_only` | structure | `/// Area in m2.` becomes `/// Area in square metres.` | 0 |
 | `rename` | structure | parameter `x` becomes `side`, with every use | 0 |
 | `move` | structure | two methods of a class swap places | 0 |
-| `move_with_changes` | behavior | a method moves and one of its lines changes | the changed lines |
+| `move_with_changes` | behavior | a method moves and one of its lines changes, or moves unchanged into another class | the changed lines, plus the definition's first line when its context changed |
 | `extract` | structure | statements become a new method, replaced by a call to it | all code lines |
 | `inline` | structure | the reverse of `extract` | all code lines |
 | `logic` | behavior | anything else, such as `x * 2` becoming `x * 3` | all code lines |

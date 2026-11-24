@@ -13,6 +13,8 @@ mod format;
 mod moves;
 mod rename;
 
+pub use moves::Context;
+
 use crate::change::Change;
 use serde::Serialize;
 use serde_json::{Map, Value};

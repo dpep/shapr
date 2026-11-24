@@ -85,6 +85,33 @@ fn assert_cross_referenced(report: &Value) {
     }
 }
 
+/// Every hunk is a `move_with_changes` naming `context`, and reviews only
+/// its moved definitions' first lines (where the context shows).
+fn assert_context_move(report: &Value, context: &str) {
+    assert!(
+        kinds(report).iter().all(|k| *k == "move_with_changes"),
+        "{report:#}"
+    );
+    assert_cross_referenced(report);
+    for hunk in hunks(report) {
+        assert_eq!(hunk["detail"]["context"], serde_json::json!([context]));
+        assert_eq!(hunk["evidence"]["similarity"], 1.0);
+        // One line per end of a move in this hunk: the definition's first.
+        let ends: usize = hunk["detail"]["moves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| {
+                usize::from(m["from_hunk"] == hunk["id"]) + usize::from(m["to_hunk"] == hunk["id"])
+            })
+            .sum();
+        assert_eq!(hunk["review_lines"], ends, "{hunk:#}");
+    }
+    let summary = &report["summary"];
+    assert_eq!(summary["move_contexts"][context], hunks(report).len());
+    assert_eq!(summary["verdict"], "behavior");
+}
+
 #[test]
 fn swapping_two_methods_is_a_move() {
     let a = method("first", "2");
@@ -160,7 +187,7 @@ fn a_moved_method_with_a_changed_line_is_move_with_changes() {
 }
 
 #[test]
-fn a_method_moved_below_private_is_logic() {
+fn a_method_moved_below_private_is_a_move_in_a_new_visibility() {
     let a = method("first", "2");
     let b = method("second", "3");
     let c = method("third", "4");
@@ -168,19 +195,11 @@ fn a_method_moved_below_private_is_logic() {
         &[("shape.rb", &class("Shape", &[&a, &b, "  private\n", &c]))],
         &[("shape.rb", &class("Shape", &[&b, "  private\n", &c, &a]))],
     );
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    let reasons: Vec<&str> = hunks(&report)
-        .iter()
-        .map(|h| h["reason"].as_str().unwrap())
-        .collect();
-    assert!(
-        reasons.iter().all(|r| r.contains("visibility")),
-        "{reasons:?}"
-    );
+    assert_context_move(&report, "visibility");
 }
 
 #[test]
-fn a_method_moved_into_another_class_is_logic() {
+fn a_method_moved_into_another_class_is_a_move_to_a_new_owner() {
     let a = method("first", "2");
     let b = method("second", "3");
     let source = format!(
@@ -194,17 +213,42 @@ fn a_method_moved_into_another_class_is_logic() {
         class("Right", &[&method("z", "1"), &b])
     );
     let report = classify(&[("shape.rb", &source)], &[("shape.rb", &target)]);
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    assert!(
-        hunks(&report)[0]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("owner")
-    );
+    assert_context_move(&report, "owner");
 }
 
 #[test]
-fn a_method_moved_past_a_statement_naming_it_is_logic() {
+fn a_method_changed_on_its_way_to_another_class_reviews_both() {
+    let a = method("first", "2");
+    let b = method("second", "3");
+    let source = format!(
+        "{}\n{}",
+        class("Left", &[&a, &b]),
+        class("Right", &[&method("z", "1")])
+    );
+    let target = format!(
+        "{}\n{}",
+        class("Left", &[&a]),
+        class(
+            "Right",
+            &[&method("z", "1"), &b.replace("log(y)", "warn(y)")]
+        )
+    );
+    let report = classify(&[("shape.rb", &source)], &[("shape.rb", &target)]);
+    assert!(
+        kinds(&report).iter().all(|k| *k == "move_with_changes"),
+        "{report:#}"
+    );
+    let added = &hunks(&report)[1];
+    assert_eq!(added["detail"]["context"], serde_json::json!(["owner"]));
+    let entry = &added["detail"]["moves"][0];
+    let line = target.lines().position(|l| l.contains("warn(y)")).unwrap() + 1;
+    assert_eq!(entry["changed_after"], serde_json::json!([line]));
+    // The changed line, and the definition's first line in its new owner.
+    assert_eq!(added["review_lines"], 2, "{added:#}");
+}
+
+#[test]
+fn a_method_moved_past_a_statement_naming_it_is_a_move_in_a_new_load_order() {
     let a = method("first", "2");
     let b = method("second", "3");
     let report = classify(
@@ -217,9 +261,28 @@ fn a_method_moved_past_a_statement_naming_it_is_logic() {
             &class("Shape", &["  alias_method :primary, :first\n", &b, &a]),
         )],
     );
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    let reason = hunks(&report)[0]["reason"].as_str().unwrap();
-    assert!(reason.contains("load time"), "{reason}");
+    assert_context_move(&report, "load_order");
+}
+
+#[test]
+fn a_method_moved_to_a_file_with_other_directives_is_a_move_under_new_directives() {
+    let frozen = "# frozen_string_literal: true\n\n";
+    let (area, perimeter) = (method("area", "2"), method("perimeter", "4"));
+    let volume = method("volume", "8");
+    let report = classify(
+        &[
+            ("a.rb", &class("Shape", &[&area, &perimeter])),
+            ("b.rb", &format!("{frozen}{}", class("Shape", &[&volume]))),
+        ],
+        &[
+            ("a.rb", &class("Shape", &[&area])),
+            (
+                "b.rb",
+                &format!("{frozen}{}", class("Shape", &[&volume, &perimeter])),
+            ),
+        ],
+    );
+    assert_context_move(&report, "directives");
 }
 
 #[test]
@@ -330,7 +393,7 @@ fn a_method_edited_where_neighbors_swap_around_it_stays_put() {
 }
 
 #[test]
-fn a_constant_moved_past_a_require_is_logic() {
+fn a_constant_moved_past_a_require_is_a_move_in_a_new_load_order() {
     // The required file may read the constant when it loads.
     let root = "ROOT = File.expand_path(File.join(__dir__, \"..\"))\n";
     let requires = "require \"a\"\nrequire \"b\"\nrequire \"c\"\nrequire \"d\"\n";
@@ -338,9 +401,7 @@ fn a_constant_moved_past_a_require_is_logic() {
         &[("helper.rb", &format!("{root}{requires}"))],
         &[("helper.rb", &format!("{requires}{root}"))],
     );
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    let reason = hunks(&report)[0]["reason"].as_str().unwrap();
-    assert!(reason.contains("load time"), "{reason}");
+    assert_context_move(&report, "load_order");
 }
 
 #[test]
@@ -403,6 +464,7 @@ fn move_fields_are_documented() {
         &hunk["evidence"],
         &hunk["detail"],
         &hunk["detail"]["moves"][0],
+        &report["summary"]["move_contexts"],
     ];
     for record in records {
         for key in record.as_object().unwrap().keys() {

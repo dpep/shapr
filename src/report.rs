@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Change, FileChange};
-use crate::classify::{Confidence, Evidence, Kind, Label, Labels, Method};
+use crate::classify::{Confidence, Context, Evidence, Kind, Label, Labels, Method};
 use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
@@ -125,6 +125,7 @@ pub struct Summary {
     unparsed_hunks: usize,
     generated_hunks: usize,
     kinds: BTreeMap<&'static str, usize>,
+    move_contexts: BTreeMap<&'static str, usize>,
     files: usize,
     directories: usize,
     subsystems: usize,
@@ -229,7 +230,8 @@ fn count_lines(file: &FileChange, hunk: &Hunk, label: &Label, id: usize) -> Line
 
 /// The lines inside the hunk's moved units that changed in the move, from
 /// `detail.moves`: before-side lines of the units it removed, after-side
-/// lines of the units it added.
+/// lines of the units it added. A unit moved into a new context adds its
+/// first line, where that context shows.
 fn moved_changes(label: &Label, id: usize) -> (BTreeSet<usize>, BTreeSet<usize>) {
     let (mut before, mut after) = (BTreeSet::new(), BTreeSet::new());
     let moves = label.detail.get("moves").and_then(Value::as_array);
@@ -244,11 +246,15 @@ fn moved_changes(label: &Label, id: usize) -> (BTreeSet<usize>, BTreeSet<usize>)
                 .collect::<Vec<_>>()
         };
         let id = Some(id as u64);
+        let context = entry["context"].as_array().is_some_and(|c| !c.is_empty());
+        let first = |key: &str| entry[key].as_u64().filter(|_| context).map(|l| l as usize);
         if entry["from_hunk"].as_u64() == id {
             before.extend(lines("changed_before"));
+            before.extend(first("from_line"));
         }
         if entry["to_hunk"].as_u64() == id {
             after.extend(lines("changed_after"));
+            after.extend(first("to_line"));
         }
     }
     (before, after)
@@ -257,10 +263,18 @@ fn moved_changes(label: &Label, id: usize) -> (BTreeSet<usize>, BTreeSet<usize>)
 fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
     let mut kinds: BTreeMap<&'static str, usize> =
         Kind::ALL.iter().map(|k| (k.as_str(), 0)).collect();
+    let mut move_contexts: BTreeMap<&'static str, usize> =
+        Context::ALL.iter().map(|c| (c.as_str(), 0)).collect();
     let mut lines = LineCounts::default();
     let (mut structure, mut behavior, mut structure_lines, mut behavior_lines) = (0, 0, 0, 0);
     for hunk in hunks {
         *kinds.entry(hunk.kind.as_str()).or_default() += 1;
+        let context = hunk.detail.get("context").and_then(Value::as_array);
+        for name in context.into_iter().flatten().filter_map(Value::as_str) {
+            if let Some(count) = move_contexts.get_mut(name) {
+                *count += 1;
+            }
+        }
         // A generated hunk sways the verdict but not the size.
         let size = !hunk.generated;
         if size {
@@ -298,6 +312,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
         unparsed_hunks: hunks.iter().filter(|h| !h.parsed).count(),
         generated_hunks: hunks.iter().filter(|h| h.generated).count(),
         kinds,
+        move_contexts,
         files: files.len(),
         directories: dirs.len(),
         subsystems: subsystems.len(),

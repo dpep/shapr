@@ -46,7 +46,7 @@ first changed line to last, with the context between them.
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs. |
 | `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. See [Moves](#moves). |
-| `move_with_changes` | no | A move whose body also changed: read the changed lines inside it. See [Moves](#moves). |
+| `move_with_changes` | no | A move whose body also changed, or whose body is unchanged but now runs among different code (another owner, visibility section, load order, file-level directives, or Rust module): read the changed lines and where it landed. See [Moves](#moves). |
 | `extract` | yes | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
 | `inline` | yes | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
 | `logic` | no | Anything else. The default: a hunk shapr can't prove structural is `logic`. |
@@ -163,7 +163,8 @@ are stated in Ruby's terms; for Rust:
   renamed.
 - Moves: a unit is a function, struct, enum, union, trait, `impl`, module,
   constant, static or type alias. Each file is its own module, so a
-  definition moved to another file stays `logic`. Struct fields, enum
+  definition moved to another file is a `move_with_changes` with context
+  `module`. Struct fields, enum
   variants and `macro_rules!` don't move. An `impl` is its methods' owner,
   told apart from another by its header.
 - Extract and inline: a `self` parameter rides on the call's receiver, and
@@ -202,7 +203,7 @@ are stated in Ruby's terms; for Rust:
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. 0 in a `generated` file. |
+| `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), plus, for an entry with a `context`, its `from_line` or `to_line` (the unit's first code line, where the new context shows), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. 0 in a `generated` file. |
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. |
 
 ## Evidence
@@ -271,13 +272,21 @@ that, by equal name and kind with `similarity` at least 0.5
 (`move_with_changes`). Definitions align by name, so one that keeps its
 place among its siblings was edited, not moved.
 
-A pair stays `logic`, with the reason saying why, when its new place changes
-what it means: a different owner (enclosing class or module), a different
-visibility section (it crossed `private`), a different order relative to a
-sibling that names it or that it names at load time (`alias_method`,
-`private :x`, a redefinition, a constant read) or, for anything but a
-method, any statement that runs code at load time (a `require`), or, across
-files, different file-level directives (`# frozen_string_literal`).
+A pair is a `move_with_changes`, even with an unchanged body, when the code
+around its new place differs. Its `context` names each difference:
+
+| context | meaning |
+|---|---|
+| `module` | Rust, across files: each file is a module, so the paths it resolves and its own path change. |
+| `owner` | A different enclosing class, module or `impl` (a Rust namespace's attributes count: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`). |
+| `visibility` | A different visibility section: it crossed a bare `private`, `protected`, `public` or `module_function`. |
+| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read) or, for anything but a method, any statement that runs code at load time (a `require`, a DSL call). |
+| `directives` | Across files, different file-level directives (`# frozen_string_literal`). |
+
+The body is relocated, not rewritten, so a reviewer reads where it landed
+rather than every line of it; but its meaning can change, so it is never a
+`move`. Code that isn't a unit (a DSL call, a definition under the size floor
+or inside a block) never pairs: reordering it is `logic`.
 
 A hunk is a move when every changed code line lies in a paired unit or in
 code the alignment kept unchanged. Both halves are labeled.
@@ -290,13 +299,21 @@ code the alignment kept unchanged. Both halves are labeled.
 | `nodes` | int | Syntax nodes in the smallest unit moved. |
 | `candidates` | int | The most units, among the hunk's pairs, that matched equally well; 1 when every match is unique. |
 
-`detail` for `move` and `move_with_changes` is `moves`, an array with one
-entry per pair touching the hunk:
+`detail` for `move` and `move_with_changes`:
+
+| key | type | meaning |
+|---|---|---|
+| `context` | string array | Every `context` among the hunk's entries, in the table's order; empty for a `move`. |
+| `moves` | array | One entry per pair touching the hunk, below. |
+
+Each `moves` entry:
 
 | key | type | meaning |
 |---|---|---|
 | `name` | string or null | The declared name. |
 | `from_hunk`, `to_hunk` | int or null | `id` of the hunk removing the unit and of the hunk adding it; equal for a reorder inside one hunk. |
+| `from_line`, `to_line` | int or null | The unit's first code line in its old file and in its new file. |
+| `context` | string array | What differs around this unit in its new place (see the table above); empty when nothing does. |
 | `similarity` | number 0–1 | This pair's similarity. |
 | `changed_before`, `changed_after` | int array | Lines, in the removed unit's old file and the added unit's new file, that the other doesn't share, whitespace aside. Empty for an exact move. |
 
@@ -315,6 +332,7 @@ enough to match by chance, and when several units could be its other half.
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
 | `generated_hunks` | int | Hunks with `generated: true`. They count in `hunks`, `kinds` and `verdict`, and nowhere below. |
 | `kinds` | object | Hunk count per kind, every kind present. |
+| `move_contexts` | object | `move_with_changes` hunk count per `context` (see [Moves](#moves)), every context present; a hunk with two contexts counts under both. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |

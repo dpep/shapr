@@ -67,6 +67,33 @@ fn assert_kinds(report: &Value, want: &[&str]) {
     assert_eq!(kinds(report), want, "{report:#}");
 }
 
+/// Every hunk is an unchanged body moved under a new `context`: a
+/// `move_with_changes` reviewing only the definitions' first lines.
+fn assert_context_move(report: &Value, context: &str) {
+    assert!(
+        kinds(report).iter().all(|k| *k == "move_with_changes"),
+        "{report:#}"
+    );
+    for hunk in hunks(report) {
+        assert_eq!(hunk["detail"]["context"], serde_json::json!([context]));
+        assert_eq!(hunk["evidence"]["similarity"], 1.0);
+        // One line per end of a move in this hunk: the definition's first.
+        let ends: usize = hunk["detail"]["moves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| {
+                usize::from(m["from_hunk"] == hunk["id"]) + usize::from(m["to_hunk"] == hunk["id"])
+            })
+            .sum();
+        assert_eq!(hunk["review_lines"], ends, "{hunk:#}");
+    }
+    assert_eq!(
+        report["summary"]["move_contexts"][context],
+        hunks(report).len()
+    );
+}
+
 #[test]
 fn rust_files_are_parsed() {
     let report = change("fn a() {}\n", "fn a() { b(); }\n");
@@ -219,13 +246,13 @@ fn swapping_methods_in_an_impl_is_a_move() {
 }
 
 #[test]
-fn a_method_moved_to_another_impl_is_logic() {
+fn a_method_moved_to_another_impl_is_a_move_to_a_new_owner() {
     let before =
         "impl A {\n    fn go(&self) -> u32 {\n        self.x + self.y\n    }\n}\n\nimpl B {\n}\n";
     let after =
         "impl A {\n}\n\nimpl B {\n    fn go(&self) -> u32 {\n        self.x + self.y\n    }\n}\n";
     let report = change(before, after);
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+    assert_context_move(&report, "owner");
 }
 
 #[test]
@@ -240,7 +267,7 @@ fn an_attribute_left_behind_by_a_move_is_logic() {
 }
 
 #[test]
-fn a_function_moved_to_another_module_file_is_logic() {
+fn a_function_moved_to_another_module_file_is_a_move_to_a_new_module() {
     // Each file is a module: the function's path and the names it resolves
     // change with its file.
     let f = "pub fn helper(x: u32) -> u32 {\n    let y = x * 2;\n    y + 1\n}\n";
@@ -251,14 +278,7 @@ fn a_function_moved_to_another_module_file_is_logic() {
             ("b.rs", &format!("pub fn other() {{}}\n\n{f}")),
         ],
     );
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    assert!(
-        hunks(&report)[0]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("module"),
-        "{report:#}"
-    );
+    assert_context_move(&report, "module");
 }
 
 #[test]
@@ -349,12 +369,12 @@ fn editing_a_type_in_place_is_not_a_move() {
 }
 
 #[test]
-fn a_function_moved_between_same_named_cfg_modules_is_logic() {
+fn a_function_moved_between_same_named_cfg_modules_is_a_move_to_a_new_owner() {
     let f = "    pub fn open(x: u32) -> u32 {\n        let y = x * 2;\n        y + 1\n    }\n";
     let before = format!("#[cfg(unix)]\nmod imp {{\n{f}}}\n\n#[cfg(windows)]\nmod imp {{\n}}\n");
     let after = format!("#[cfg(unix)]\nmod imp {{\n}}\n\n#[cfg(windows)]\nmod imp {{\n{f}}}\n");
     let report = change(&before, &after);
-    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+    assert_context_move(&report, "owner");
 }
 
 #[test]
