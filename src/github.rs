@@ -19,8 +19,6 @@ or a commit (https://github.com/OWNER/REPO/commit/SHA, OWNER/REPO@SHA)";
 const HOST: &str = "github.com";
 const API_URL: &str = "https://api.github.com";
 const GIT_URL: &str = "https://github.com";
-/// What a root commit is compared against.
-const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Repo {
@@ -343,7 +341,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
             let head = sha(&found.sha)?;
             let base = match found.parents.first() {
                 Some(parent) => sha(&parent.sha)?,
-                None => EMPTY_TREE.to_string(),
+                None => git::EMPTY_TREE.to_string(),
             };
             let source = Source {
                 kind: "commit",
@@ -381,7 +379,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
     );
     let wanted: Vec<&str> = [source.base.as_str(), source.head.as_str()]
         .into_iter()
-        .filter(|s| *s != EMPTY_TREE)
+        .filter(|s| *s != git::EMPTY_TREE)
         .collect();
     let git_dir = cache.fetch(repo, &wanted)?;
     Ok(Remote {

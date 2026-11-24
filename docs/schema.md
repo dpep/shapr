@@ -511,8 +511,34 @@ can check `schema` before reading the rest.
 | `record` | `"meta"` | |
 | `schema` | int | This schema's version. |
 | `version` | string | shapr's version. |
-| `command` | string | What produced the records that follow: `classify` (`shapr RANGE` or a diff on stdin) or `norms` (`shapr norms`). Check it before reading `summary.verdict`, which a `norms` output doesn't have. |
-| `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local range or stdin. |
+| `command` | string | What produced the records that follow: `classify` (`shapr REV`, a range, paths, or a diff on stdin) or `norms` (`shapr norms`). Check it before reading `summary.verdict`, which a `norms` output doesn't have. |
+| `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local change or stdin. |
+| `input` | string or null | How the change was named (see [Input](#input)): `stdin`, `commit`, `range`, `merge_base_range`, `merge_base_worktree`, `worktree`, `github_pr` or `github_commit`; `null` for `norms`. |
+| `paths` | bool or null | Paths limited the diff (`shapr main..HEAD -- lib`); `null` for `norms`. |
+
+## Input
+
+Each way of naming a change is a git command, and `meta.input` names it:
+
+| shapr | same as | `meta.input` |
+|---|---|---|
+| `shapr REV` | `git show REV`: the commit against its first parent (a root commit against the empty tree) | `commit` |
+| `shapr A..B`, `shapr A B`, `shapr R^!`, `shapr R^-N` | `git diff A..B` | `range` |
+| `shapr A...B`, `shapr main...` | `git diff A...B`: from the merge base | `range` |
+| `shapr --merge-base REF REV` | `git diff --merge-base REF REV`, that is `REF...REV` | `merge_base_range` |
+| `shapr --merge-base REF` | `git diff --merge-base REF`: from the merge base of REF and HEAD to the working tree, the branch's committed and uncommitted work | `merge_base_worktree` |
+| `shapr PATH...`, `shapr .` | `git diff HEAD -- PATH...`: uncommitted changes, staged and not | `worktree` |
+| no arguments | the unified diff on stdin | `stdin` |
+| a GitHub pull request or commit | see [GitHub input](#github-input) | `github_pr`, `github_commit` |
+
+Any form but stdin and GitHub takes paths after its revisions, `shapr main..HEAD
+lib` or `shapr main..HEAD -- lib`, as git pathspecs read from the directory shapr
+runs in (`-C`); `meta.paths` is then `true`. Arguments are read as git reads
+them: revisions first, then paths; a name that is both a revision and a path
+is a usage error (64) asking for `--`, which makes everything after it a path.
+A merge commit named alone is an error (2) naming `REV^1..REV` and
+`REV^2..REV`. The commit messages read for [claims](#claims) are those of the
+commits the form spans that touch the paths.
 
 ## `file` record
 
@@ -630,10 +656,11 @@ facts.
 ## Claims
 
 `summary.claims` holds what the messages around the change *claim*: the
-commit messages of the range (`git log` over the commits `git diff RANGE`
-spans: `A..B` and `A...B` read the commits in B and not A, a single revision
-`R` reads `R..HEAD`) and the description given with `--message FILE` (a PR
-body; `-` reads stdin when a RANGE is given). A piped diff has no commit
+commit messages of the change (`git log` over the commits its
+[input](#input) spans: `shapr R` reads R, `A..B` and `A...B` the commits in B
+and not A, `--merge-base REF` those from the merge base to HEAD, paths alone
+none) and the description given with `--message FILE` (a PR body; `-` reads
+stdin when the change is named on the command line). A piped diff has no commit
 messages. For a GitHub pull request (see [GitHub input](#github-input)) the
 commit messages are the pull request's commits as the GitHub API lists them
 (up to 250) and the description is its title (the subject) and body, unless
@@ -1007,7 +1034,7 @@ style inferred), `deviations`, `hotspots`, `steps`, `fixes` and
 cache flags (`--cache-dir`, `--status`, `--clear-cache`, `SHAPR_CACHE_DIR`)
 may change in any release before 1.0.
 
-RANGE may name a GitHub pull request or commit instead of local revisions:
+The argument may name a GitHub pull request or commit instead of local revisions:
 
 | form | names |
 |---|---|
@@ -1079,8 +1106,8 @@ the change exits 0, whatever the verdict.
 | code | meaning |
 |---|---|
 | 0 | success |
-| 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
-| 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
+| 2 | operational error: git failed (not a repository, a bad revision, a name that is neither a revision nor a path), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`shapr R` or `R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
+| 64 | usage: a bad command line (more than two revisions, a range beside another revision, a bare `--merge-base`), a name that is both a revision and a path (use `--`), a revision after a path, no input (no arguments and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `none`.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe

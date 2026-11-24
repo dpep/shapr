@@ -355,11 +355,9 @@ fn a_piped_diff_matches_the_range() {
     write(dir.path(), &[("a.rb", &METHOD.replace("  end", "    end"))]);
     let diff = git(dir.path(), &["diff"]);
     let piped = shapr_stdin(dir.path(), &["-J"], &diff);
-    let ranged = shapr(dir.path(), &["-J", "HEAD"]);
-    assert_eq!(
-        String::from_utf8_lossy(&piped.stdout),
-        String::from_utf8_lossy(&ranged.stdout)
-    );
+    let ranged = shapr(dir.path(), &["-J", "."]);
+    // All but meta, which names the input form.
+    assert_eq!(records(&piped)[1..], records(&ranged)[1..]);
     let lines = records(&piped);
     let records: Vec<&str> = lines
         .iter()
@@ -420,7 +418,7 @@ fn dash_c_reads_that_repository_whatever_git_dir_says() {
     };
     // A range, and a piped diff whose working-tree blob is read from disk.
     for (args, stdin) in [
-        (vec!["-C", dir, "-j", "HEAD"], ""),
+        (vec!["-C", dir, "-j", "."], ""),
         (vec!["-C", dir, "-j"], diff.as_str()),
     ] {
         let (report, code) = run(&args, stdin);
@@ -607,7 +605,7 @@ fn a_root_commit_against_its_parents_diffs_against_the_working_tree() {
     // git diffs a parentless R^! as R against the working tree.
     write(dir.path(), &[("a.rb", &METHOD.replace("greet", "welcome"))]);
     let caret = report(&shapr(dir.path(), &["-j", "HEAD~1^!"]));
-    let plain = report(&shapr(dir.path(), &["-j", "HEAD~1"]));
+    let plain = report(&shapr(dir.path(), &["-j", "--merge-base", "HEAD~1"]));
     assert_eq!(caret["hunks"], plain["hunks"]);
 }
 
@@ -650,7 +648,212 @@ fn a_github_file_url_is_not_a_change() {
 fn help_names_the_last_commit_form() {
     let dir = repo(&[]);
     let help = String::from_utf8(shapr(dir.path(), &["--help"]).stdout).unwrap();
-    assert!(help.contains("shapr HEAD^!"), "{help}");
+    assert!(help.contains("shapr HEAD  "), "{help}");
+}
+
+// The input grammar: each form is a git command (README, Usage).
+
+/// `a.rb` and `lib/b.rb` on main, a branch `feat` off it with one commit
+/// changing both, and an uncommitted edit to each.
+fn branched() -> tempfile::TempDir {
+    let dir = repo(&[&[("a.rb", METHOD), ("lib/b.rb", "B = 1\n")]]);
+    git(dir.path(), &["checkout", "-q", "-b", "feat"]);
+    commit(
+        dir.path(),
+        &[
+            ("a.rb", &METHOD.replace("hi", "yo")),
+            ("lib/b.rb", "B = 2\n"),
+        ],
+        "feat: both",
+    );
+    write(
+        dir.path(),
+        &[
+            ("a.rb", &METHOD.replace("hi", "hey")),
+            ("lib/b.rb", "B = 3\n"),
+        ],
+    );
+    dir
+}
+
+/// The files a run's hunks are in, and its meta record.
+fn ran(dir: &std::path::Path, args: &[&str]) -> (Vec<String>, Value) {
+    let mut all = vec!["-j"];
+    all.extend(args);
+    let out = shapr(dir, &all);
+    assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+    let report = report(&out);
+    let files = hunks(&report)
+        .iter()
+        .map(|h| h["file"].as_str().unwrap().to_string())
+        .collect();
+    (files, report["meta"].clone())
+}
+
+/// The error record's message and code.
+fn refused(dir: &std::path::Path, args: &[&str]) -> (String, i64) {
+    let mut all = vec!["-J"];
+    all.extend(args);
+    let out = shapr(dir, &all);
+    let record = report(&out);
+    assert_eq!(record["record"], "error", "{args:?}");
+    assert_eq!(out.status.code().map(i64::from), record["code"].as_i64());
+    (
+        record["error"].as_str().unwrap().to_string(),
+        record["code"].as_i64().unwrap(),
+    )
+}
+
+#[test]
+fn one_revision_is_that_commit_against_its_parent() {
+    let dir = branched();
+    let one = report(&shapr(dir.path(), &["-j", "feat"]));
+    let range = report(&shapr(dir.path(), &["-j", "feat^..feat"]));
+    assert_eq!(one["hunks"], range["hunks"]);
+    assert_eq!(one["summary"]["claims"]["messages"], 1);
+    assert_eq!(one["meta"]["input"], "commit");
+    assert_eq!(one["meta"]["paths"], false);
+}
+
+#[test]
+fn a_root_commit_alone_is_everything_it_added() {
+    let dir = repo(&[&[("a.rb", METHOD)], &[("b.rb", "x = 1\n")]]);
+    write(dir.path(), &[("a.rb", "x = 2\n")]);
+    let report = report(&shapr(dir.path(), &["-j", "HEAD~1"]));
+    let hunk = &hunks(&report)[0];
+    assert_eq!(hunks(&report).len(), 1, "{report:#}");
+    assert_eq!(hunk["file"], "a.rb");
+    assert_eq!(hunk["deleted"], 0, "{hunk:#}");
+    assert_eq!(report["summary"]["claims"]["messages"], 1);
+}
+
+#[test]
+fn two_revisions_are_the_range_between_them() {
+    let dir = branched();
+    let two = report(&shapr(dir.path(), &["-j", "main", "feat"]));
+    let range = report(&shapr(dir.path(), &["-j", "main..feat"]));
+    assert_eq!(two["hunks"], range["hunks"]);
+    assert_eq!(two["meta"]["input"], "range");
+    let (message, code) = refused(dir.path(), &["main", "feat", "HEAD"]);
+    assert_eq!(code, 64);
+    assert!(message.contains("--"), "{message}");
+}
+
+#[test]
+fn merge_base_is_the_branch_against_where_it_left_main() {
+    let dir = branched();
+    // No second revision: committed and uncommitted work on the branch.
+    let (files, meta) = ran(dir.path(), &["--merge-base", "main"]);
+    assert_eq!(files, ["a.rb", "lib/b.rb"]);
+    assert_eq!(meta["input"], "merge_base_worktree");
+    let worktree = report(&shapr(dir.path(), &["-j", "--merge-base", "main"]));
+    let piped = shapr_stdin(dir.path(), &["-j"], &git(dir.path(), &["diff", "main"]));
+    assert_eq!(worktree["hunks"], report(&piped)["hunks"]);
+    assert_eq!(worktree["summary"]["claims"]["messages"], 1);
+    // With one: `main...feat`.
+    let both = report(&shapr(dir.path(), &["-j", "--merge-base", "main", "feat"]));
+    let dots = report(&shapr(dir.path(), &["-j", "main...feat"]));
+    assert_eq!(both["hunks"], dots["hunks"]);
+    assert_eq!(both["meta"]["input"], "merge_base_range");
+    assert_eq!(both["summary"]["claims"]["messages"], 1);
+
+    let out = shapr(dir.path(), &["-J", "--merge-base"]);
+    assert_eq!(out.status.code(), Some(64), "{out:?}");
+    let (_, code) = refused(dir.path(), &["--merge-base", "main", "feat", "HEAD"]);
+    assert_eq!(code, 64);
+}
+
+#[test]
+fn paths_alone_are_the_uncommitted_changes_to_them() {
+    let dir = branched();
+    let (files, meta) = ran(dir.path(), &["a.rb"]);
+    assert_eq!(files, ["a.rb"]);
+    assert_eq!(
+        (meta["input"].as_str(), meta["paths"].as_bool()),
+        (Some("worktree"), Some(true))
+    );
+    let (files, _) = ran(dir.path(), &["."]);
+    assert_eq!(files, ["a.rb", "lib/b.rb"]);
+    let staged = git(dir.path(), &["diff", "HEAD"]);
+    let piped = shapr_stdin(dir.path(), &["-j"], &staged);
+    let dotted = report(&shapr(dir.path(), &["-j", "."]));
+    assert_eq!(report(&piped)["hunks"], dotted["hunks"]);
+    // From a subdirectory (-C), paths are relative to it, as git reads them.
+    let (files, _) = ran(dir.path(), &["-C", "lib", "b.rb"]);
+    assert_eq!(files, ["lib/b.rb"]);
+}
+
+#[test]
+fn every_form_takes_paths_after_its_revisions() {
+    let dir = branched();
+    for args in [
+        &["feat", "--", "lib"][..],
+        &["feat", "lib"],
+        &["main..feat", "--", "lib/b.rb"],
+        &["main", "feat", "lib"],
+        &["--merge-base", "main", "lib"],
+        &["--merge-base", "main", "feat", "--", "lib"],
+        &["--", "lib"],
+    ] {
+        let (files, meta) = ran(dir.path(), args);
+        assert_eq!(files, ["lib/b.rb"], "{args:?}");
+        assert_eq!(meta["paths"], true, "{args:?}");
+    }
+}
+
+#[test]
+fn a_name_that_is_a_revision_and_a_path_needs_dashes() {
+    let dir = branched();
+    git(dir.path(), &["branch", "lib", "main"]);
+    let (message, code) = refused(dir.path(), &["lib"]);
+    assert_eq!(code, 64);
+    assert!(
+        message.contains("ambiguous argument 'lib': both revision and filename"),
+        "{message}"
+    );
+    assert!(
+        message.contains("Use '--' to separate paths from revisions"),
+        "{message}"
+    );
+    // `--` decides: after it a path, before it a revision.
+    let (files, meta) = ran(dir.path(), &["--", "lib"]);
+    assert_eq!(
+        (files, meta["input"].as_str()),
+        (vec!["lib/b.rb".to_string()], Some("worktree"))
+    );
+    let (_, meta) = ran(dir.path(), &["lib", "--"]);
+    assert_eq!(meta["input"], "commit");
+}
+
+#[test]
+fn a_name_that_is_neither_says_how_to_name_a_path() {
+    let dir = branched();
+    let (message, code) = refused(dir.path(), &["nope"]);
+    assert_eq!(code, 2);
+    assert!(
+        message.contains("unknown revision or path not in the working tree"),
+        "{message}"
+    );
+    assert!(message.contains("--"), "{message}");
+    // A revision after a path.
+    let (message, code) = refused(dir.path(), &["a.rb", "main"]);
+    assert_eq!(code, 64);
+    assert!(message.contains("main"), "{message}");
+}
+
+#[test]
+fn meta_names_the_input_form() {
+    let dir = branched();
+    let piped = shapr_stdin(dir.path(), &["-j"], &git(dir.path(), &["diff"]));
+    let meta = &report(&piped)["meta"];
+    assert_eq!(
+        (meta["input"].as_str(), meta["paths"].as_bool()),
+        (Some("stdin"), Some(false))
+    );
+    assert_eq!(ran(dir.path(), &["main...feat"]).1["input"], "range");
+    assert_eq!(ran(dir.path(), &["HEAD^!"]).1["input"], "range");
+    let norms = report(&shapr(dir.path(), &["-j", "norms", "a.rb"]));
+    assert_eq!(norms["meta"]["input"], Value::Null);
 }
 
 #[test]

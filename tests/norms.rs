@@ -32,7 +32,7 @@ fn config_above_the_repository_is_not_read() {
     }
     for args in [
         vec!["-j", "HEAD~1..HEAD"],
-        vec!["-j", "HEAD~1"],
+        vec!["-j", "--merge-base", "HEAD~1"],
         vec!["norms", "-j", "a.rb"],
     ] {
         let report = report(&shapr(&root, &args));

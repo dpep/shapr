@@ -84,51 +84,108 @@ impl Git {
         cmd
     }
 
-    /// `git diff RANGE`, in a fixed format: prefixes, rename detection and
-    /// three lines of context whatever the user's config says.
-    pub fn diff(&self, range: &str) -> Result<String> {
+    /// `git diff RANGE -- PATHS`, in a fixed format: prefixes, rename
+    /// detection and three lines of context whatever the user's config says.
+    pub fn diff(&self, range: &str, paths: &[String]) -> Result<String> {
         self.verify_range(range)?;
         // Against all its parents a merge diffs as a combined diff, or nothing.
         if let Some(rev) = range.strip_suffix("^!")
             && self.parents(rev)? > 1
         {
-            bail!("{rev} is {MERGE}");
+            bail!("{}", merge(rev));
         }
-        let out = run(self.command().args([
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--src-prefix=a/",
-            "--dst-prefix=b/",
-            "-M",
-            "-U3",
-            range,
-            "--",
-        ]))?;
+        let out = run(self
+            .command()
+            .args([
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "-M",
+                "-U3",
+                range,
+                "--",
+            ])
+            .args(paths))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
 
-    /// Each commit's id and message in the commits `git diff RANGE` spans,
-    /// newest first: `A..B` and `A...B` are the commits in B and not A, and
-    /// one revision `R` (against the working tree) is `R..HEAD`.
-    pub fn messages(&self, range: &str) -> Result<Vec<(String, String)>> {
-        let commits = match range.split_once("...") {
-            Some((from, to)) => format!("{from}..{to}"),
-            None => match self.parent_diff(range) {
+    /// What `git show REV` diffs, as a range: `REV^!`, or from the empty
+    /// tree for a root commit. A merge is refused in `diff`.
+    pub fn commit_range(&self, rev: &str) -> Result<String> {
+        Ok(match self.parents(rev)? {
+            0 => format!("{EMPTY_TREE}..{rev}"),
+            _ => format!("{rev}^!"),
+        })
+    }
+
+    /// The best common ancestor of A and B.
+    pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {
+        let out = run(self.command().args(["merge-base", a, b, "--"]))?;
+        Ok(String::from_utf8_lossy(&out).trim().to_string())
+    }
+
+    /// ARGS, given with no `--`, as git reads them: the leading revisions,
+    /// then paths. `Ok(Err(message))` when git won't tell them apart
+    /// (a name that is both, a revision after a path): a usage error.
+    pub fn split(&self, args: &[String]) -> Result<Result<Split, String>> {
+        // `git log` disambiguates as `git diff` does; `rev-parse` doesn't.
+        let out = self
+            .command()
+            .args(["log", "-n0", "--format="])
+            .args(args)
+            .output()
+            .context("could not run git")?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            self.outside_repository(&stderr)?;
+            let first = stderr.lines().next().unwrap_or_default();
+            let first = first.strip_prefix("fatal: ").unwrap_or(first);
+            let first = first.trim_end_matches('.');
+            let usage = "shapr [REV...] -- [PATH...]";
+            if first.contains("both revision and filename") {
+                return Ok(Err(format!(
+                    "{first}. Use '--' to separate paths from revisions: {usage}"
+                )));
+            }
+            if first.contains("no such path in the working tree") {
+                return Ok(Err(format!(
+                    "{first}. Revisions go before paths, and a path that doesn't exist after '--': {usage}"
+                )));
+            }
+            if first.contains("unknown revision or path") {
+                bail!("{first}. Use '--' to separate paths from revisions: {usage}");
+            }
+            bail!("git: {first}");
+        }
+        let revisions = args.iter().take_while(|a| self.resolves(a)).count();
+        Ok(Ok((args[..revisions].to_vec(), args[revisions..].to_vec())))
+    }
+
+    /// Each commit's id and message in the commits `git diff RANGE` spans
+    /// that touch PATHS (all when empty), newest first: `A..B` and `A...B`
+    /// are the commits in B and not A, a root commit from the empty tree is
+    /// itself, and one revision `R` (against the working tree) is `R..HEAD`.
+    pub fn messages(&self, range: &str, paths: &[String]) -> Result<Vec<(String, String)>> {
+        let root = range
+            .strip_prefix(EMPTY_TREE)
+            .and_then(|r| r.strip_prefix(".."));
+        let commits = match (root, range.split_once("...")) {
+            (Some(root), _) => root.to_string(),
+            (None, Some((from, to))) => format!("{from}..{to}"),
+            (None, None) => match self.parent_diff(range) {
                 Some((rev, None)) => format!("{rev}..HEAD"),
                 Some(_) => range.to_string(),
                 None if range.contains("..") => range.to_string(),
                 None => format!("{range}..HEAD"),
             },
         };
-        let out = run(self.command().args([
-            "log",
-            "--no-color",
-            "--format=%H%x00%B%x1e",
-            &commits,
-            "--",
-        ]))?;
+        let out = run(self
+            .command()
+            .args(["log", "--no-color", "--format=%H%x00%B%x1e", &commits, "--"])
+            .args(paths))?;
         Ok(String::from_utf8_lossy(&out)
             .split('\x1e')
             .filter_map(|entry| entry.trim_start().split_once('\0'))
@@ -178,7 +235,12 @@ impl Git {
             .args(["rev-parse", "--quiet", range, "--"])
             .output()
             .context("could not run git")?;
-        let stderr = String::from_utf8_lossy(&out.stderr);
+        self.outside_repository(&String::from_utf8_lossy(&out.stderr))?;
+        check(out).map(drop)
+    }
+
+    /// Fails in one line when git's STDERR says it ran outside a repository.
+    fn outside_repository(&self, stderr: &str) -> Result<()> {
         if stderr.contains("not a git repository") {
             let dir = match &self.dir {
                 Some(dir) => dir.clone(),
@@ -186,7 +248,7 @@ impl Git {
             };
             bail!("not a git repository: {}", dir.display());
         }
-        check(out).map(drop)
+        Ok(())
     }
 
     /// ARG names revisions in this repository (read-only; false outside one).
@@ -684,6 +746,17 @@ impl Git {
 
 /// Why a merge's combined diff isn't read, and what to run instead.
 pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
+
+/// Why merge commit REV isn't diffed against all its parents, and what to run instead.
+pub fn merge(rev: &str) -> String {
+    format!("{rev} is a merge: diff it against one parent, {rev}^1..{rev} or {rev}^2..{rev}")
+}
+
+/// Arguments as revisions, then paths.
+pub type Split = (Vec<String>, Vec<String>);
+
+/// What a root commit is compared against.
+pub const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 const LINGUIST: [&str; 3] = [
     "linguist-generated",

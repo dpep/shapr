@@ -8,24 +8,31 @@ use crate::{change, classify, diff, git, github};
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
 use std::io::{IsTerminal, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const AFTER_HELP: &str = "\
-EXAMPLES
-  shapr main..HEAD           classify a branch's commits
-  shapr main                 main against the working tree
-  shapr HEAD^!               the last commit alone
-  git diff --staged | shapr  classify a diff from stdin (needs `git diff` index lines)
-  shapr -J main..HEAD        JSON lines: a meta record, each file and hunk, then a summary
-  shapr -C app main..HEAD    run in another repository, like git -C
-  shapr --message pr.md main..HEAD   also read claims from a PR description
-  shapr acme/widgets#12      a GitHub pull request: the diff its Files tab shows
-  shapr acme/widgets@1a2b3c4  a GitHub commit, against its (first) parent
-  shapr norms lib/cart.rb    a file's style norms, no diff needed (see shapr norms --help)
+EXAMPLES                          each is a git command: shapr X is git show/diff X
+  shapr HEAD                      the last commit (git show HEAD)
+  shapr main..HEAD                a range (git diff main..HEAD); shapr main HEAD is the same
+  shapr main...                   a branch's commits, from where it left main
+  shapr --merge-base main         everything on the branch, committed or not
+  shapr .                         uncommitted changes (git diff HEAD -- .)
+  shapr main..HEAD -- lib         any form, limited to paths
+  git diff --staged | shapr       a diff on stdin (needs `git diff` index lines)
+  shapr -J main..HEAD             JSON lines: a meta record, each file and hunk, then a summary
+  shapr -C app main..HEAD         run in another repository, like git -C
+  shapr --message pr.md main...   also read claims from a PR description
+  shapr acme/widgets#12           a GitHub pull request: the diff its Files tab shows
+  shapr acme/widgets@1a2b3c4      a GitHub commit, against its (first) parent
+  shapr norms lib/cart.rb         a file's style norms, no diff needed (see shapr norms --help)
 
-  With no RANGE, shapr reads a diff from stdin; like any filter, it waits while an
-  inherited stdin stays open. An empty stdin is no input (64), so a failed
+  Arguments are read as git reads them: revisions, then paths. A name that is
+  both needs `--`: shapr lib -- (the revision), shapr -- lib (the path). A
+  merge commit alone is refused: name one parent, REV^1..REV.
+
+  With no arguments, shapr reads a diff from stdin; like any filter, it waits while
+  an inherited stdin stays open. An empty stdin is no input (64), so a failed
   `git diff` upstream is an error, not an empty verdict.
 
   Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0. Only
@@ -34,7 +41,7 @@ EXAMPLES
   `unknown`, counted in summary.verdicts.
 
 GITHUB (experimental: the forms, meta.source and the cache may change before 1.0)
-  RANGE may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,
+  The argument may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,
   or #N for this repository's GitHub remote) or a commit (.../commit/SHA,
   .../pull/N/commits/SHA, OWNER/REPO@SHA). A shorthand that is also a local revision
   is the local revision. Metadata comes from the GitHub API, with a token from GH_TOKEN,
@@ -43,9 +50,11 @@ GITHUB (experimental: the forms, meta.source and the cache may change before 1.0
 
 EXIT CODES
   0   success, whatever the verdict: the verdict is in the output
-  2   error: git failed (not a repository, a bad revision), stdin is not a diff, or GitHub
-      failed (unreachable, not found, rate limited)
-  64  usage: the command line is wrong, or there is no input (an empty stdin)
+  2   error: git failed (not a repository, a bad revision, a name that is neither a
+      revision nor a path, a merge commit alone), stdin is not a diff, or GitHub failed
+      (unreachable, not found, rate limited)
+  64  usage: the command line is wrong (a name both a revision and a path, more than
+      two revisions), or there is no input (an empty stdin)
 
   Structure is a shape, not a safety claim: extracts and inlines still deserve review.";
 
@@ -54,16 +63,29 @@ EXIT CODES
     name = "shapr",
     version,
     about = "Classify the shape of a code change: format, comment, restyle, rename, move, extract, inline, or logic.",
-    override_usage = "shapr [OPTIONS] [RANGE]\n       shapr norms [OPTIONS] <FILE>...",
+    override_usage = "shapr [OPTIONS] [REV [REV]] [[--] PATH...]\n       shapr [OPTIONS] --merge-base REF [REV] [[--] PATH...]\n       shapr norms [OPTIONS] [PATH]...",
     after_help = AFTER_HELP
 )]
 struct Cli {
-    /// Revisions to compare, as `git diff` takes them (`main..HEAD`,
-    /// `main...HEAD`, or one revision against the working tree), or a GitHub
-    /// pull request or commit (see GITHUB below). Without it, a unified diff
-    /// is read from stdin; an empty stdin is a usage error.
-    #[arg(value_name = "RANGE")]
-    range: Option<String>,
+    /// What to classify, as git reads it: one revision is that commit
+    /// (`git show REV`); a range or two revisions are `git diff A..B`;
+    /// paths alone are their uncommitted changes (`git diff HEAD -- PATH`),
+    /// and after revisions limit them. A name that is both a revision and a
+    /// path needs `--`. Or a GitHub pull request or commit (see GITHUB
+    /// below). With none, a unified diff is read from stdin.
+    #[arg(value_name = "REV|PATH")]
+    args: Vec<String>,
+
+    /// Paths, after `--`.
+    #[arg(last = true, value_name = "PATH")]
+    paths: Vec<String>,
+
+    /// Diff from the merge base of REF and HEAD to the working tree, like
+    /// `git diff --merge-base REF`: everything on the branch, committed or
+    /// not. With a REV, from the merge base of REF and REV to REV
+    /// (`REF...REV`).
+    #[arg(long, value_name = "REF")]
+    merge_base: Option<String>,
 
     /// Run as if shapr was started in DIR, like `git -C`. GIT_DIR,
     /// GIT_WORK_TREE and GIT_INDEX_FILE are ignored, so DIR's repository
@@ -90,8 +112,8 @@ struct Cli {
     quiet: bool,
 
     /// Read claims from FILE, a description of the change such as a PR body,
-    /// beside the range's commit messages (see summary.claims). `-` reads
-    /// stdin, when a RANGE is given. Claims never change a hunk's label.
+    /// beside the commit messages (see summary.claims). `-` reads stdin,
+    /// when the change isn't on stdin. Claims never change a hunk's label.
     #[arg(long, value_name = "FILE")]
     message: Option<PathBuf>,
     /// Experimental. Where GitHub repositories are cached; also SHAPR_CACHE_DIR. Defaults
@@ -101,12 +123,12 @@ struct Cli {
 
     /// Experimental. Show the GitHub cache: its path, the repositories in it,
     /// and their size.
-    #[arg(long, conflicts_with_all = ["range", "clear_cache"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "clear_cache"])]
     status: bool,
 
     /// Experimental. Remove every cached GitHub repository, then show the
     /// cache.
-    #[arg(long, conflicts_with = "range")]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base"])]
     clear_cache: bool,
 
     /// The share a style needs to be a norm of the code around a hunk, from
@@ -122,8 +144,7 @@ struct Cli {
 
 pub(crate) const ERROR: u8 = 2;
 pub(crate) const USAGE: u8 = 64;
-const NO_INPUT: &str =
-    "no input: give a range (shapr main..HEAD) or pipe a diff (git diff | shapr)";
+const NO_INPUT: &str = "no input: name a change (shapr HEAD, shapr main..HEAD, shapr .) or pipe a diff (git diff | shapr)";
 
 /// A clap error's message as one line: its first paragraph, which may
 /// continue onto indented lines (the missing arguments), without the tips.
@@ -201,51 +222,53 @@ pub fn run() -> ExitCode {
             USAGE,
         );
     }
-    let stdin_message = cli.message.as_deref() == Some(std::path::Path::new("-"));
-    if stdin_message && cli.range.is_none() {
-        return fail(
-            format,
-            "--message - needs a RANGE: stdin carries the diff without one",
-            USAGE,
-        );
-    }
     if cli.status || cli.clear_cache {
         return cache(format, cli.cache_dir, cli.clear_cache, cli.quiet);
     }
     let mut git = git::Git::new(cli.dir.clone());
+    let dashdash = std::env::args().skip(1).any(|a| a == "--");
+    let input = match input(&cli, dashdash, &git) {
+        Ok(input) => input,
+        Err((message, code)) => return fail(format, &message, code),
+    };
+    let stdin_message = cli.message.as_deref() == Some(std::path::Path::new("-"));
+    if stdin_message && matches!(input, Input::Stdin) {
+        return fail(
+            format,
+            "--message - needs a change named on the command line: stdin carries the diff without one",
+            USAGE,
+        );
+    }
     let mut remote = None;
-    let text = match &cli.range {
-        Some(range) if range.starts_with('-') => {
-            return fail(format, &format!("`{range}` is not a range"), USAGE);
+    let (form, local) = match &input {
+        Input::Stdin => (report::Input::Stdin, None),
+        Input::Local { form, range, paths } => (*form, Some((range.as_str(), paths.as_slice()))),
+        Input::GitHub(target) => {
+            let form = match target {
+                github::Target::Pull { .. } => report::Input::GithubPr,
+                github::Target::Commit { .. } => report::Input::GithubCommit,
+            };
+            (form, None)
         }
-        Some(range) if github_file(range) => {
-            return fail(
-                format,
-                "a GitHub file isn't a change: give a pull request or commit, \
-                 or run shapr norms on a local checkout",
-                USAGE,
-            );
-        }
-        Some(range) => match github::resolve(range, &git) {
-            Err(message) => return fail(format, &message, USAGE),
-            Ok(None) => git.diff(range),
-            Ok(Some(target)) => {
-                let cache = match github::Cache::resolve(cli.cache_dir.clone()) {
-                    Ok(cache) => cache,
-                    Err(message) => return fail(format, &message, USAGE),
-                };
-                match github::fetch(&target, &cache) {
-                    Err(error) => return fail(format, &format!("{error:#}"), ERROR),
-                    Ok(fetched) => {
-                        let text = fetched.git.diff(&fetched.range);
-                        remote = Some(fetched);
-                        text
-                    }
+    };
+    let text = match &input {
+        Input::Local { range, paths, .. } => git.diff(range, paths),
+        Input::GitHub(target) => {
+            let cache = match github::Cache::resolve(cli.cache_dir.clone()) {
+                Ok(cache) => cache,
+                Err(message) => return fail(format, &message, USAGE),
+            };
+            match github::fetch(target, &cache) {
+                Err(error) => return fail(format, &format!("{error:#}"), ERROR),
+                Ok(fetched) => {
+                    let text = fetched.git.diff(&fetched.range, &[]);
+                    remote = Some(fetched);
+                    text
                 }
             }
-        },
-        None if std::io::stdin().is_terminal() => return fail(format, NO_INPUT, USAGE),
-        None => {
+        }
+        Input::Stdin if std::io::stdin().is_terminal() => return fail(format, NO_INPUT, USAGE),
+        Input::Stdin => {
             let mut text = String::new();
             std::io::stdin()
                 .read_to_string(&mut text)
@@ -266,7 +289,8 @@ pub fn run() -> ExitCode {
         return fail(format, &format!("the diff is {}", git::MERGE), ERROR);
     }
     let files = diff::parse(&text);
-    if cli.range.is_none() && files.is_empty() {
+    let stdin = matches!(input, Input::Stdin);
+    if stdin && files.is_empty() {
         // An empty pipe is usually an upstream failure (`git diff nope | shapr`).
         if text.trim().is_empty() {
             return fail(format, NO_INPUT, USAGE);
@@ -274,7 +298,7 @@ pub fn run() -> ExitCode {
         return fail(format, "stdin is not a diff: no file headers", ERROR);
     }
     let source = remote.as_ref().map(|r| r.source.clone());
-    let messages = match messages(&cli, &git, stdin_message, remote.as_mut()) {
+    let messages = match messages(&cli, &git, local, stdin_message, remote.as_mut()) {
         Ok(messages) => messages,
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
@@ -282,7 +306,7 @@ pub fn run() -> ExitCode {
     let range = remote
         .as_ref()
         .map(|r| r.range.clone())
-        .or(cli.range.clone());
+        .or(local.map(|(range, _)| range.to_string()));
     let mut claims = Claims::read(&messages);
     if let Some(remote) = remote {
         claims.resolve(&remote.reference_kinds(&claims.references()));
@@ -290,12 +314,12 @@ pub fn run() -> ExitCode {
     }
     // Where uses outside the change are searched: a diff on stdin names
     // its own after side only by blob ids.
-    let states = match (&cli.range, git.after_revision(cli.range.as_deref())) {
+    let states = match (stdin, git.after_revision(range.as_deref())) {
         (_, Some(rev)) => vec![git::State::Revision(rev)],
-        (Some(_), None) => vec![git::State::Worktree],
-        (None, None) => git.stdin_after(&files),
+        (false, None) => vec![git::State::Worktree],
+        (true, None) => git.stdin_after(&files),
     };
-    if cli.range.is_none() && states.is_empty() {
+    if stdin && states.is_empty() {
         crate::verbose!(
             "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
         );
@@ -340,7 +364,8 @@ pub fn run() -> ExitCode {
         &change,
         &labels,
         claims,
-        report::Meta::new("classify", source),
+        report::Meta::new("classify", source)
+            .input(form, local.is_some_and(|(_, paths)| !paths.is_empty())),
     );
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
@@ -367,11 +392,140 @@ pub fn run() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// What the command line names.
+enum Input {
+    Stdin,
+    /// What `git diff RANGE -- PATHS` shows; a lone revision in RANGE
+    /// is against the working tree, as `git diff REV` is.
+    Local {
+        form: report::Input,
+        range: String,
+        paths: Vec<String>,
+    },
+    GitHub(github::Target),
+}
+
+/// The change the arguments name, read as git reads them; an error's
+/// message and exit code.
+fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8)> {
+    let usage = |message: String| (message, USAGE);
+    let error = |error: anyhow::Error| (format!("{error:#}"), ERROR);
+    if let [arg] = cli.args.as_slice()
+        && !dashdash
+        && cli.merge_base.is_none()
+        && !cli
+            .dir
+            .as_deref()
+            .unwrap_or(Path::new("."))
+            .join(arg)
+            .exists()
+    {
+        if github_file(arg) {
+            return Err(usage(
+                "a GitHub file isn't a change: give a pull request or commit, \
+                 or run shapr norms on a local checkout"
+                    .to_string(),
+            ));
+        }
+        if let Some(target) = github::resolve(arg, git).map_err(usage)? {
+            return Ok(Input::GitHub(target));
+        }
+    }
+    let (revisions, mut paths) = match dashdash || cli.args.is_empty() {
+        true => (cli.args.clone(), Vec::new()),
+        false => git.split(&cli.args).map_err(error)?.map_err(usage)?,
+    };
+    paths.extend(cli.paths.iter().cloned());
+    let shape = shape(&revisions, cli.merge_base.as_deref(), !paths.is_empty()).map_err(usage)?;
+    let (form, range) = match shape {
+        None => return Ok(Input::Stdin),
+        Some(Shape::Commit(rev)) => (
+            report::Input::Commit,
+            git.commit_range(&rev).map_err(error)?,
+        ),
+        Some(Shape::Range(range)) => (report::Input::Range, range),
+        Some(Shape::MergeBaseRange(range)) => (report::Input::MergeBaseRange, range),
+        Some(Shape::MergeBaseWorktree(base)) => (
+            report::Input::MergeBaseWorktree,
+            git.merge_base(&base, "HEAD").map_err(error)?,
+        ),
+        Some(Shape::Worktree) => (report::Input::Worktree, "HEAD".to_string()),
+    };
+    Ok(Input::Local { form, range, paths })
+}
+
+/// The form revisions take, before git is asked anything.
+#[derive(Debug, PartialEq)]
+enum Shape {
+    /// `git show REV`.
+    Commit(String),
+    /// What `git diff` takes: `A..B`, `A...B`, `R^!`.
+    Range(String),
+    MergeBaseRange(String),
+    /// The merge base of REF and HEAD, against the working tree.
+    MergeBaseWorktree(String),
+    /// HEAD against the working tree.
+    Worktree,
+}
+
+/// The shape of REVISIONS under `--merge-base BASE`, with or without PATHS;
+/// `None` for a diff on stdin, a usage message for a shape git has no
+/// command for.
+fn shape(revisions: &[String], base: Option<&str>, paths: bool) -> Result<Option<Shape>, String> {
+    if let Some(base) = base {
+        if revisions.len() > 1 {
+            return Err("--merge-base takes one revision after REF at most: \
+                 shapr --merge-base REF [REV] [-- PATH...]"
+                .to_string());
+        }
+        if let Some(range) = std::iter::once(base)
+            .chain(revisions.iter().map(String::as_str))
+            .find(|r| is_range(r))
+        {
+            return Err(format!(
+                "--merge-base takes revisions, not a range like `{range}`: \
+                 shapr --merge-base main feature, or shapr main...feature"
+            ));
+        }
+        return Ok(Some(match revisions {
+            [rev] => Shape::MergeBaseRange(format!("{base}...{rev}")),
+            _ => Shape::MergeBaseWorktree(base.to_string()),
+        }));
+    }
+    Ok(match revisions {
+        [] if paths => Some(Shape::Worktree),
+        [] => None,
+        [rev] if is_range(rev) => Some(Shape::Range(rev.clone())),
+        [rev] => Some(Shape::Commit(rev.clone())),
+        [a, b] if is_range(a) || is_range(b) => {
+            return Err(format!(
+                "two revisions, not ranges: shapr A B, or shapr A..B (got `{a}` and `{b}`)"
+            ));
+        }
+        [a, b] => Some(Shape::Range(format!("{a}..{b}"))),
+        _ => {
+            return Err("at most two revisions, as git diff takes them; \
+                 paths go after them, or after `--`: shapr A B -- PATH..."
+                .to_string());
+        }
+    })
+}
+
+/// REV is git's notation for two endpoints: `A..B`, `A...B`, `R^!`, `R^-N`.
+fn is_range(rev: &str) -> bool {
+    rev.contains("..")
+        || rev.ends_with("^!")
+        || rev
+            .rsplit_once("^-")
+            .is_some_and(|(_, n)| n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// The range's commit messages, then the description: `--message`, else a
 /// pull request's own.
 fn messages(
     cli: &Cli,
     git: &git::Git,
+    local: Option<(&str, &[String])>,
     stdin: bool,
     remote: Option<&mut github::Remote>,
 ) -> anyhow::Result<Vec<Message>> {
@@ -380,8 +534,8 @@ fn messages(
     if let Some(remote) = remote {
         messages.append(&mut remote.commits);
         description = remote.description.take();
-    } else if let Some(range) = &cli.range {
-        for (id, text) in git.messages(range)? {
+    } else if let Some((range, paths)) = local {
+        for (id, text) in git.messages(range, paths)? {
             messages.push(Message {
                 source: Source::Commit,
                 commit: Some(id[..id.len().min(12)].to_string()),
@@ -562,25 +716,81 @@ pub(crate) fn requested_format() -> Format {
 mod tests {
     use super::*;
 
-    #[test]
-    fn after_help_examples_parse() {
-        let examples: Vec<&str> = AFTER_HELP
+    /// The example lines of --help and of the README's Usage block.
+    fn examples() -> Vec<String> {
+        let help = AFTER_HELP
             .lines()
             .map(str::trim_start)
-            .filter(|l| l.starts_with("shapr "))
-            .collect();
-        assert!(examples.len() >= 4);
+            .filter_map(|l| l.split("  ").next());
+        let readme = include_str!("../README.md");
+        let usage = readme
+            .split("## Usage")
+            .nth(1)
+            .and_then(|u| u.split("```sh\n").nth(1))
+            .and_then(|u| u.split("```").next())
+            .expect("README has a Usage block");
+        let readme = usage.lines().filter_map(|l| l.split(" # ").next());
+        help.chain(readme)
+            .filter(|l| l.starts_with("shapr ") || l.contains("| shapr"))
+            .filter_map(|l| l.find("shapr").map(|at| l[at..].trim().to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn help_examples() {
+        let examples = examples();
+        assert!(examples.len() >= 20, "{examples:?}");
         for example in examples {
-            let command = example.split("  ").next().unwrap();
-            let args: Vec<&str> = command.split_whitespace().collect();
-            let parsed = match args.get(1) {
-                Some(&"norms") => {
-                    crate::norms::command::NormsCli::try_parse_from(&args[1..]).is_ok()
-                }
-                _ => Cli::try_parse_from(args).is_ok(),
-            };
-            assert!(parsed, "{command}");
+            let args: Vec<&str> = example.split_whitespace().collect();
+            if args.get(1) == Some(&"norms") {
+                let parsed = crate::norms::command::NormsCli::try_parse_from(&args[1..]);
+                assert!(parsed.is_ok(), "{example}");
+                continue;
+            }
+            let cli = Cli::try_parse_from(&args).unwrap_or_else(|e| panic!("{example}: {e}"));
+            // What git would decide, from the examples' own names: a path has
+            // a slash or is `.`, unless it is a GitHub form.
+            let github = |a: &str| a.contains('#') || a.contains('@') || a.contains("://");
+            if cli.args.iter().any(|a| github(a)) {
+                continue;
+            }
+            let path = |a: &&String| *a == "." || a.contains('/');
+            let revisions: Vec<String> = cli.args.iter().filter(|a| !path(a)).cloned().collect();
+            let paths = cli.args.iter().any(|a| path(&a)) || !cli.paths.is_empty();
+            let shape = shape(&revisions, cli.merge_base.as_deref(), paths);
+            assert!(shape.is_ok(), "{example}: {shape:?}");
         }
+    }
+
+    #[test]
+    fn shapes_follow_git() {
+        let s = |revisions: &[&str], base: Option<&str>, paths: bool| {
+            let revisions: Vec<String> = revisions.iter().map(|r| r.to_string()).collect();
+            shape(&revisions, base, paths)
+        };
+        let range = |r: &str| Ok(Some(Shape::Range(r.to_string())));
+        assert_eq!(s(&[], None, false), Ok(None));
+        assert_eq!(s(&[], None, true), Ok(Some(Shape::Worktree)));
+        assert_eq!(
+            s(&["main"], None, false),
+            Ok(Some(Shape::Commit("main".into())))
+        );
+        for r in ["a..b", "a...", "HEAD^!", "HEAD^-2", "HEAD^-"] {
+            assert_eq!(s(&[r], None, false), range(r));
+        }
+        assert_eq!(s(&["a", "b"], None, true), range("a..b"));
+        assert!(s(&["a..b", "c"], None, false).is_err());
+        assert!(s(&["a", "b", "c"], None, false).is_err());
+        assert_eq!(
+            s(&[], Some("main"), false),
+            Ok(Some(Shape::MergeBaseWorktree("main".into())))
+        );
+        assert_eq!(
+            s(&["f"], Some("main"), false),
+            Ok(Some(Shape::MergeBaseRange("main...f".into())))
+        );
+        assert!(s(&["f", "g"], Some("main"), false).is_err());
+        assert!(s(&[], Some("a..b"), false).is_err());
     }
 
     #[test]

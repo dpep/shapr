@@ -219,7 +219,7 @@ fn a_rename_against_the_working_tree_searches_the_working_tree() {
         &[("README.md", "Meters.\n")],
     );
     write(dir.path(), &[("meter.rb", &meter("level", "probe"))]);
-    let contained = report(&shapr(dir.path(), &["-j", "HEAD"]));
+    let contained = report(&shapr(dir.path(), &["-j", "."]));
     assert_eq!(
         any_part(&contained, "rename")["structure"],
         true,

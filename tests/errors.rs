@@ -76,14 +76,14 @@ fn outside_a_repository_is_one_line() {
 #[test]
 fn a_range_that_isnt_a_revision_is_one_line() {
     let dir = repo(&[&[("a.rb", METHOD)]]);
-    // `..` names the parent directory: git would read it as a path.
-    for (range, rev) in [("..", ".."), ("nope..HEAD", "nope..HEAD")] {
-        let message = error(&shapr(dir.path(), &["-J", range]), 2);
-        assert!(
-            message.contains(&format!("bad revision '{rev}'")),
-            "{message}"
-        );
-    }
+    let message = error(&shapr(dir.path(), &["-J", "nope..HEAD"]), 2);
+    assert!(
+        message.starts_with("ambiguous argument 'nope..HEAD': unknown revision"),
+        "{message}"
+    );
+    // `..` names the parent directory, a path outside the repository.
+    let message = error(&shapr(dir.path(), &["-J", ".."]), 2);
+    assert!(message.contains("outside repository"), "{message}");
 }
 
 #[test]
@@ -203,9 +203,20 @@ fn merges() -> tempfile::TempDir {
 #[test]
 fn a_merge_against_its_parents_is_an_error_naming_one_parent() {
     let dir = merges();
-    for rev in ["HEAD^!", "HEAD~1^!"] {
-        let message = error(&shapr(dir.path(), &["-J", rev]), 2);
-        assert!(message.contains("R^1..R"), "{rev}: {message}");
+    for (arg, rev) in [
+        ("HEAD", "HEAD"),
+        ("HEAD~1", "HEAD~1"),
+        ("HEAD^!", "HEAD"),
+        ("HEAD~1^!", "HEAD~1"),
+    ] {
+        let message = error(&shapr(dir.path(), &["-J", arg]), 2);
+        assert_eq!(
+            message,
+            format!(
+                "{rev} is a merge: diff it against one parent, {rev}^1..{rev} or {rev}^2..{rev}"
+            ),
+            "{arg}"
+        );
     }
     // A first-parent diff of the same merge is an ordinary diff.
     assert_eq!(shapr(dir.path(), &["-J", "HEAD^-1"]).status.code(), Some(0));

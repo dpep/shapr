@@ -44,15 +44,20 @@ A config or manifest edit is `behavior`. A README edit or a lockfile beside a re
 
 ## Usage
 
+Every form is a git command: `shapr X` classifies what `git show X` or `git diff X` shows.
+
 ```sh
-shapr main..HEAD             # a branch's commits
-shapr main                   # main against the working tree
+shapr HEAD                   # the last commit (git show HEAD)
+shapr main..HEAD             # a range (git diff main..HEAD); `shapr main HEAD` is the same
+shapr main...                # a branch's commits, from where it left main (git diff main...)
+shapr --merge-base main      # everything on the branch, committed or not (git diff --merge-base main)
+shapr .                      # uncommitted changes, staged and not (git diff HEAD -- .)
+shapr main..HEAD -- lib      # any form, limited to paths
 git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
-shapr HEAD^!                 # the last commit alone
 shapr -J main..HEAD          # NDJSON: a meta line, a line per file and hunk, then a summary
 shapr -j main..HEAD          # one pretty JSON object
 shapr -C app main..HEAD      # in another repository, like git -C
-shapr --message pr.md main   # also read claims from a PR description
+shapr --message pr.md main...   # also read claims from a PR description
 shapr https://github.com/acme/widgets/pull/12   # a GitHub pull request, as its Files tab shows it
 shapr acme/widgets#12        # the same; `#12` uses this repository's GitHub remote
 shapr acme/widgets@1a2b3c4   # a GitHub commit, against its first parent
@@ -61,9 +66,21 @@ shapr norms lib/             # a codebase's style norms, its hotspots and a clea
 shapr --completions zsh      # a completion script
 ```
 
+| shapr | same as | `meta.input` |
+|---|---|---|
+| `shapr REV` | `git show REV`: the commit against its first parent | `commit` |
+| `shapr A..B`, `shapr A B` | `git diff A..B` | `range` |
+| `shapr A...B`, `shapr main...` | `git diff A...B`: from the merge base | `range` |
+| `shapr --merge-base REF [REV]` | `git diff --merge-base REF [REV]`: without REV, the merge base of REF and HEAD against the working tree | `merge_base_worktree`, `merge_base_range` |
+| `shapr PATH...`, `shapr .` | `git diff HEAD -- PATH...`: uncommitted changes | `worktree` |
+| any form `[--] PATH...` | the same, limited to paths | `meta.paths: true` |
+| no arguments | the diff on stdin | `stdin` |
+
+Arguments are read as git reads them: revisions first, then paths. A name that is both a revision and a path is a usage error asking for `--`: `shapr lib --` is the revision, `shapr -- lib` the path. A merge commit alone is refused with the command for each parent (`REV^1..REV`, `REV^2..REV`).
+
 GitHub input is experimental: its forms, `meta.source` and the cache may change before 1.0. A GitHub pull request or commit needs no checkout: shapr reads its metadata from the GitHub API (with a token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, if any) and fetches just the two commits, with your git credentials, into a cache of partial clones under `~/.cache/shapr` (`--cache-dir` or `SHAPR_CACHE_DIR` to move it). Your repository is never written to. The forms and the cache are in [docs/schema.md](docs/schema.md#github-input).
 
-With no range, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
+With no arguments, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
 
 Text output, for a commit that reformats one method's signature and changes another's body (mixed):
 

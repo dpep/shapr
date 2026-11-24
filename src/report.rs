@@ -104,6 +104,10 @@ pub struct Meta {
     command: &'static str,
     /// The GitHub pull request or commit analyzed; `None` for a local run.
     pub source: Option<crate::github::Source>,
+    /// The form the change was named in; `None` for `norms`.
+    input: Option<Input>,
+    /// Whether paths limited the diff; `None` for `norms`.
+    paths: Option<bool>,
 }
 
 impl Meta {
@@ -114,8 +118,39 @@ impl Meta {
             version: env!("CARGO_PKG_VERSION"),
             command,
             source,
+            input: None,
+            paths: None,
         }
     }
+
+    /// The change's input form, and whether paths limited it.
+    pub fn input(self, input: Input, paths: bool) -> Meta {
+        Meta {
+            input: Some(input),
+            paths: Some(paths),
+            ..self
+        }
+    }
+}
+
+/// How the command line named a change: each form is a git command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Input {
+    /// A diff on stdin.
+    Stdin,
+    /// `shapr REV`: `git show REV`.
+    Commit,
+    /// `shapr A..B`, `A...B`, `A B`, `R^!`: `git diff` of them.
+    Range,
+    /// `shapr --merge-base REF REV`: `git diff REF...REV`.
+    MergeBaseRange,
+    /// `shapr --merge-base REF`: the merge base of REF and HEAD against the working tree.
+    MergeBaseWorktree,
+    /// `shapr PATH...`: `git diff HEAD -- PATH...`.
+    Worktree,
+    GithubPr,
+    GithubCommit,
 }
 
 #[derive(Clone, Copy, Default, Serialize)]
