@@ -168,10 +168,18 @@ pub fn run() -> ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
     let mut at = 1;
     while let Some(arg) = args.get(at) {
+        let switches = |s: &str| s.chars().all(|c| "jJvq".contains(c));
         match arg.as_str() {
-            "-j" | "-J" | "-v" | "-q" | "--json" | "--ndjson" | "--verbose" | "--quiet" => at += 1,
-            "-C" => at += 2,
-            dir if dir.starts_with("-C") => at += 1,
+            "--json" | "--ndjson" | "--verbose" | "--quiet" => at += 1,
+            // A cluster of switches, perhaps ending in -C and its value.
+            short if short.starts_with('-') && !short.starts_with("--") => {
+                match short[1..].split_once('C') {
+                    Some((before, "")) if switches(before) => at += 2,
+                    Some((before, _)) if switches(before) => at += 1,
+                    None if short.len() > 1 && switches(&short[1..]) => at += 1,
+                    _ => break,
+                }
+            }
             _ => break,
         }
     }

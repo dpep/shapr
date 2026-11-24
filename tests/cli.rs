@@ -550,9 +550,13 @@ fn git_range_syntax_passes_through() {
 #[test]
 fn global_format_flags_may_precede_norms() {
     let dir = repo(&[&[("a.rb", "A = 'a'\n")]]);
-    let out = shapr(dir.path(), &["-J", "norms", "a.rb"]);
+    for args in [&["-J", "norms", "a.rb"][..], &["-vJ", "norms", "a.rb"]] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        assert!(records(&out).iter().any(|r| r["record"] == "summary"));
+    }
+    let out = shapr(dir.path(), &["-qJ", "norms", "a.rb"]);
     assert_eq!(out.status.code(), Some(0), "{out:?}");
-    assert!(records(&out).iter().any(|r| r["record"] == "summary"));
 }
 
 #[test]
