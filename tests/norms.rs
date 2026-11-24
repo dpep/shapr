@@ -435,3 +435,53 @@ fn deviations_config_excludes_are_withheld_and_rank_no_hotspot() {
         "{text}"
     );
 }
+
+/// `shapr` in `dir`, which must exit within `secs`: config built to blow up
+/// is refused, not run to exhaustion.
+fn shapr_within(dir: &std::path::Path, args: &[&str], secs: u64) -> std::process::Output {
+    let out = tempfile::tempdir().unwrap();
+    let (stdout, stderr) = (out.path().join("out"), out.path().join("err"));
+    let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir)
+        .args(args)
+        .stdout(std::fs::File::create(&stdout).unwrap())
+        .stderr(std::fs::File::create(&stderr).unwrap())
+        .spawn()
+        .unwrap();
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(secs) {
+            child.kill().unwrap();
+            panic!("shapr {args:?} ran past {secs}s");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    std::process::Output {
+        status,
+        stdout: std::fs::read(stdout).unwrap(),
+        stderr: std::fs::read(stderr).unwrap(),
+    }
+}
+
+/// An `inherit_from` that lists itself, many times over, reads each file
+/// once and names the cycle.
+#[test]
+fn an_inherit_from_cycle_is_read_once_and_named() {
+    let config = format!(
+        "inherit_from:\n{}Style/StringLiterals:\n  EnforcedStyle: double_quotes\n",
+        "  - .rubocop.yml\n".repeat(12)
+    );
+    let dir = repo(&[&[(".rubocop.yml", &config), ("a.rb", "def a\n  'x'\nend\n")]]);
+    let out = shapr_within(dir.path(), &["norms", "-j", "a.rb"], 30);
+    let report = report(&out);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!(["inherit_from: .rubocop.yml (cycle)"])
+    );
+    assert_eq!(
+        norm(&report, "Style/StringLiterals")["configured"],
+        "double_quotes"
+    );
+}

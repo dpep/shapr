@@ -78,20 +78,30 @@ pub fn find(path: &str, snapshot: &dyn Snapshot) -> Option<String> {
     }
 }
 
+/// Config files one chain reads, at most: plenty for a real project, and a
+/// bound on a chain built to fan out.
+const MAX_FILES: usize = 32;
+
 pub fn load(path: &str, snapshot: &dyn Snapshot) -> Config {
     let mut config = Config::default();
-    merge(path, snapshot, &mut config, 0);
+    merge(path, snapshot, &mut config, &mut Vec::new(), &mut 0);
     config
 }
 
-fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize) {
-    // Deep enough for any real chain; a cycle stops here.
-    if depth > 8 {
-        return;
-    }
+/// Merges the file at `path` under what it inherits; `chain` holds the
+/// files inheriting it, `read` counts the files read so far.
+fn merge(
+    path: &str,
+    snapshot: &dyn Snapshot,
+    config: &mut Config,
+    chain: &mut Vec<String>,
+    read: &mut usize,
+) {
     let Some(text) = snapshot.read(path) else {
         return;
     };
+    *read += 1;
+    chain.push(path.to_string());
     // RuboCop reads a `.rubocop*` file's paths from its own directory, any
     // other config's from where it runs: the top, here.
     let name = path.rsplit('/').next().unwrap_or_default();
@@ -109,14 +119,23 @@ fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize)
     (config.unread).extend(own.gems.iter().map(|g| format!("inherit_gem: {g}")));
     for entry in inherits {
         let file = resolve(parent(path), &entry).filter(|f| snapshot.read(f).is_some());
-        match file {
-            _ if entry.contains("://") => {
-                (config.unread).push(format!("inherit_from: {entry} (remote)"));
+        let note = match file {
+            _ if entry.contains("://") => format!("inherit_from: {entry} (remote)"),
+            None => format!("inherit_from: {entry} (not found)"),
+            Some(file) if chain.contains(&file) => format!("inherit_from: {entry} (cycle)"),
+            Some(_) if *read >= MAX_FILES => {
+                format!("inherit_from: {entry} (past {MAX_FILES} config files)")
             }
-            Some(file) => merge(&file, snapshot, config, depth + 1),
-            None => (config.unread).push(format!("inherit_from: {entry} (not found)")),
+            Some(file) => {
+                merge(&file, snapshot, config, chain, read);
+                continue;
+            }
+        };
+        if !config.unread.contains(&note) {
+            config.unread.push(note);
         }
     }
+    chain.pop();
     if name == TODO {
         let cops = own.settings.keys().chain(own.lists.keys());
         config.todo.extend(cops.cloned());
@@ -392,6 +411,29 @@ mod tests {
         assert!(glob("a/[b-c]?.rb", "a/cd.rb"));
         assert!(!glob("a/*", "a/b/c.rb"));
         assert!(!glob("a", "a/b.rb"));
+    }
+
+    /// A chain that fans out without a cycle stops at the file cap.
+    #[test]
+    fn a_fanned_out_chain_stops_at_the_file_cap() {
+        struct Fan;
+        impl Snapshot for Fan {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                let n: usize = path.strip_prefix('f')?.strip_suffix(".yml")?.parse().ok()?;
+                let next = format!("  - f{}.yml\n", n + 1).repeat(12);
+                Some(format!("inherit_from:\n{next}A:\n  B: c\n").into_bytes())
+            }
+            fn list(&self, _: &str) -> Vec<String> {
+                Vec::new()
+            }
+        }
+        let config = load("f0.yml", &Fan);
+        assert_eq!(config.get("A", "B"), Some("c"));
+        assert!(
+            (config.unread.iter()).any(|n| n.ends_with("(past 32 config files)")),
+            "{:?}",
+            config.unread
+        );
     }
 
     #[test]
