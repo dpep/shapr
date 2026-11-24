@@ -186,7 +186,8 @@ A diff on stdin names its after side only by the blob ids on its `index`
 lines, so shapr searches it only where those ids say the change ends: the
 index when every file goes from HEAD to the index (`git diff --staged`),
 the working tree when every file goes from the index or HEAD to the working
-tree (`git diff`, `git diff HEAD`). Any other diff (between two commits, or
+tree (`git diff`, `git diff HEAD`), and both when the ids fit both (a use in
+either is a use; a file found that differs between them counts as one). Any other diff (between two commits, or
 against an older base) leaves the files it doesn't name unknown, so its
 parts carry `unseen_uses`: give the range instead (`shapr A..B`).
 

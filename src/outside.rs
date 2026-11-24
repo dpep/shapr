@@ -228,6 +228,57 @@ impl Outside for Repository<'_> {
     }
 }
 
+/// Several states a change may end in, searched as one: a diff on stdin
+/// whose blob ids fit both the index and the working tree. A use in any of
+/// them is a use.
+pub struct Union<'a, 'r>(pub &'r [Repository<'a>]);
+
+impl Outside for Union<'_, '_> {
+    fn uses(&self, path: &str, word: &str) -> Search {
+        let mut all = self.0.iter().map(|r| r.uses(path, word));
+        let first = all.next().unwrap_or(Search::Unavailable);
+        all.fold(first, |acc, next| match (acc, next) {
+            (
+                Search::Done {
+                    searched,
+                    mut found,
+                    mut mentioned,
+                },
+                Search::Done {
+                    searched: more,
+                    found: also,
+                    mentioned: too,
+                },
+            ) => {
+                found.extend(also);
+                found.sort();
+                found.dedup();
+                mentioned.extend(too);
+                mentioned.sort();
+                mentioned.dedup();
+                Search::Done {
+                    searched: searched.max(more),
+                    found,
+                    mentioned,
+                }
+            }
+            (Search::Done { .. }, open) | (open, _) => open,
+        })
+    }
+
+    fn library(&self, path: &str) -> bool {
+        self.0.iter().any(|r| r.library(path))
+    }
+
+    /// The file's contents where the states agree; `None` where they differ,
+    /// which a caller reads as a use.
+    fn read(&self, path: &str) -> Option<Vec<u8>> {
+        let mut found = self.0.iter().filter_map(|r| r.read(path));
+        let first = found.next()?;
+        found.all(|other| other == first).then_some(first)
+    }
+}
+
 /// Whether `path` matches one of `globs`: `*.ext` in any directory, or a
 /// file name.
 fn matches(globs: &[&str], path: &str) -> bool {

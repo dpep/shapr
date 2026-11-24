@@ -2,7 +2,7 @@
 
 use crate::claims::{Claims, Message, Source};
 use crate::classify::proof::{Nowhere, Outside};
-use crate::outside::Repository;
+use crate::outside::{Repository, Union};
 use crate::report::{self, Format};
 use crate::{change, classify, diff, git, github};
 use clap::{CommandFactory, Parser};
@@ -266,42 +266,50 @@ pub fn run() -> ExitCode {
     }
     // Where uses outside the change are searched: a diff on stdin names
     // its own after side only by blob ids.
-    let state = match (&cli.range, git.after_revision(cli.range.as_deref())) {
-        (_, Some(rev)) => Some(git::State::Revision(rev)),
-        (Some(_), None) => Some(git::State::Worktree),
+    let states = match (&cli.range, git.after_revision(cli.range.as_deref())) {
+        (_, Some(rev)) => vec![git::State::Revision(rev)],
+        (Some(_), None) => vec![git::State::Worktree],
         (None, None) => git.stdin_after(&files),
     };
-    if cli.range.is_none() && state.is_none() {
+    if cli.range.is_none() && states.is_empty() {
         crate::verbose!(
             "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
         );
     }
     let before = git.before_revision(range.as_deref());
-    let after = match &state {
+    let after = match states.first() {
         Some(git::State::Revision(rev)) => Some(rev.as_str()),
         _ => None,
     };
     let change = change::assemble(files, &git, before.as_deref(), after);
     // The repository as of the change's after side: config and neighbors
     // for norms, uses and library layout for proof.
-    let revision = match &state {
-        Some(git::State::Revision(rev)) => Some(crate::norms::Revision::new(&git, rev.clone())),
-        _ => None,
-    };
+    let revision = after.map(|rev| crate::norms::Revision::new(&git, rev.to_string()));
     let index = crate::norms::Index(&git);
     let worktree = git.toplevel().map(crate::norms::Worktree);
-    let snapshot: Option<&dyn crate::norms::Snapshot> = match (&state, &revision, &worktree) {
+    let snapshot: Option<&dyn crate::norms::Snapshot> = match (states.first(), &revision, &worktree)
+    {
         (_, Some(revision), _) => Some(revision),
         (Some(git::State::Index), ..) => Some(&index),
         (_, None, Some(worktree)) => Some(worktree),
         (_, None, None) => None,
     };
-    let repository = snapshot
-        .zip(state)
-        .map(|(s, state)| Repository::new(&git, state, s));
-    let outside: &dyn Outside = match &repository {
-        Some(repository) => repository,
-        None => &Nowhere,
+    let repositories: Vec<Repository> = states
+        .into_iter()
+        .filter_map(|state| {
+            let snapshot: &dyn crate::norms::Snapshot = match &state {
+                git::State::Revision(_) => revision.as_ref()?,
+                git::State::Index => &index,
+                git::State::Worktree => worktree.as_ref()?,
+            };
+            Some(Repository::new(&git, state, snapshot))
+        })
+        .collect();
+    let union = Union(&repositories);
+    let outside: &dyn Outside = match repositories.as_slice() {
+        [] => &Nowhere,
+        [repository] => repository,
+        _ => &union,
     };
     let labels = classify::classify(&change, outside);
     let mut report = report::build(

@@ -217,19 +217,26 @@ impl Git {
         Some(if to.is_empty() { "HEAD" } else { to }.to_string())
     }
 
-    /// Where a diff read from stdin ends, from its blob ids: the index when
-    /// each file goes from HEAD to the index (`git diff --staged`), the
+    /// Where a diff read from stdin may end, from its blob ids: the index
+    /// when each file goes from HEAD to the index (`git diff --staged`), the
     /// working tree when each goes from the index or HEAD to the working
-    /// tree (`git diff`, `git diff HEAD`). `None` for anything else, such as
-    /// a diff between two commits: the files it doesn't name can't be read
-    /// as of its after side.
-    pub fn stdin_after(&self, diffs: &[FileDiff]) -> Option<State> {
-        let index: HashMap<String, String> = self.files(None).ok()?.into_iter().collect();
+    /// tree (`git diff`, `git diff HEAD`); both when the ids fit both, as
+    /// the same text may be either. Empty for anything else, such as a diff
+    /// between two commits: the files it doesn't name can't be read as of
+    /// its after side.
+    pub fn stdin_after(&self, diffs: &[FileDiff]) -> Vec<State> {
+        let Ok(index) = self.files(None) else {
+            return Vec::new();
+        };
+        let index: HashMap<String, String> = index.into_iter().collect();
         let head: HashMap<String, String> = self
             .files(Some("HEAD"))
             .map(|f| f.into_iter().collect())
             .unwrap_or_default();
-        let worktree = self.hash_worktree(diffs.iter().filter_map(|d| d.new_path.as_deref()))?;
+        let Some(worktree) = self.hash_worktree(diffs.iter().filter_map(|d| d.new_path.as_deref()))
+        else {
+            return Vec::new();
+        };
         let all = |before: &[&HashMap<String, String>], after: &HashMap<String, String>| {
             diffs.iter().all(|d| {
                 blob_is(&d.new_blob, d.new_path.as_deref(), after)
@@ -238,13 +245,14 @@ impl Git {
                         .any(|b| blob_is(&d.old_blob, d.old_path.as_deref(), b))
             })
         };
+        let mut states = Vec::new();
         if all(&[&head], &index) {
-            Some(State::Index)
-        } else if all(&[&index, &head], &worktree) {
-            Some(State::Worktree)
-        } else {
-            None
+            states.push(State::Index);
         }
+        if all(&[&index, &head], &worktree) {
+            states.push(State::Worktree);
+        }
+        states
     }
 
     /// Each existing working-tree file of PATHS (from the top) with the blob

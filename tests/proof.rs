@@ -385,3 +385,21 @@ fn a_search_over_thousands_of_files_finishes() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
+
+#[test]
+fn a_diff_on_stdin_that_could_end_in_the_index_or_the_working_tree_is_searched_in_both() {
+    let dir = based_repo(
+        &[CALLER_GONE],
+        &[("meter.rb", &meter("read", "sample"))],
+        &[("README.md", "Meters.\n")],
+    );
+    write(dir.path(), &[("meter.rb", &meter("read", "probe"))]);
+    git(dir.path(), &["add", "meter.rb"]);
+    // Unstaged, and outside the diff: only the working tree calls `sample`.
+    write(dir.path(), &[CALLER]);
+    // `git diff --staged` and `git diff HEAD -- meter.rb` print the same text.
+    let diff = git(dir.path(), &["diff", "--staged"]);
+    let report = report(&shapr_stdin(dir.path(), &["-j"], &diff));
+    let reason = any_part(&report, "logic")["reason"].as_str().unwrap();
+    assert!(reason.contains("report.rb"), "{report:#}");
+}
