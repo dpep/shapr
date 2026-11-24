@@ -271,7 +271,9 @@ pub fn run() -> ExitCode {
         .as_ref()
         .map(|r| r.range.clone())
         .or(cli.range.clone());
+    let mut claims = Claims::read(&messages);
     if let Some(remote) = remote {
+        claims.resolve(&remote.reference_kinds(&claims.references()));
         git = remote.git;
     }
     // Where uses outside the change are searched: a diff on stdin names
@@ -322,12 +324,7 @@ pub fn run() -> ExitCode {
         _ => &union,
     };
     let labels = classify::classify(&change, outside);
-    let mut report = report::build(
-        &change,
-        &labels,
-        Claims::read(&messages),
-        report::Meta::new(source),
-    );
+    let mut report = report::build(&change, &labels, claims, report::Meta::new(source));
     let styles = crate::norms::styles(&change, snapshot, cli.norm_threshold);
     for ((hunk, style), label) in report
         .hunks

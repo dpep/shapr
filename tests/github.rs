@@ -294,6 +294,71 @@ fn claims_read_the_pull_requests_commits_and_description() {
 }
 
 #[test]
+fn hash_references_are_looked_up_once_and_failures_stay_references() {
+    let f = Fixture::new();
+    let refs: Vec<String> = (1..=12).map(|n| format!("#{n}")).collect();
+    let body = format!(
+        "In the spirit of #1, see #2, #3 and #1 again. {}",
+        refs.join(" ")
+    );
+    let pull = "/repos/acme/widgets/pulls/12".to_string();
+    let mut canned: Value =
+        serde_json::from_str(&f.server.routes.lock().unwrap()[&pull].1).unwrap();
+    canned["body"] = json!(body);
+    f.server.route(&pull, 200, canned);
+    f.server.route(
+        "/repos/acme/widgets/issues/1",
+        200,
+        json!({"number": 1, "pull_request": {"url": "x"}}),
+    );
+    f.server
+        .route("/repos/acme/widgets/issues/2", 200, json!({"number": 2}));
+    f.server.route(
+        "/repos/acme/widgets/issues/3",
+        500,
+        json!({"message": "boom"}),
+    );
+    let out = f.shapr(&["-j", "acme/widgets#12"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let r = report(&out);
+    let kinds: Vec<(String, String)> = r["summary"]["claims"]["hints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|h| h["value"].as_str().unwrap().starts_with('#'))
+        .map(|h| {
+            (
+                h["value"].as_str().unwrap().into(),
+                h["hint"].as_str().unwrap().into(),
+            )
+        })
+        .take(4)
+        .collect();
+    let kind = |v: &str, k: &str| (v.to_string(), k.to_string());
+    assert_eq!(
+        kinds,
+        [
+            kind("#1", "pull_request"),
+            kind("#2", "issue"),
+            kind("#3", "reference"),
+            kind("#4", "reference"),
+        ]
+    );
+    let asked: Vec<String> = f
+        .server
+        .requests()
+        .iter()
+        .filter_map(|r| r.split_whitespace().nth(1).map(str::to_string))
+        .filter(|p| p.contains("/issues/"))
+        .collect();
+    // Each number once, the first ten only.
+    let expected: Vec<String> = (1..=10)
+        .map(|n| format!("/repos/acme/widgets/issues/{n}"))
+        .collect();
+    assert_eq!(asked, expected);
+}
+
+#[test]
 fn claims_read_a_commits_message() {
     let f = Fixture::new();
     f.commit(&f.feature, &f.feature);

@@ -123,11 +123,11 @@ fn a_breaking_feature_is_typed_and_flagged() {
 }
 
 #[test]
-fn a_description_file_adds_issue_references() {
+fn a_description_file_adds_references() {
     let dir = gate_repo(GATE, &flipped(), "Start over");
     std::fs::write(
         dir.path().join("pr.md"),
-        "Handle small gates\n\nFixes #12, see PROJ-34 and UTF-8 docs.\n",
+        "Handle small gates\n\nFixes #12, see PROJ-34, https://github.com/o/r/pull/7, https://github.com/o/r/issues/8 and UTF-8 docs.\n",
     )
     .unwrap();
     let out = shapr(dir.path(), &["-j", "--message", "pr.md", "HEAD~1..HEAD"]);
@@ -142,8 +142,11 @@ fn a_description_file_adds_issue_references() {
     assert_eq!(
         from_file,
         [
-            &json!({"hint": "issue", "value": "#12", "category": "fix", "source": "message", "commit": null, "field": "body"}),
+            // Offline, `#12` could be an issue or a pull request: GitHub numbers both alike.
+            &json!({"hint": "reference", "value": "#12", "category": "fix", "source": "message", "commit": null, "field": "body"}),
             &json!({"hint": "issue", "value": "PROJ-34", "category": null, "source": "message", "commit": null, "field": "body"}),
+            &json!({"hint": "pull_request", "value": "#7", "category": null, "source": "message", "commit": null, "field": "body"}),
+            &json!({"hint": "issue", "value": "#8", "category": null, "source": "message", "commit": null, "field": "body"}),
         ]
     );
 }

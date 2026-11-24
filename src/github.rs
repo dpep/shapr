@@ -6,6 +6,7 @@ use crate::claims::{self, Message};
 use crate::git::{self, Git};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -265,6 +266,43 @@ pub struct Remote {
     pub commits: Vec<Message>,
     /// The pull request's title and body.
     pub description: Option<Message>,
+    api: Api,
+}
+
+/// `#N` references looked up per run: each is one API request.
+const REFERENCE_LOOKUPS: usize = 10;
+
+impl Remote {
+    /// Whether each of the first `#N` references is an issue or a pull
+    /// request, from the issues endpoint (which serves both, a pull request
+    /// with a `pull_request` key). A failed lookup is left out: the
+    /// reference stays neutral.
+    pub fn reference_kinds(&self, numbers: &[u64]) -> BTreeMap<u64, claims::HintKind> {
+        let repo = &self.source.repo;
+        let mut kinds = BTreeMap::new();
+        for &n in numbers.iter().take(REFERENCE_LOOKUPS) {
+            let what = format!("{repo}#{n}");
+            match self
+                .api
+                .get::<IssueJson>(&format!("/repos/{repo}/issues/{n}"), &what)
+            {
+                Ok(found) => {
+                    let kind = match found.pull_request {
+                        Some(_) => claims::HintKind::PullRequest,
+                        None => claims::HintKind::Issue,
+                    };
+                    kinds.insert(n, kind);
+                }
+                Err(error) => crate::verbose!("{what} stays a reference: {error:#}"),
+            }
+        }
+        kinds
+    }
+}
+
+#[derive(Deserialize)]
+struct IssueJson {
+    pull_request: Option<serde::de::IgnoredAny>,
 }
 
 /// Looks the target up on GitHub and fetches its two commits into the cache.
@@ -352,6 +390,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
         source,
         commits,
         description,
+        api,
     })
 }
 

@@ -78,8 +78,12 @@ pub enum HintKind {
     Keyword,
     /// `Revert "subject"`, or `This reverts commit <id>`.
     Revert,
-    /// `#12`, `PROJ-34`, an issue or pull URL.
+    /// An issue: `PROJ-34`, an issue URL, or a `#12` GitHub says is one.
     Issue,
+    /// A pull request: a pull URL, or a `#12` GitHub says is one.
+    PullRequest,
+    /// `#12`: an issue or a pull request, which share GitHub's numbering.
+    Reference,
     /// `type!:` or a `BREAKING CHANGE:` footer.
     Breaking,
     /// "No behavior change", "no functional change", "NFC".
@@ -168,6 +172,33 @@ impl Claims {
                 categories,
                 conflicts: Vec::new(),
             },
+        }
+    }
+
+    /// The numbers of the `#N` references, each once, in message order.
+    pub fn references(&self) -> Vec<u64> {
+        let mut numbers: Vec<u64> = Vec::new();
+        for hint in self.hints.iter().filter(|h| h.hint == HintKind::Reference) {
+            if let Some(n) = reference_number(&hint.value)
+                && !numbers.contains(&n)
+            {
+                numbers.push(n);
+            }
+        }
+        numbers
+    }
+
+    /// Retypes each `#N` reference whose target is known: `kinds` maps a
+    /// number to `Issue` or `PullRequest`.
+    pub fn resolve(&mut self, kinds: &BTreeMap<u64, HintKind>) {
+        for hint in self
+            .hints
+            .iter_mut()
+            .filter(|h| h.hint == HintKind::Reference)
+        {
+            if let Some(kind) = reference_number(&hint.value).and_then(|n| kinds.get(&n)) {
+                hint.hint = *kind;
+            }
         }
     }
 
@@ -379,9 +410,9 @@ fn hints_in(message: &Message) -> Vec<Hint> {
         let mut previous = String::new();
         for word in text.split_whitespace() {
             let token = word.trim_matches(|c: char| ",.;:()[]{}<>!?'\"".contains(c));
-            if let Some(issue) = issue(token) {
+            if let Some((kind, value)) = issue(token) {
                 let category = FIXING.contains(&previous.as_str()).then_some(Category::Fix);
-                add(HintKind::Issue, &issue, category, field);
+                add(kind, &value, category, field);
             }
             previous = token.to_ascii_lowercase();
         }
@@ -440,15 +471,18 @@ fn normalize(text: &str) -> String {
         .join(" ")
 }
 
-/// `#12`, `KEY-12`, or an issue or pull URL (as `#12`).
-fn issue(token: &str) -> Option<String> {
+/// `#12`, `KEY-12`, or an issue or pull URL (as `#12`), and what it refers to.
+fn issue(token: &str) -> Option<(HintKind, String)> {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     if let Some(n) = token.strip_prefix('#') {
-        return digits(n).then(|| token.to_string());
+        return digits(n).then(|| (HintKind::Reference, token.to_string()));
     }
-    for marker in ["/issues/", "/pull/"] {
+    for (marker, kind) in [
+        ("/issues/", HintKind::Issue),
+        ("/pull/", HintKind::PullRequest),
+    ] {
         if let Some((_, n)) = token.rsplit_once(marker) {
-            return digits(n).then(|| format!("#{n}"));
+            return digits(n).then(|| (kind, format!("#{n}")));
         }
     }
     let (key, n) = token.split_once('-')?;
@@ -458,7 +492,11 @@ fn issue(token: &str) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
         && !NOT_ISSUE_KEYS.contains(&key);
-    (key_ok && digits(n)).then(|| token.to_string())
+    (key_ok && digits(n)).then(|| (HintKind::Issue, token.to_string()))
+}
+
+fn reference_number(value: &str) -> Option<u64> {
+    value.strip_prefix('#')?.parse().ok()
 }
 
 #[cfg(test)]
@@ -489,9 +527,16 @@ mod tests {
 
     #[test]
     fn issue_keys_skip_standards_and_bare_words() {
-        assert_eq!(issue("#12"), Some("#12".into()));
-        assert_eq!(issue("PROJ-34"), Some("PROJ-34".into()));
-        assert_eq!(issue("https://github.com/o/r/pull/9"), Some("#9".into()));
+        assert_eq!(
+            issue("https://github.com/o/r/pull/9"),
+            Some((HintKind::PullRequest, "#9".into()))
+        );
+        assert_eq!(
+            issue("https://github.com/o/r/issues/9"),
+            Some((HintKind::Issue, "#9".into()))
+        );
+        assert_eq!(issue("#12"), Some((HintKind::Reference, "#12".into())));
+        assert_eq!(issue("PROJ-34"), Some((HintKind::Issue, "PROJ-34".into())));
         for no in ["UTF-8", "SHA-256", "#abc", "x-1", "A-1", "re-run"] {
             assert_eq!(issue(no), None, "{no}");
         }
