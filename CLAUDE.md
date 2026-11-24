@@ -3,8 +3,8 @@
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
 says what kind of change it is (`format_only`, `comment_only`, `rename`,
 `move`, `move_with_changes`, `extract`, `inline`, `logic`), and it gives the
-whole change a verdict: structure, behavior, or mixed (Kent Beck's *Tidy
-First*). It is a narrow, deterministic, pipe-first evidence tool; review
+whole change a verdict: structure, behavior, or mixed (structure and
+behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
 agents and classifier prompts consume its JSON. shapr never calls an LLM.
 
 [docs/schema.md](docs/schema.md) is the output contract.

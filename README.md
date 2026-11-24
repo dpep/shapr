@@ -1,6 +1,6 @@
 # shapr
 
-Classify the shape of a code change. For each hunk in a diff, shapr says whether it is format-only, comment-only, a rename, a move, an extract or inline, or logic, and gives the change an overall verdict: structure, behavior, or mixed (Kent Beck's *Tidy First*: a change should alter structure or behavior, not both).
+Classify the shape of a code change. For each hunk in a diff, shapr says whether it is format-only, comment-only, a rename, a move, an extract or inline, or logic, and gives the change an overall verdict: structure, behavior, or mixed. A change that only restructures code is quick to review; one that also alters behavior hides the behavior among the moves, so keep the two apart.
 
 shapr is a deterministic evidence tool: it parses both sides of every hunk, compares syntax trees, and reports what it found and how sure it is. "Structure" is a shape, not a safety claim.
 
@@ -67,3 +67,10 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 ## Development
 
 `make check` runs the gate (`cargo fmt --check`, clippy with warnings denied, the tests, docs). See [CLAUDE.md](CLAUDE.md) for the design and layout.
+
+## References
+
+- Kent Beck, [*Tidy First?: A Personal Exercise in Empirical Software Design*](https://www.oreilly.com/library/view/tidy-first/9781098151232/) (O'Reilly, 2023). Its "Separate Tidying" chapter puts tidyings (structure changes) in their own commits and pull requests, apart from behavior changes. That separation is what shapr checks.
+- Kent Beck, [*Software Design: Tidy First?*](https://newsletter.kentbeck.com/), his newsletter, including [Management: Separate Tidying](https://newsletter.kentbeck.com/p/management-separate-tidying).
+- Kent Beck, ["for each desired change, make the change easy (warning: this may be hard), then make the easy change"](https://x.com/KentBeck/status/250733358307500032) (2012): why tidying comes first.
+- [docs/research.md](docs/research.md): the research on change shape, refactoring detection and risk behind shapr's design.
