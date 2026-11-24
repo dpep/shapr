@@ -8,6 +8,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// The largest linter config file read: past any real one, and a bound on
+/// the parsing every judged file repeats.
+pub const MAX_CONFIG_BYTES: usize = 1 << 20;
+
+/// The note for a config file past [`MAX_CONFIG_BYTES`].
+pub fn too_large(path: &str) -> String {
+    format!("{path}: not read (over 1 MiB)")
+}
+
 pub trait Snapshot {
     fn read(&self, path: &str) -> Option<Vec<u8>>;
     /// The files directly in `dir` (`""` for the top), as paths.

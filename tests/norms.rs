@@ -639,3 +639,33 @@ fn a_plan_diff_quotes_a_path_as_git_does() {
     let applied = std::fs::read_to_string(dir.path().join(name)).unwrap();
     assert_eq!(applied, "g = 'g'\n");
 }
+
+/// A config file past the size cap isn't parsed, once per file judged or
+/// at all: it is named instead.
+#[test]
+fn a_config_file_past_the_size_cap_is_named_not_read() {
+    let rubocop = format!(
+        "Style/StringLiterals:\n  EnforcedStyle: double_quotes\n{}",
+        "# padding\n".repeat(110_000)
+    );
+    let editorconfig = format!(
+        "[*]\ntrim_trailing_whitespace = true\n{}",
+        "; pad\n".repeat(200_000)
+    );
+    let dir = repo(&[&[
+        (".rubocop.yml", &rubocop),
+        (".editorconfig", &editorconfig),
+        ("a.rb", "def a\n  'x'\nend\n"),
+    ]]);
+    let report = norms_json(dir.path(), &["a.rb"]);
+    assert_eq!(
+        report["summary"]["config_unread"],
+        serde_json::json!([
+            ".editorconfig: not read (over 1 MiB)",
+            ".rubocop.yml: not read (over 1 MiB)"
+        ])
+    );
+    for id in ["Style/StringLiterals", "Layout/TrailingWhitespace"] {
+        assert_eq!(norm(&report, id)["configured"], Value::Null, "{id}");
+    }
+}

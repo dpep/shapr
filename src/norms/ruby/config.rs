@@ -6,7 +6,7 @@
 //! installed, not the repository's, and a URL needs the network. What isn't
 //! read is listed in `Config::unread`.
 
-use crate::norms::snapshot::{Snapshot, join, parent, resolve};
+use crate::norms::snapshot::{MAX_CONFIG_BYTES, Snapshot, join, parent, resolve, too_large};
 use std::collections::BTreeMap;
 
 const NAME: &str = ".rubocop.yml";
@@ -101,6 +101,10 @@ fn merge(
     let Some(text) = snapshot.read(path) else {
         return;
     };
+    if text.len() > MAX_CONFIG_BYTES {
+        config.unread.push(too_large(path));
+        return;
+    }
     *read += 1;
     chain.push(path.to_string());
     // RuboCop reads a `.rubocop*` file's paths from its own directory, any

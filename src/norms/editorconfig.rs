@@ -5,7 +5,7 @@
 //! `{a,b}` and `{1..3}` (an integer in the range); a glob without `/`
 //! matches the name at any depth.
 
-use super::snapshot::{Snapshot, join, parent};
+use super::snapshot::{MAX_CONFIG_BYTES, Snapshot, join, parent, too_large};
 use std::collections::BTreeMap;
 
 const NAME: &str = ".editorconfig";
@@ -19,28 +19,38 @@ const MAX_GLOB: usize = 1024;
 pub struct Properties {
     /// By lowercased key; `unset` removes one.
     pub values: BTreeMap<String, String>,
-    /// What wasn't read, one note each: a section past the glob cap.
+    /// What wasn't read, one note each: a file past the size cap, a section
+    /// past the glob cap.
     pub unread: Vec<String>,
 }
 
 pub fn properties(path: &str, snapshot: &dyn Snapshot) -> Properties {
     let mut files = Vec::new();
+    let mut unread = Vec::new();
     let mut dir = parent(path);
     loop {
-        if let Some(text) = snapshot.read(&join(dir, NAME)) {
-            let parsed = parse(&String::from_utf8_lossy(&text));
-            let root = parsed.root;
-            files.push((dir.to_string(), parsed));
-            if root {
-                break;
+        let name = join(dir, NAME);
+        match snapshot.read(&name) {
+            Some(text) if text.len() > MAX_CONFIG_BYTES => unread.push(too_large(&name)),
+            Some(text) => {
+                let parsed = parse(&String::from_utf8_lossy(&text));
+                let root = parsed.root;
+                files.push((dir.to_string(), parsed));
+                if root {
+                    break;
+                }
             }
+            None => {}
         }
         if dir.is_empty() {
             break;
         }
         dir = parent(dir);
     }
-    let mut out = Properties::default();
+    let mut out = Properties {
+        unread,
+        ..Properties::default()
+    };
     for (dir, file) in files.iter().rev() {
         let relative = match dir.as_str() {
             "" => path,
