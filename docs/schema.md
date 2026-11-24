@@ -561,6 +561,10 @@ enough to match by chance, and when several units could be its other half.
 
 ## GitHub input
 
+*Experimental*: the forms below, `meta.source`, the `cache` record and the
+cache flags (`--cache-dir`, `--status`, `--clear-cache`, `SHAPR_CACHE_DIR`)
+may change in any release before 1.0.
+
 RANGE may name a GitHub pull request or commit instead of local revisions:
 
 | form | names |
@@ -609,6 +613,8 @@ and `SHAPR_GITHUB_GIT_URL` replace `https://api.github.com` and
 `https://github.com`.
 
 ## `cache` record
+
+*Experimental*, with [GitHub input](#github-input).
 
 `--status` and `--clear-cache` print the cache as it stands afterwards; one
 object under `-j` or `-J`.

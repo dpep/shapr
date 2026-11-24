@@ -29,7 +29,7 @@ EXAMPLES
   is `none`, and lockfiles, vendored and binary files and unparsed languages are
   `unknown`, counted in summary.verdicts.
 
-GITHUB
+GITHUB (experimental: the forms, meta.source and the cache may change before 1.0)
   RANGE may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,
   or #N for this repository's GitHub remote) or a commit (.../commit/SHA,
   .../pull/N/commits/SHA, OWNER/REPO@SHA). A shorthand that is also a local revision
@@ -89,16 +89,18 @@ struct Cli {
     /// stdin, when a RANGE is given. Claims never change a hunk's label.
     #[arg(long, value_name = "FILE")]
     message: Option<PathBuf>,
-    /// Where GitHub repositories are cached; also SHAPR_CACHE_DIR. Defaults
+    /// Experimental. Where GitHub repositories are cached; also SHAPR_CACHE_DIR. Defaults
     /// to $XDG_CACHE_HOME/shapr, else ~/.cache/shapr. Must be absolute.
     #[arg(long, value_name = "DIR")]
     cache_dir: Option<PathBuf>,
 
-    /// Show the cache: its path, the repositories in it, and their size.
+    /// Experimental. Show the GitHub cache: its path, the repositories in it,
+    /// and their size.
     #[arg(long, conflicts_with_all = ["range", "clear_cache"])]
     status: bool,
 
-    /// Remove every cached GitHub repository, then show the cache.
+    /// Experimental. Remove every cached GitHub repository, then show the
+    /// cache.
     #[arg(long, conflicts_with = "range")]
     clear_cache: bool,
 
