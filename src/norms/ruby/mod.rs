@@ -4,6 +4,7 @@
 mod braces;
 mod commas;
 mod config;
+mod final_newline;
 mod hash_syntax;
 mod indentation;
 mod strings;
@@ -50,6 +51,10 @@ static NORMS: &[NormDef] = &[
     NormDef {
         id: whitespace::NORM,
         styles: whitespace::STYLES,
+    },
+    NormDef {
+        id: final_newline::NORM,
+        styles: final_newline::STYLES,
     },
 ];
 
@@ -130,6 +135,14 @@ static SETTINGS: &[Setting] = &[
         key: "Enabled",
         values: &[("true", "no_trailing_whitespace")],
     },
+    Setting {
+        norm: final_newline::NORM,
+        key: "EnforcedStyle",
+        values: &[
+            ("final_newline", "final_newline"),
+            ("final_blank_line", "final_blank_line"),
+        ],
+    },
 ];
 
 /// Every comma style wants one where commas are observed: each item on its
@@ -167,6 +180,7 @@ impl Language for Ruby {
         };
         walker.visit(&result.node());
         whitespace::lines(&mut walker);
+        final_newline::file(&mut walker);
         Analysis {
             observations: walker.observations,
             scopes: walker.scopes,
@@ -200,6 +214,11 @@ fn from_editorconfig(properties: &BTreeMap<String, String>) -> BTreeMap<&'static
     if get("trim_trailing_whitespace") == Some("true") {
         styles.insert(whitespace::NORM, "no_trailing_whitespace".to_string());
     }
+    match get("insert_final_newline") {
+        Some("true") => styles.insert(final_newline::NORM, "final_newline".to_string()),
+        Some("false") => styles.insert(final_newline::NORM, "no_final_newline".to_string()),
+        _ => None,
+    };
     styles
 }
 

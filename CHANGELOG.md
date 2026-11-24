@@ -26,4 +26,5 @@ First release.
 - Experimental: the `Style/HashSyntax` norm, `ruby19` labels or `hash_rockets`, per pair.
 - Experimental: the `Layout/IndentationConsistency` norm, methods after `private` or `protected` at the modifier's column or a step deeper.
 - Experimental: `.editorconfig` configures norms beside `.rubocop.yml`, which wins where both set one. The `Layout/TrailingWhitespace` norm, configured by `trim_trailing_whitespace`.
+- Experimental: the `Layout/TrailingEmptyLines` norm, how a file ends, configured by `insert_final_newline`. A suggested edit marks a last line with no line break as unified diffs do.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
