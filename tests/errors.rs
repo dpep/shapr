@@ -1,0 +1,156 @@
+//! Errors and input edges: an error looks like an error, in one line.
+
+use serde_json::Value;
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Output, Stdio};
+
+fn command(program: &str, dir: &Path) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CEILING_DIRECTORIES", dir.parent().unwrap_or(dir));
+    cmd
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = command("git", dir).args(args).output().unwrap();
+    assert!(out.status.success(), "git {args:?}");
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// A repo with one commit per state; each state maps paths to contents.
+fn repo(states: &[&[(&str, &str)]]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    for state in states {
+        for (path, content) in *state {
+            std::fs::write(dir.path().join(path), content).unwrap();
+        }
+        git(dir.path(), &["add", "-A"]);
+        git(dir.path(), &["commit", "-q", "--allow-empty", "-m", "s"]);
+    }
+    dir
+}
+
+fn shapr(dir: &Path, args: &[&str], stdin: &str) -> Output {
+    let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// The JSON error record, after checking stderr is the same one line.
+fn error(out: &Output, code: i32) -> String {
+    assert_eq!(out.status.code(), Some(code), "{out:?}");
+    let record: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(record["record"], "error");
+    assert_eq!(record["code"], code);
+    let message = record["error"].as_str().unwrap().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.trim_end(), format!("shapr: {message}"));
+    message
+}
+
+const METHOD: &str = "def greet(name)\n  \"hi #{name}\"\nend\n";
+
+#[test]
+fn no_input_on_stdin_is_a_usage_error() {
+    let dir = repo(&[]);
+    for stdin in ["", "\n  \n"] {
+        let message = error(&shapr(dir.path(), &["-J"], stdin), 64);
+        assert!(message.starts_with("no input"), "{message}");
+    }
+}
+
+#[test]
+fn stdin_that_holds_no_diff_is_an_error() {
+    let dir = repo(&[]);
+    let message = error(&shapr(dir.path(), &["-J"], "hello\n"), 2);
+    assert!(message.contains("not a diff"), "{message}");
+}
+
+#[test]
+fn a_rename_without_hunks_on_stdin_is_a_diff() {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    git(dir.path(), &["mv", "a.rb", "b.rb"]);
+    let diff = git(dir.path(), &["diff", "--staged", "-M"]);
+    let out = shapr(dir.path(), &["-j"], &diff);
+    assert_eq!(out.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["summary"]["verdict"], "empty");
+}
+
+#[test]
+fn an_empty_range_is_an_empty_verdict() {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    let out = shapr(dir.path(), &["-J", "main..main"], "");
+    let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(summary["verdict"], "empty");
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn outside_a_repository_is_one_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let message = error(&shapr(dir.path(), &["-J", "main..HEAD"], ""), 2);
+    assert!(message.starts_with("not a git repository: "), "{message}");
+
+    let elsewhere = repo(&[]);
+    let target = dir.path().to_str().unwrap();
+    let message = error(
+        &shapr(elsewhere.path(), &["-J", "-C", target, "main..HEAD"], ""),
+        2,
+    );
+    assert_eq!(message, format!("not a git repository: {target}"));
+}
+
+#[test]
+fn a_range_that_isnt_a_revision_is_one_line() {
+    let dir = repo(&[&[("a.rb", METHOD)]]);
+    // `..` names the parent directory: git would read it as a path.
+    for (range, rev) in [("..", ".."), ("nope..HEAD", "nope..HEAD")] {
+        let message = error(&shapr(dir.path(), &["-J", range], ""), 2);
+        assert!(
+            message.contains(&format!("bad revision '{rev}'")),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn a_usage_error_message_has_no_error_prefix() {
+    let dir = repo(&[]);
+    let out = shapr(dir.path(), &["-J", "--bogus"], "");
+    assert_eq!(out.status.code(), Some(64));
+    let record: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let message = record["error"].as_str().unwrap();
+    assert!(message.starts_with("unexpected argument"), "{message}");
+}
+
+#[test]
+fn quiet_writes_no_error_record() {
+    let dir = repo(&[]);
+    for args in [&["-q", "-J"][..], &["-qJ", "--bogus"]] {
+        let out = shapr(dir.path(), args, "");
+        assert_eq!(out.status.code(), Some(64), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+        assert!(!out.stderr.is_empty(), "{args:?}");
+    }
+}

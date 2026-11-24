@@ -34,6 +34,7 @@ impl Git {
     /// `git diff RANGE`, in a fixed format: prefixes, rename detection and
     /// three lines of context whatever the user's config says.
     pub fn diff(&self, range: &str) -> Result<String> {
+        self.verify_range(range)?;
         let out = run(self.command().args([
             "diff",
             "--no-color",
@@ -47,6 +48,26 @@ impl Git {
             "--",
         ]))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
+    }
+
+    /// Fails in one line unless RANGE resolves as revisions in a repository.
+    /// Outside a repository, or given a path that exists outside it (`..`),
+    /// `git diff` drops into `--no-index` mode and prints its whole usage.
+    fn verify_range(&self, range: &str) -> Result<()> {
+        let out = self
+            .command()
+            .args(["rev-parse", "--quiet", range, "--"])
+            .output()
+            .context("could not run git")?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if stderr.contains("not a git repository") {
+            let dir = match &self.dir {
+                Some(dir) => dir.clone(),
+                None => std::env::current_dir().unwrap_or_default(),
+            };
+            bail!("not a git repository: {}", dir.display());
+        }
+        check(out).map(drop)
     }
 
     fn toplevel(&self) -> Option<PathBuf> {

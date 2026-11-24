@@ -17,7 +17,8 @@ Schema version: **1**.
   single document can't stream, which is why both formats exist.
 - An operational or usage error under either format is one
   `{"record": "error", "error": "<message>", "code": <exit code>}` object on
-  stdout; the message is on stderr too.
+  stdout; the same one-line message is on stderr too. Under `-q` stdout stays
+  empty, error records included: the exit code and stderr carry the error.
 
 Every field below is always present. Fields that can be `null` say so.
 
@@ -348,5 +349,10 @@ enough to match by chance, and when several units could be its other half.
 | 0 | `structure` or `empty` |
 | 1 | `behavior` |
 | 3 | `mixed` |
-| 2 | operational error: git failed, input unreadable |
-| 64 | usage: a bad command line, or no input |
+| 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, or stdin holds no diff (no file header) |
+| 64 | usage: a bad command line, or no input (no range and an empty or blank stdin) |
+
+An empty diff from a range (`shapr main..main`) is the verdict `empty`, exit 0.
+An empty stdin is not: it is what a failed `git diff` upstream of the pipe
+leaves, so it exits 64. A diff whose only change is a rename or mode change
+has file headers and no hunks, and is `empty` too.

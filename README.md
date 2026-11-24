@@ -36,6 +36,8 @@ shapr -C app main..HEAD      # in another repository, like git -C
 shapr --completions zsh      # a completion script
 ```
 
+With no range, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
+
 Text output, for a commit that reformats one method's signature and changes another's body (exit 3, mixed):
 
 ```
@@ -61,8 +63,8 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 | 0 | structure (or no hunks) |
 | 1 | behavior |
 | 3 | mixed |
-| 2 | error |
-| 64 | usage |
+| 2 | error (not a repository, a bad revision, stdin that isn't a diff) |
+| 64 | usage (including no input) |
 
 ## Development
 

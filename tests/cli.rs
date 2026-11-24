@@ -376,15 +376,6 @@ fn dash_c_reads_that_repository_whatever_git_dir_says() {
 }
 
 #[test]
-fn empty_input_is_an_empty_verdict() {
-    let dir = repo(&[]);
-    let out = shapr(dir.path(), &["-J"], Some(""));
-    let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(summary["verdict"], "empty");
-    assert_eq!(out.status.code(), Some(0));
-}
-
-#[test]
 fn errors_have_their_own_exit_codes() {
     let dir = repo(&[&[("a.rb", "1\n")]]);
     let bad_range = shapr(dir.path(), &["-J", "nope..HEAD"], None);

@@ -17,6 +17,10 @@ EXAMPLES
   shapr -q main..HEAD        no output; the exit code is the verdict
   shapr -C app main..HEAD    run in another repository, like git -C
 
+  With no RANGE, shapr reads a diff from stdin; like any filter, it waits while an
+  inherited stdin stays open. An empty stdin is no input (64), so a failed
+  `git diff` upstream is an error, not an empty verdict.
+
   Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0.
   To leave them out: git diff main -- '*.rb' '*.rs' | shapr
 
@@ -24,8 +28,8 @@ EXIT CODES
   0   structure: every hunk changes structure, not behavior (or there are no hunks)
   1   behavior: every hunk changes behavior
   3   mixed: both
-  2   error: git failed, input unreadable
-  64  usage: the command line is wrong, or there is no input
+  2   error: git failed (not a repository, a bad revision), or stdin is not a diff
+  64  usage: the command line is wrong, or there is no input (an empty stdin)
 
   Structure is a shape, not a safety claim: extracts and inlines still deserve review.";
 
@@ -39,7 +43,7 @@ EXIT CODES
 struct Cli {
     /// Revisions to compare, as `git diff` takes them (`main..HEAD`,
     /// `main...HEAD`, or one revision against the working tree). Without
-    /// it, a unified diff is read from stdin.
+    /// it, a unified diff is read from stdin; an empty stdin is a usage error.
     #[arg(value_name = "RANGE")]
     range: Option<String>,
 
@@ -62,7 +66,8 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Write nothing to stdout; the exit code still carries the verdict.
+    /// Write nothing to stdout, not even a JSON error record; the exit code
+    /// still carries the verdict, and errors still go to stderr.
     #[arg(short, long)]
     quiet: bool,
 
@@ -74,6 +79,8 @@ struct Cli {
 
 const ERROR: u8 = 2;
 const USAGE: u8 = 64;
+const NO_INPUT: &str =
+    "no input: give a range (shapr main..HEAD) or pipe a diff (git diff | shapr)";
 
 pub fn run() -> ExitCode {
     let cli = match Cli::try_parse() {
@@ -84,16 +91,20 @@ pub fn run() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             let first = error.to_string();
+            let first = first.lines().next().unwrap_or_default();
             emit_error(
                 requested_format(),
-                first.lines().next().unwrap_or_default(),
+                first.strip_prefix("error: ").unwrap_or(first),
                 USAGE,
             );
             return ExitCode::from(USAGE);
         }
     };
     crate::log::set_verbose(cli.verbose);
-    let format = if cli.ndjson {
+    // -q keeps stdout empty, error records included.
+    let format = if cli.quiet {
+        Format::Text
+    } else if cli.ndjson {
         Format::Ndjson
     } else if cli.json {
         Format::Json
@@ -126,13 +137,7 @@ pub fn run() -> ExitCode {
             return fail(format, &format!("`{range}` is not a range"), USAGE);
         }
         Some(range) => git.diff(range),
-        None if std::io::stdin().is_terminal() => {
-            return fail(
-                format,
-                "no input: give a range (shapr main..HEAD) or pipe a diff (git diff | shapr)",
-                USAGE,
-            );
-        }
+        None if std::io::stdin().is_terminal() => return fail(format, NO_INPUT, USAGE),
         None => {
             let mut text = String::new();
             std::io::stdin()
@@ -146,7 +151,15 @@ pub fn run() -> ExitCode {
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
 
-    let change = change::assemble(diff::parse(&text), &git);
+    let files = diff::parse(&text);
+    if cli.range.is_none() && files.is_empty() {
+        // An empty pipe is usually an upstream failure (`git diff nope | shapr`).
+        if text.trim().is_empty() {
+            return fail(format, NO_INPUT, USAGE);
+        }
+        return fail(format, "stdin is not a diff: no file headers", ERROR);
+    }
+    let change = change::assemble(files, &git);
     let labels = classify::classify(&change);
     let report = report::build(&change, &labels);
     if !cli.quiet {
@@ -194,7 +207,7 @@ fn emit_error(format: Format, message: &str, code: u8) {
 }
 
 /// The format argv asks for, read before clap has parsed it, so a usage
-/// error reaches a JSON caller as JSON. Every short flag but `-C` is a
+/// error reaches a JSON caller as JSON (and a `-q` caller as nothing). Every short flag but `-C` is a
 /// switch, so a cluster like `-qJ` reads letter by letter up to a `C`, whose
 /// value is the rest of the cluster or the next argument.
 fn requested_format() -> Format {
@@ -202,12 +215,16 @@ fn requested_format() -> Format {
     let mut args = std::env::args().skip(1).take_while(|a| a != "--");
     while let Some(arg) = args.next() {
         let (json, ndjson) = match arg.strip_prefix("--") {
+            Some("quiet") => return Format::Text,
             Some(long) => (long == "json", long == "ndjson"),
             None => match arg.strip_prefix('-') {
                 Some(short) => {
                     let (switches, dir) = short.split_once('C').unwrap_or((short, "x"));
                     if dir.is_empty() {
                         args.next();
+                    }
+                    if switches.contains('q') {
+                        return Format::Text;
                     }
                     (switches.contains('j'), switches.contains('J'))
                 }
