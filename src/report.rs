@@ -108,6 +108,10 @@ pub struct Meta {
     input: Option<Input>,
     /// Whether paths limited the diff; `None` for `norms`.
     paths: Option<bool>,
+    /// How many untracked files the paths hold, which a change ending in
+    /// the working tree leaves out, as `git diff` does; `None` for any
+    /// other change.
+    pub untracked: Option<usize>,
     /// What was compared, for the text summary (`main...HEAD`,
     /// `uncommitted changes in lib`); a GitHub change names its `source`.
     #[serde(skip)]
@@ -124,6 +128,7 @@ impl Meta {
             source,
             input: None,
             paths: None,
+            untracked: None,
             subject: None,
         }
     }

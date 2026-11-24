@@ -519,6 +519,7 @@ can check `schema` before reading the rest.
 | `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local change or stdin. |
 | `input` | string or null | How the change was named (see [Input](#input)): `stdin`, `commit`, `range`, `merge_base_range`, `merge_base_worktree`, `worktree`, `staged`, `github_pr` or `github_commit`; `null` for `norms`. |
 | `paths` | bool or null | Paths limited the diff (`shapr main..HEAD -- lib`); `null` for `norms`. |
+| `untracked` | int or null | Untracked files git doesn't ignore under the paths (the whole repository without paths), which a change ending in the working tree (`worktree`, `merge_base_worktree`) leaves out, as `git diff` does; stderr names up to three and the `git add -N` that includes them. `null` for any other form, stdin included, and for `norms`. |
 
 ## Input
 

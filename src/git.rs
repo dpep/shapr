@@ -645,6 +645,24 @@ impl Git {
             .collect())
     }
 
+    /// The untracked files git doesn't ignore under PATHS (the whole
+    /// repository when empty), as `git diff` reads paths, and named relative
+    /// to where git runs, ready for `git add`.
+    pub fn untracked_in(&self, paths: &[String]) -> Result<Vec<String>> {
+        let mut cmd = self.command();
+        cmd.args(["ls-files", "-z", "--others", "--exclude-standard", "--"]);
+        match paths {
+            [] => cmd.arg(":/"),
+            paths => cmd.args(paths),
+        };
+        let out = run(&mut cmd)?;
+        Ok(String::from_utf8_lossy(&out)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
     /// Files of STATE matching PATHSPECS that hold one of WORDS as a whole
     /// word, as paths from the top; the working tree's untracked files
     /// included, binary files only when BINARY. Never fetches: a blob a

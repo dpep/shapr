@@ -78,6 +78,8 @@ shapr --completions zsh      # a completion script
 | any form `[--] PATH...` | the same, limited to paths | `meta.paths: true` |
 | no arguments | the diff on stdin | `stdin` |
 
+Like `git diff`, a form that ends in the working tree leaves untracked files out: shapr says so on stderr (`1 untracked file not shown: lib/new.rb (git add -N lib/new.rb to include it)`) and counts them in `meta.untracked`.
+
 Arguments are read as git reads them: revisions first, then paths. A name that is both a revision and a path is a usage error asking for `--`: `shapr lib --` is the revision, `shapr -- lib` the path. A merge commit alone is refused with the command for each parent (`REV^1..REV`, `REV^2..REV`).
 
 GitHub input is experimental: its forms, `meta.source` and the cache may change before 1.0. A GitHub pull request or commit needs no checkout: shapr reads its metadata from the GitHub API (with a token from `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token`, if any) and fetches just the two commits, with your git credentials, into a cache of partial clones under `~/.cache/shapr` (`--cache-dir` or `SHAPR_CACHE_DIR` to move it). Your repository is never written to. The forms and the cache are in [docs/schema.md](docs/schema.md#github-input).

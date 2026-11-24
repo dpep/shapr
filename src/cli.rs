@@ -411,6 +411,11 @@ fn dispatch() -> ExitCode {
             "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
         );
     }
+    // `git diff` never shows untracked files: say so rather than look clean.
+    let untracked = match (local, states.as_slice()) {
+        (Some((_, paths)), [git::State::Worktree]) => git.untracked_in(paths).ok(),
+        _ => None,
+    };
     let before = git.before_revision(range.as_deref());
     let after = match states.first() {
         Some(git::State::Revision(rev)) => Some(rev.as_str()),
@@ -449,6 +454,13 @@ fn dispatch() -> ExitCode {
     let labels = classify::classify(&change, outside);
     let mut meta = report::Meta::new("classify", source).input(form, paths);
     meta.subject = subject(&input, cli.merge_base.as_deref(), &git);
+    meta.untracked = untracked.as_ref().map(Vec::len);
+    if let Some(note) = untracked
+        .as_deref()
+        .and_then(|files| untracked_note(files, cli.dir.as_deref()))
+    {
+        eprintln!("shapr: {note}");
+    }
     let mut report = report::build(&change, &labels, claims, meta);
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
@@ -541,6 +553,43 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
         Some(Shape::Staged(rev)) => (report::Input::Staged, rev),
     };
     Ok(Input::Local { form, range, paths })
+}
+
+/// The untracked FILES a working-tree diff left out, and the command that
+/// adds them to it; `None` when there are none. DIR is `-C`'s.
+fn untracked_note(files: &[String], dir: Option<&Path>) -> Option<String> {
+    let git = match dir {
+        Some(dir) => format!("git -C {} add -N", shell_word(&dir.to_string_lossy())),
+        None => "git add -N".to_string(),
+    };
+    let named: Vec<&str> = files.iter().take(3).map(String::as_str).collect();
+    let words: Vec<String> = named.iter().map(|f| shell_word(f)).collect();
+    Some(match files.len() {
+        0 => return None,
+        1 => format!(
+            "1 untracked file not shown: {} ({git} {} to include it)",
+            named[0], words[0]
+        ),
+        n @ 2..=3 => format!(
+            "{n} untracked files not shown: {} ({git} {} to include them)",
+            named.join(", "),
+            words.join(" ")
+        ),
+        n => format!(
+            "{n} untracked files not shown: {}, ... ({git} <path> to include them)",
+            named.join(", ")
+        ),
+    })
+}
+
+/// WORD as one shell word: quoted when it holds anything but plain path
+/// characters.
+fn shell_word(word: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_-./@+:,=".contains(c);
+    if !word.is_empty() && word.chars().all(plain) {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r"'\''"))
 }
 
 /// What INPUT compares, in the words of the text summary; `None` for a

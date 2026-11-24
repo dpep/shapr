@@ -1228,3 +1228,56 @@ fn the_text_summary_names_what_was_compared() {
         "{text}"
     );
 }
+
+#[test]
+fn untracked_files_a_working_tree_form_leaves_out_are_counted_and_named() {
+    let dir = branched();
+    write(
+        dir.path(),
+        &[
+            ("lib/new.rb", "N = 1\n"),
+            ("c.rb", "C = 1\n"),
+            ("skip.log", "x\n"),
+            (".gitignore", "*.log\n"),
+        ],
+    );
+    let run = |args: &[&str]| {
+        let mut all = vec!["-j"];
+        all.extend(args);
+        let out = shapr(dir.path(), &all);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        let stderr = String::from_utf8(out.stderr.clone()).unwrap();
+        (report(&out)["meta"]["untracked"].clone(), stderr)
+    };
+    let (count, stderr) = run(&["."]);
+    assert_eq!(count, 3);
+    assert_eq!(
+        stderr,
+        "shapr: 3 untracked files not shown: .gitignore, c.rb, lib/new.rb \
+         (git add -N .gitignore c.rb lib/new.rb to include them)\n"
+    );
+    let (count, stderr) = run(&["--", "lib"]);
+    assert_eq!(count, 1);
+    assert_eq!(
+        stderr,
+        "shapr: 1 untracked file not shown: lib/new.rb (git add -N lib/new.rb to include it)\n"
+    );
+    assert_eq!(run(&["--merge-base", "main"]).0, 3);
+    // More than three: the first three named.
+    write(dir.path(), &[("d.rb", "D = 1\n")]);
+    let (count, stderr) = run(&["."]);
+    assert_eq!(count, 4);
+    assert!(
+        stderr.contains("4 untracked files not shown: .gitignore, c.rb, d.rb, ... (git add -N <path> to include them)"),
+        "{stderr}"
+    );
+    // Forms that don't end in the working tree have none to leave out.
+    for args in [&["feat"][..], &["main..feat"], &["--staged"]] {
+        assert_eq!(run(args), (Value::Null, String::new()), "{args:?}");
+    }
+    // Added with -N, a new file is diffed and no longer untracked.
+    git(dir.path(), &["add", "-N", "lib/new.rb"]);
+    let (files, meta) = ran(dir.path(), &["--", "lib"]);
+    assert_eq!(files, ["lib/b.rb", "lib/new.rb"]);
+    assert_eq!(meta["untracked"], 0);
+}
