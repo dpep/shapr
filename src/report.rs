@@ -674,12 +674,17 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         writeln!(out, "{line}")?;
     }
     claims(out, &s.claims)?;
-    let kinds: Vec<String> = s
-        .kinds
+    // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
+    let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
+    for part in report
+        .hunks
         .iter()
-        .filter(|(_, n)| **n > 0)
-        .map(|(k, n)| format!("{n} {k}"))
-        .collect();
+        .filter(|h| h.verdict.counted())
+        .flat_map(|h| &h.parts)
+    {
+        *kinds.entry(part.kind.as_str()).or_default() += 1;
+    }
+    let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{n} {k}")).collect();
     if let Some(source) = &report.meta.source {
         write!(out, "{}", source.name())?;
         if source.merge {

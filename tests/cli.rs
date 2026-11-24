@@ -1102,3 +1102,18 @@ fn the_text_summary_counts_kinds_and_leaves_out_what_says_nothing() {
     assert!(!last.contains("comments"), "{text}");
     assert!(!last.contains("structure share"), "{text}");
 }
+
+#[test]
+fn the_text_kinds_count_only_hunks_inside_the_verdict() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n"), ("README.md", "hi\n")],
+        &[("a.rb", "def f\n  2\nend\n"), ("README.md", "hello\n")],
+    ]);
+    let out = shapr(dir.path(), &["HEAD"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let last = text.lines().last().unwrap_or_default();
+    assert!(
+        last.contains("behavior: 2 hunks (1 logic); outside the verdict: 1 none;"),
+        "{text}"
+    );
+}
