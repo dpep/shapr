@@ -468,7 +468,8 @@ impl Walker<'_> {
                     t.rsplit("::").next().unwrap_or(t)
                 });
                 let role = match name {
-                    Some("line" | "column") => Role::Hazard(Hazard::Line),
+                    // `dbg!` prints its own line and column.
+                    Some("line" | "column" | "dbg") => Role::Hazard(Hazard::Line),
                     Some("file" | "module_path") => Role::Hazard(Hazard::File),
                     Some(name) if PLAIN_MACROS.contains(&name) => Role::Reference(Macro),
                     _ => Role::Hazard(Hazard::Macro),

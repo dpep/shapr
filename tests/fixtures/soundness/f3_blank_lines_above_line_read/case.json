@@ -1,0 +1,6 @@
+{
+  "description": "blank lines above a __LINE__ read change the value it returns",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

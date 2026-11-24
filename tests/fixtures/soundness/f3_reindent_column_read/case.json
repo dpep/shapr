@@ -1,0 +1,6 @@
+{
+  "description": "column!() reads its own column, so reindenting its line changes the value",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

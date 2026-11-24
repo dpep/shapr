@@ -1,0 +1,6 @@
+{
+  "description": "a blank line below the only __LINE__ read moves nothing it reads",
+  "expect": {
+    "hunks": [{"kind": "format_only"}]
+  }
+}

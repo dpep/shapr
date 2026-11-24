@@ -26,6 +26,9 @@ pub(super) enum Op {
     /// An argument restating a default dropped or added: the hazard is in
     /// the called method's own body.
     RestateDefault,
+    /// Lines added or removed above the code, or the code's own line edited:
+    /// it sits at another line or column.
+    Shift,
 }
 
 /// Whether `hazard` in the code `op` touches makes it something other than
@@ -78,6 +81,13 @@ pub(super) fn blocks(op: Op, hazard: Hazard) -> bool {
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
             | Line | File | Rebind => false,
         },
+        // Only an explicit read of the code's own position; `caller` and a
+        // backtrace report shifted lines too, as any exception does.
+        Op::Shift => match hazard {
+            Line => true,
+            Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
+            | Binding | Frame | File | Rebind => false,
+        },
     }
 }
 
@@ -99,5 +109,6 @@ mod tests {
         assert!(blocks(Op::MoveAcrossFiles, Hazard::File));
         assert!(blocks(Op::RestateDefault, Hazard::Binding));
         assert!(!blocks(Op::RestateDefault, Hazard::Super));
+        assert!(blocks(Op::Shift, Hazard::Line) && !blocks(Op::Shift, Hazard::Frame));
     }
 }

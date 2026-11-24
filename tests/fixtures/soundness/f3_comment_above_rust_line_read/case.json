@@ -1,0 +1,6 @@
+{
+  "description": "a comment line above line!() shifts the line it prints",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

@@ -333,10 +333,59 @@ fn passes(change: &Change, outside: &dyn Outside) -> Labels {
     for pass in PASSES {
         pass(change, &alignments, outside, &mut labels);
     }
+    shifted_reads(change, &mut labels);
     for label in labels.iter_mut().flatten() {
         label.residual.lines = label.unclaimed();
     }
     labels
+}
+
+/// Refuses the structure of every hunk that moves code reading its own
+/// position (`__LINE__`, `line!()`): one holding the read, and one above it
+/// when the lines added and removed above it don't balance.
+fn shifted_reads(change: &Change, labels: &mut Labels) {
+    for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
+        let Ok(trees) = &file.trees else { continue };
+        let tree = &trees.after;
+        let reads = tree.nodes.iter().filter(|n| {
+            n.role
+                .hazard()
+                .is_some_and(|h| hazard::blocks(hazard::Op::Shift, h))
+        });
+        let reads: Vec<usize> = reads.map(|n| tree.line_of(n.span.start)).collect();
+        let hunks = &file.diff.hunks;
+        let delta = |h: &Hunk| h.added.len() as isize - h.removed.len() as isize;
+        let last = |h: &Hunk| h.after.start + h.after.count.saturating_sub(1);
+        let mut shifts: Vec<Option<usize>> = vec![None; hunks.len()];
+        for &read in &reads {
+            let above = || hunks.iter().enumerate().filter(|(_, h)| last(h) < read);
+            let moved = above().map(|(_, h)| delta(h)).sum::<isize>() != 0;
+            for (i, h) in hunks.iter().enumerate() {
+                let inside = (h.after.start..=last(h)).contains(&read);
+                let shifts_it = moved && last(h) < read && delta(h) != 0;
+                if inside || shifts_it {
+                    shifts[i].get_or_insert(read);
+                }
+            }
+        }
+        for (label, read) in labels.iter_mut().zip(shifts) {
+            let Some(read) = read else { continue };
+            let (refused, kept) = std::mem::take(&mut label.parts)
+                .into_iter()
+                .partition::<Vec<Part>, _>(Part::structure);
+            label.parts = kept;
+            if let Some(kind) = refused.iter().map(|p| p.kind).max() {
+                let residual = &mut label.residual;
+                residual.reason = format!(
+                    "{}, but it moves line {read}, which reads its own position",
+                    kind.as_str()
+                );
+                residual
+                    .detail
+                    .insert("near".into(), Value::from(kind.as_str()));
+            }
+        }
+    }
 }
 
 fn defaults(change: &Change) -> Labels {

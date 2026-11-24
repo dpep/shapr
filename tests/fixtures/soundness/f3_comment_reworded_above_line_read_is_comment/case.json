@@ -1,0 +1,6 @@
+{
+  "description": "a comment reworded in place keeps every line where it was",
+  "expect": {
+    "hunks": [{"kind": "comment_only"}]
+  }
+}

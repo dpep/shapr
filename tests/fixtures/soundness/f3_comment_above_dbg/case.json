@@ -1,0 +1,6 @@
+{
+  "description": "dbg! prints its own line, so a comment line above it changes the output",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

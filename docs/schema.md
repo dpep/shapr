@@ -75,6 +75,13 @@ new code also defines): the part is then not claimed and its lines stay
 
 A part is structure only when it is proven: see [Proof status](#proof-status).
 
+Code that reads its own position (`__LINE__`, Rust's `line!()`, `column!()`
+and `dbg!`) changes value when it moves. A hunk holding such a read, or one
+above it in the file when the lines added and removed above the read don't
+balance, proves no structure: its lines are `logic`, with `detail.near`
+naming the kind it would have been. A shifted line `caller` or a backtrace
+reports is not checked, as any exception's backtrace would shift too.
+
 ### Runs
 
 Diff context merges edits a few lines apart into one hunk, so a hunk can

@@ -752,7 +752,7 @@ impl<'a> Walker<'a> {
                 let name = self.text(&n);
                 let bang = n.next_sibling().is_some_and(|s| s.kind() == "!");
                 let role = match name {
-                    "line" | "column" if bang => Role::Hazard(Hazard::Line),
+                    "line" | "column" | "dbg" if bang => Role::Hazard(Hazard::Line),
                     "file" | "module_path" if bang => Role::Hazard(Hazard::File),
                     _ => Role::Opaque,
                 };
