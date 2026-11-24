@@ -926,6 +926,24 @@ mod tests {
     }
 
     #[test]
+    fn an_assert_spells_its_condition_unless_a_message_surely_follows() {
+        let spells = |src: &str| {
+            parse(src)
+                .nodes
+                .iter()
+                .any(|n| n.flags.contains(crate::tree::Flags::SPELLS))
+        };
+        assert!(spells("fn f() { assert!(a > 0); }"));
+        assert!(spells("fn f() { assert!(a > 0,); }"));
+        assert!(spells("fn f() { assert!(g::<u8, u16>(a)); }"));
+        assert!(spells(
+            "fn f() { assert!((|x, y| x > y)(a, 0) || a < b, \"m\"); }"
+        ));
+        assert!(!spells("fn f() { assert!(a > 0, \"m\"); }"));
+        assert!(!spells("fn f() { assert!(f(a, b), \"m {}\", a < b); }"));
+    }
+
+    #[test]
     fn items_bound_locals_and_closures_do_not() {
         let tree =
             parse("mod m { #[derive(Clone)] struct S; impl S { fn a() { let f = |x| x; } } }");

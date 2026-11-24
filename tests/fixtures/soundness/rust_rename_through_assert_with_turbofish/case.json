@@ -1,0 +1,7 @@
+{
+  "description": "the comma in a turbofish (`g::<u8, u16>`) is no message separator: the assert! panics with its condition's text, so renaming a local inside it is logic",
+  "expect": {
+    "hunks": [{"verdict": {"$not": "structure"}}],
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

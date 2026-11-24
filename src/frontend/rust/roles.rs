@@ -735,9 +735,15 @@ pub(super) fn spells(name: &str, tokens: Option<Node<'_>>) -> bool {
         "assert" | "debug_assert" => !tokens.is_some_and(|t| {
             let mut c = t.walk();
             let kinds: Vec<&str> = t.children(&mut c).map(|t| t.kind()).collect();
-            kinds
-                .windows(2)
-                .any(|w| w[0] == "," && !matches!(w[1], ")" | "]" | "}"))
+            let Some(comma) = kinds.iter().position(|&k| k == ",") else {
+                return false;
+            };
+            // A `<` or `|` before it may open generics or closure
+            // parameters, whose commas a token tree doesn't nest.
+            let ambiguous = kinds[..comma]
+                .iter()
+                .any(|k| k.starts_with('<') || *k == "|");
+            !ambiguous && !matches!(kinds.get(comma + 1), None | Some(&(")" | "]" | "}")))
         }),
         "line" | "column" | "file" | "module_path" => false,
         name => !PLAIN_MACROS.contains(&name),
