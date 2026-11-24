@@ -1281,3 +1281,40 @@ fn untracked_files_a_working_tree_form_leaves_out_are_counted_and_named() {
     assert_eq!(files, ["lib/b.rb", "lib/new.rb"]);
     assert_eq!(meta["untracked"], 0);
 }
+
+#[test]
+fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
+    let dir = repo(&[
+        &[
+            ("README.md", "hi\n"),
+            ("Makefile", "x\n"),
+            ("config/x.yml", "a: 1\n"),
+            ("config/y.yml", "b: 1  \n"),
+            ("spec/fixtures/f.rb", "X = 1\n"),
+        ],
+        &[
+            ("README.md", "hello\n"),
+            ("Makefile", "y\n"),
+            ("config/x.yml", "a: 2\n"),
+            ("config/y.yml", "b: 1\n"),
+            ("spec/fixtures/f.rb", "X = 2\n"),
+        ],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    let lines: Vec<String> = text
+        .lines()
+        .take(5)
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "Makefile:1 unknown file (outside the verdict)",
+            "README.md:1 docs change (outside the verdict)",
+            "config/x.yml:1 config change",
+            "config/y.yml:1 config change, whitespace only (outside the verdict)",
+            "spec/fixtures/f.rb:1 fixture change (outside the verdict)",
+        ],
+        "{text}"
+    );
+}

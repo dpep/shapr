@@ -655,6 +655,15 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .max()
         .unwrap_or(0);
     for hunk in &report.hunks {
+        let outside = if hunk.verdict.counted() {
+            ""
+        } else {
+            " (outside the verdict)"
+        };
+        if let Some(plain) = uncompared(hunk) {
+            writeln!(out, "{:width$}  {plain}{outside}", place(hunk))?;
+            continue;
+        }
         // One line per part; the place names the hunk on its first.
         for (i, part) in hunk.parts.iter().enumerate() {
             let facets: Vec<&str> = part.facets.iter().map(|f| f.as_str()).collect();
@@ -793,6 +802,26 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// A hunk in a file shapr didn't compare, by its category alone: `docs
+/// change`, `unknown file`. `None` for code or tests, whose reason says why.
+fn uncompared(hunk: &HunkRecord) -> Option<String> {
+    let [part] = hunk.parts.as_slice() else {
+        return None;
+    };
+    if hunk.parsed || part.evidence.comparison != Method::None {
+        return None;
+    }
+    Some(match hunk.category {
+        Category::Code | Category::Test => return None,
+        Category::Unknown | Category::Binary => format!("{} file", hunk.category.as_str()),
+        // A counted file outside the verdict changed only in whitespace.
+        category if category.counted() && hunk.verdict == Verdict::None => {
+            format!("{} change, whitespace only", category.as_str())
+        }
+        category => format!("{} change", category.as_str()),
+    })
 }
 
 /// `file:first-last` on the after side; a pure deletion names its before lines.

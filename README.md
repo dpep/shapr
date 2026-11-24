@@ -121,7 +121,7 @@ The plan's diffs are at `.steps[].edits[].diff` under `-j`, ready for `git apply
 shapr norms -j lib | jq -r '.steps[].edits[].diff' | git apply
 ```
 
-Hunks in files shapr can't parse are `logic` with confidence 0; in a file of unknown category they are outside the verdict (`unknown`).
+Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a file of unknown category they are outside the verdict (`unknown`). Text output names them by category instead: `README.md:1  docs change (outside the verdict)`, `config/app.yml:3  config change`, `spec/fixtures/cart.rb:1  fixture change (outside the verdict)`, `Makefile:1  unknown file (outside the verdict)`.
 
 ## Usage log
 
