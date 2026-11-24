@@ -678,7 +678,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .kinds
         .iter()
         .filter(|(_, n)| **n > 0)
-        .map(|(k, n)| format!("{k} {n}"))
+        .map(|(k, n)| format!("{n} {k}"))
         .collect();
     if let Some(source) = &report.meta.source {
         write!(out, "{}", source.name())?;
@@ -695,7 +695,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .collect();
     writeln!(
         out,
-        "{}: {} hunk{} ({}){}; review {} line{}{}; comments +{} -{}; structure share {:.2}",
+        "{}: {} hunk{} ({}){}; review {} line{}{}{}{}",
         s.verdict.as_str(),
         s.hunks,
         if s.hunks == 1 { "" } else { "s" },
@@ -715,9 +715,16 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             0 => String::new(),
             n => format!(", {n} in tests"),
         },
-        s.lines.comment_added,
-        s.lines.comment_deleted,
-        s.structure_share,
+        match (s.lines.comment_added, s.lines.comment_deleted) {
+            (0, 0) => String::new(),
+            (added, deleted) => format!("; comments +{added} -{deleted}"),
+        },
+        // Always 0 on behavior and 1 on structure.
+        if s.verdict == Verdict::Mixed {
+            format!("; structure share {:.2}", s.structure_share)
+        } else {
+            String::new()
+        },
     )
 }
 
@@ -731,19 +738,18 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         .categories
         .iter()
         .filter(|(_, n)| **n > 0)
-        .map(|(c, n)| format!("{c} {n}"))
+        .map(|(c, n)| format!("{c} in {n}"))
         .collect();
-    writeln!(
-        out,
-        "claims: {} ({} message{})",
-        if claimed.is_empty() {
-            "none".to_string()
-        } else {
-            claimed.join(", ")
-        },
+    let of = format!(
+        "{} message{}",
         claims.messages,
-        if claims.messages == 1 { "" } else { "s" },
-    )?;
+        if claims.messages == 1 { "" } else { "s" }
+    );
+    match claimed.as_slice() {
+        [] => writeln!(out, "claims: none in {of}")?,
+        [one] => writeln!(out, "claims: {one} of {of}")?,
+        many => writeln!(out, "claims: {} (of {of})", many.join(", "))?,
+    }
     for conflict in &claims.experimental.conflicts {
         let plural = if conflict.count == 1 { "" } else { "s" };
         // Hunks shapr couldn't prove structural aren't proof of behavior.

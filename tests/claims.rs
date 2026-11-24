@@ -186,7 +186,10 @@ fn claims_show_in_text_output() {
     let dir = gate_repo(GATE, &flipped(), "Refactor the gate check");
     let out = shapr(dir.path(), &["HEAD~1..HEAD"]);
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("claims: refactor 1 (1 message)"), "{text}");
+    assert!(
+        text.contains("claims: refactor in 1 of 1 message"),
+        "{text}"
+    );
     assert!(
         text.contains("unproven: claims refactor; 1 hunk not shown structural"),
         "{text}"

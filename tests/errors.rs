@@ -130,7 +130,10 @@ fn one_review_line_is_singular() {
     let dir = repo(&[&[("a.rb", METHOD)], &[("a.rb", &after)]]);
     let out = shapr(dir.path(), &["HEAD~1..HEAD"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("review 1 line;"), "{text}");
+    assert!(
+        text.contains("review 1 line") && !text.contains("review 1 lines"),
+        "{text}"
+    );
 }
 
 #[test]

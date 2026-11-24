@@ -1055,3 +1055,17 @@ fn a_log_that_cant_be_written_never_fails_the_run() {
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     assert!(out.stderr.is_empty(), "{out:?}");
 }
+
+#[test]
+fn the_text_summary_counts_kinds_and_leaves_out_what_says_nothing() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n")],
+        &[("a.rb", "def f\n  2\nend\n")],
+    ]);
+    let out = shapr(dir.path(), &["HEAD"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let last = text.lines().last().unwrap_or_default();
+    assert!(last.starts_with("behavior: 1 hunk (1 logic)"), "{text}");
+    assert!(!last.contains("comments"), "{text}");
+    assert!(!last.contains("structure share"), "{text}");
+}

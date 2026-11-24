@@ -87,7 +87,7 @@ Text output, for a commit that reformats one method's signature and changes anot
 ```
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
 lib/greeter.rb:15  logic             1.00  code differs beyond whitespace and comments
-mixed: 2 hunks (format_only 1, logic 1); review 2 lines; comments +0 -0; structure share 0.50
+mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
 ```
 
 Hunks in files shapr can't parse are `logic` with confidence 0; in a file of unknown category they are outside the verdict (`unknown`).
