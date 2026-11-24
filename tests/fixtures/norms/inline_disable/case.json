@@ -1,0 +1,33 @@
+{
+  "description": "a line under rubocop:disable or rubocop:todo for a norm's cop keeps its inferred verdict but gets no suggested edit",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "inferred": "single_quotes",
+              "deviations": [
+                {
+                  "line": 5,
+                  "edit": null
+                },
+                {
+                  "line": 7,
+                  "edit": null
+                },
+                {
+                  "line": 9,
+                  "edit": "--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -9,1 +9,1 @@\n-z = \"z\"\n+z = 'z'\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

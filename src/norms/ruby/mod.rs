@@ -16,11 +16,12 @@ mod width;
 
 use super::editorconfig;
 use super::{
-    Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind, Snapshot,
+    Analysis, Configured, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind,
+    Snapshot,
 };
 use crate::frontend::ruby::{Entered, generated};
 use ruby_prism::{Location, Node, Visit};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct Ruby;
 
@@ -276,6 +277,7 @@ impl Language for Ruby {
         Analysis {
             observations: walker.observations,
             scopes: walker.scopes,
+            disabled: directives(source, &result, &index),
             errors: result.errors().next().is_some(),
             lines: index.count(),
         }
@@ -283,11 +285,20 @@ impl Language for Ruby {
 
     /// `.editorconfig`, then `.rubocop.yml`: where both set a norm, the
     /// Ruby-specific file wins.
-    fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> BTreeMap<&'static str, String> {
+    fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> Configured {
         let mut styles = from_editorconfig(&editorconfig::properties(path, snapshot));
         let Some(config) = config::find(path, snapshot).map(|p| config::load(&p, snapshot)) else {
-            return styles;
+            return Configured {
+                styles,
+                ..Configured::default()
+            };
         };
+        // A file RuboCop skips for a cop has no configured style there.
+        let off: BTreeSet<&'static str> = (NORMS.iter())
+            .map(|n| n.id)
+            .filter(|id| !config.inspects(id, path))
+            .collect();
+        styles.retain(|id, _| !off.contains(id));
         for setting in SETTINGS {
             let value = config.get(setting.norm, setting.key);
             let style = match value {
@@ -298,11 +309,11 @@ impl Language for Ruby {
                     .find(|(v, _)| Some(*v) == value)
                     .map(|(_, style)| style.to_string()),
             };
-            if let Some(style) = style {
+            if let (Some(style), false) = (style, off.contains(setting.norm)) {
                 styles.insert(setting.norm, style);
             }
         }
-        styles
+        Configured { styles, off }
     }
 }
 
@@ -330,6 +341,53 @@ fn from_editorconfig(properties: &BTreeMap<String, String>) -> BTreeMap<&'static
         _ => None,
     };
     styles
+}
+
+/// The lines each `# rubocop:disable` or `# rubocop:todo` turns its cops
+/// off for: alone on its line, to the matching `# rubocop:enable` or the
+/// file's end; after code, that line.
+fn directives(
+    source: &[u8],
+    result: &ruby_prism::ParseResult,
+    index: &LineIndex,
+) -> Vec<(String, usize, usize)> {
+    let mut out = Vec::new();
+    let mut open: Vec<(String, usize)> = Vec::new();
+    for comment in result.comments() {
+        let loc = comment.location();
+        let text = String::from_utf8_lossy(&source[loc.start_offset()..loc.end_offset()]);
+        let Some(rest) = text.trim_start_matches('#').trim().strip_prefix("rubocop:") else {
+            continue;
+        };
+        let (mode, cops) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+        // RuboCop reads a ` -- ` and what follows as the reason.
+        let cops = cops.split(" --").next().unwrap_or_default();
+        let cops = cops.split(',').map(str::trim).filter(|c| !c.is_empty());
+        let line = index.line(loc.start_offset());
+        let alone = source[index.start(line)..loc.start_offset()]
+            .iter()
+            .all(u8::is_ascii_whitespace);
+        match mode {
+            "disable" | "todo" if alone => open.extend(cops.map(|c| (c.to_string(), line))),
+            "disable" | "todo" => out.extend(cops.map(|c| (c.to_string(), line, line))),
+            "enable" => {
+                for cop in cops {
+                    let (closed, kept) =
+                        open.drain(..).partition(|(c, _)| cop == "all" || c == cop);
+                    open = kept;
+                    out.extend(
+                        closed
+                            .into_iter()
+                            .map(|(c, first): (String, usize)| (c, first, line)),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    let last = index.count().max(1);
+    out.extend(open.into_iter().map(|(c, first)| (c, first, last)));
+    out
 }
 
 pub struct Walker<'a> {
@@ -439,6 +497,23 @@ pub mod tests {
             .map(|o| format!("{}@{}", o.style, o.line))
             .collect();
         words.join(" ")
+    }
+
+    #[test]
+    fn rubocop_directives_turn_checks_off_by_line() {
+        let analysis = Ruby.analyze(
+            b"a = 1 # rubocop:disable Style/StringLiterals -- reason\n\
+              # rubocop:disable all\nb = 2\n# rubocop:enable all\n\
+              # rubocop:todo Naming, Layout/TrailingWhitespace\nc = 3\n",
+        );
+        let off = |norm, line| analysis.disabled(norm, line);
+        assert!(off("Style/StringLiterals", 1));
+        assert!(!off("Style/HashSyntax", 1));
+        assert!(off("Style/HashSyntax", 3));
+        assert!(!off("Style/StringLiterals", 5));
+        assert!(off("Naming/MethodName", 6));
+        assert!(off("Layout/TrailingWhitespace", 6));
+        assert!(!off("Layout/IndentationWidth", 6));
     }
 
     #[test]

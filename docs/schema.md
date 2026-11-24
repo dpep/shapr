@@ -796,6 +796,17 @@ section globs matched against the file as editorconfig.org specifies).
 Where both set the same norm, `.rubocop.yml` wins: it is the Ruby-specific
 file. The table above says which settings configure each norm.
 
+Where RuboCop wouldn't check a norm's cop, its config says nothing: a file
+under `AllCops` or the cop's `Exclude`, or outside the cop's `Include`
+(patterns matched as RuboCop does, `File.fnmatch?` with `**/` and `{a,b}`,
+from the directory of the `.rubocop*` file that lists them; a pattern shapr
+can't read, such as a regexp, counts against the file), and a line under
+`# rubocop:disable` or `# rubocop:todo` for the cop, its department or `all`
+(to the matching `# rubocop:enable`, or that line alone after code). There
+the norm has no `configured` style and its deviations no `edit`; the style
+the code itself backs still judges, as it is the code's own evidence, not
+RuboCop's.
+
 Config, and the directory's files the change didn't touch, are read as of the change's after side:
 from the revision a range ends in (`B` of `A..B`; a GitHub change's head),
 or from the index or the working tree when the change ends there (one
@@ -822,7 +833,7 @@ Each norm:
 | `previous` | object or null | When renorming, per style, the scope's whole before side. |
 | `inferred` | string or null | The style the scope backs. |
 | `confidence` | number 0–1 or null | Its pooled share, as above. |
-| `configured` | string or null | The style `.rubocop.yml` sets; `null` when it sets none or disables the cop. Reported beside `inferred` even when they differ. |
+| `configured` | string or null | The style `.rubocop.yml` sets; `null` when it sets none, disables the cop, or wouldn't check the hunk's new code (above). Reported beside `inferred` even when they differ. |
 | `expected` | string or null | `inferred`, else `configured`. |
 | `direction` | string | `aligned` (new code follows `expected`), `converging` (it does, and replaces code that didn't, or the scope renormed), `diverging` (some new code doesn't) or `abstain` (nothing expected). |
 | `convergence` | string or null | When `converging`: `normalizing` (toward the surrounding norm) or `renorming` (the scope moved to a new one). |

@@ -15,7 +15,7 @@ pub use snapshot::{Index, Revision, Snapshot, Worktree, join};
 
 use crate::change::Category;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 /// The share (rule of succession) a style needs to be a norm.
@@ -66,6 +66,9 @@ pub struct Scope {
 pub struct Analysis {
     pub observations: Vec<Observation>,
     pub scopes: Vec<Scope>,
+    /// Lines a linter directive turns a check off for: the check's name (a
+    /// norm id, a department such as `Style`, or `all`), first and last line.
+    pub disabled: Vec<(String, usize, usize)>,
     pub errors: bool,
     pub lines: usize,
 }
@@ -91,8 +94,18 @@ pub trait Language: Sync {
     fn handles(&self, path: &str) -> bool;
     fn norms(&self) -> &'static [NormDef];
     fn analyze(&self, source: &[u8]) -> Analysis;
-    /// Styles the linter config for the file at `path` sets, by norm id.
-    fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> BTreeMap<&'static str, String>;
+    /// What the linter config for the file at `path` says.
+    fn configured(&self, path: &str, snapshot: &dyn Snapshot) -> Configured;
+}
+
+/// The linter config's word on one file.
+#[derive(Default)]
+pub struct Configured {
+    /// Styles it sets, by norm id.
+    pub styles: BTreeMap<&'static str, String>,
+    /// Norms whose linter check skips the file (excluded, or outside the
+    /// check's includes): no style is set for them, and no edit offered.
+    pub off: BTreeSet<&'static str>,
 }
 
 static LANGUAGES: &[&dyn Language] = &[&ruby::Ruby];
@@ -166,6 +179,20 @@ pub fn pooled(rings: &[&Counts], pooling: f64, threshold: f64) -> Option<Norm> {
         style: (*top).clone(),
         confidence,
     })
+}
+
+impl Analysis {
+    /// A directive turns `norm`'s check off at `line`.
+    pub fn disabled(&self, norm: &str, line: usize) -> bool {
+        self.disabled.iter().any(|(name, first, last)| {
+            (*first..=*last).contains(&line)
+                && (name == "all"
+                    || name == norm
+                    || norm
+                        .strip_prefix(name.as_str())
+                        .is_some_and(|r| r.starts_with('/')))
+        })
+    }
 }
 
 pub fn count<'a>(def: &NormDef, observations: impl Iterator<Item = &'a Observation>) -> Counts {

@@ -1,0 +1,62 @@
+{
+  "description": "a file RuboCop wouldn't inspect for a cop (AllCops Exclude, the cop's Exclude, or outside its Include) gets no configured style for that norm",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "configured": null,
+              "direction": "abstain",
+              "deviations": []
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "configured": null,
+              "direction": "abstain",
+              "deviations": []
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "configured": "double_quotes",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 3,
+                  "style": "single_quotes",
+                  "edit": "--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -3,1 +3,1 @@\n-    'x'\n+    \"x\"\n"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "configured": null,
+              "direction": "abstain",
+              "deviations": []
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

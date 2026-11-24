@@ -1,7 +1,8 @@
 //! The RuboCop config a file falls under: the nearest `.rubocop.yml`, with
 //! the local files it `inherit_from`s. Only the YAML RuboCop configs use is
-//! read: top-level cop names, their scalar settings, and `inherit_from`.
-//! Gems (`inherit_gem`) and remote URLs are not followed.
+//! read: top-level cop names, their scalar settings, their `Include` and
+//! `Exclude` lists, and `inherit_from`. Gems (`inherit_gem`) and remote URLs
+//! are not followed.
 
 use crate::norms::snapshot::{Snapshot, join, parent, resolve};
 use std::collections::BTreeMap;
@@ -10,16 +11,35 @@ const NAME: &str = ".rubocop.yml";
 
 /// Settings by cop, then by key; a later file overrides what it inherits.
 #[derive(Debug, Default)]
-pub struct Config(BTreeMap<String, BTreeMap<String, String>>);
+pub struct Config {
+    settings: BTreeMap<String, BTreeMap<String, String>>,
+    /// Path lists (`Include`, `Exclude`) by cop, then by key: each pattern
+    /// relative to the repository's top, `None` where it can't be read (a
+    /// regexp, an absolute path, ERB).
+    lists: BTreeMap<String, BTreeMap<String, Vec<Option<String>>>>,
+}
 
 impl Config {
     pub fn get(&self, cop: &str, key: &str) -> Option<&str> {
-        let settings = self.0.get(cop)?;
+        let settings = self.settings.get(cop)?;
         // A disabled cop sets no style.
         if settings.get("Enabled").map(String::as_str) == Some("false") {
             return None;
         }
         settings.get(key).map(String::as_str)
+    }
+
+    /// RuboCop would inspect the file at `path` with `cop`: it is outside
+    /// `AllCops`' and the cop's `Exclude`, and inside the cop's `Include` if
+    /// it has one. A pattern that can't be read counts against the file.
+    pub fn inspects(&self, cop: &str, path: &str) -> bool {
+        let list = |cop: &str, key: &str| self.lists.get(cop).and_then(|l| l.get(key));
+        let hit = |patterns: &Vec<Option<String>>, unread: bool| {
+            (patterns.iter()).any(|p| p.as_ref().map_or(unread, |p| glob(p, path)))
+        };
+        let excluded = |cop: &str| list(cop, "Exclude").is_some_and(|p| hit(p, true));
+        let included = list(cop, "Include").is_none_or(|p| p.is_empty() || hit(p, false));
+        included && !excluded("AllCops") && !excluded(cop)
     }
 }
 
@@ -53,25 +73,44 @@ fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize)
     let Some(text) = snapshot.read(path) else {
         return;
     };
-    let (inherits, own) = parse(&String::from_utf8_lossy(&text));
+    // RuboCop reads a `.rubocop*` file's paths from its own directory, any
+    // other config's from where it runs: the top, here.
+    let name = path.rsplit('/').next().unwrap_or_default();
+    let base = if name.starts_with(".rubocop") {
+        parent(path)
+    } else {
+        ""
+    };
+    let (inherits, own) = parse(&String::from_utf8_lossy(&text), base);
     for file in inherits {
         if let (false, Some(file)) = (file.contains("://"), resolve(parent(path), &file)) {
             merge(&file, snapshot, config, depth + 1);
         }
     }
-    for (cop, settings) in own.0 {
-        config.0.entry(cop).or_default().extend(settings);
+    for (cop, settings) in own.settings {
+        config.settings.entry(cop).or_default().extend(settings);
+    }
+    for (cop, lists) in own.lists {
+        config.lists.entry(cop).or_default().extend(lists);
     }
 }
 
-/// `inherit_from` entries and the cops' scalar settings.
-fn parse(text: &str) -> (Vec<String>, Config) {
+/// `inherit_from` entries and the cops' scalar settings and path lists,
+/// those resolved from `base`.
+fn parse(text: &str, base: &str) -> (Vec<String>, Config) {
     let mut inherits = Vec::new();
     let mut config = Config::default();
     let mut cop: Option<String> = None;
     let mut in_inherit = false;
     // The indentation of a cop's settings; deeper lines are nested values.
     let mut indent: Option<usize> = None;
+    // The setting whose block list the following `- ` lines extend.
+    let mut items: Option<String> = None;
+    let pattern = |item: &str| {
+        let item = unquote(item);
+        let unreadable = item.starts_with('/') || item.starts_with('!') || item.contains("<%");
+        (!unreadable).then(|| resolve(base, item)).flatten()
+    };
     for raw in text.lines() {
         let line = strip_comment(raw);
         let trimmed = line.trim();
@@ -84,6 +123,7 @@ fn parse(text: &str) -> (Vec<String>, Config) {
             in_inherit = key == "inherit_from";
             cop = None;
             indent = None;
+            items = None;
             if in_inherit {
                 inherits.extend(list(value));
             } else if value.is_empty() {
@@ -98,19 +138,104 @@ fn parse(text: &str) -> (Vec<String>, Config) {
             continue;
         }
         let Some(cop) = &cop else { continue };
-        if *indent.get_or_insert(depth) != depth {
+        let indent = *indent.get_or_insert(depth);
+        // A block list's items sit deeper than its key, or level with it.
+        if let (Some(key), Some(item)) = (&items, trimmed.strip_prefix("- "))
+            && depth >= indent
+        {
+            let list = config.lists.entry(cop.clone()).or_default();
+            list.entry(key.clone()).or_default().push(pattern(item));
+            continue;
+        }
+        if depth != indent {
             continue;
         }
         let (key, value) = split(trimmed);
-        if !value.is_empty() {
+        items = None;
+        if value.is_empty() {
+            items = Some(key.to_string());
+            let list = config.lists.entry(cop.clone()).or_default();
+            list.insert(key.to_string(), Vec::new());
+        } else if value.starts_with('[') {
+            let list = config.lists.entry(cop.clone()).or_default();
+            list.insert(
+                key.to_string(),
+                self::list(value).iter().map(|v| pattern(v)).collect(),
+            );
+        } else {
             config
-                .0
+                .settings
                 .entry(cop.clone())
                 .or_default()
                 .insert(key.to_string(), unquote(value).to_string());
         }
     }
     (inherits, config)
+}
+
+/// RuboCop's path match: `File.fnmatch?` with `FNM_PATHNAME` and
+/// `FNM_EXTGLOB`, so `*` stays within a directory, `**/` spans any number of
+/// them and `{a,b}` is either; a pattern with no wildcard matches only itself.
+pub fn glob(pattern: &str, path: &str) -> bool {
+    if let Some(open) = pattern.find('{')
+        && let Some(close) = pattern[open..].find('}').map(|i| open + i)
+    {
+        return (pattern[open + 1..close].split(',')).any(|alt| {
+            glob(
+                &format!("{}{alt}{}", &pattern[..open], &pattern[close + 1..]),
+                path,
+            )
+        });
+    }
+    let pattern: Vec<&str> = pattern.split('/').collect();
+    let path: Vec<&str> = path.split('/').collect();
+    segments(&pattern, &path)
+}
+
+fn segments(pattern: &[&str], path: &[&str]) -> bool {
+    match (pattern.split_first(), path.split_first()) {
+        (None, None) => true,
+        (Some((&"**", rest)), _) if !rest.is_empty() => {
+            (0..=path.len()).any(|skip| segments(rest, &path[skip..]))
+        }
+        (Some((p, rest)), Some((name, tail))) => {
+            wildcard(p.as_bytes(), name.as_bytes()) && segments(rest, tail)
+        }
+        _ => false,
+    }
+}
+
+/// One path segment against `*`, `?` and `[...]`.
+fn wildcard(pattern: &[u8], name: &[u8]) -> bool {
+    match pattern.split_first() {
+        None => name.is_empty(),
+        Some((b'*', rest)) => (0..=name.len()).any(|i| wildcard(rest, &name[i..])),
+        Some((b'?', rest)) => !name.is_empty() && wildcard(rest, &name[1..]),
+        Some((b'[', rest)) => {
+            let Some(end) = rest.iter().position(|&b| b == b']') else {
+                return name.first() == Some(&b'[') && wildcard(rest, &name[1..]);
+            };
+            let (class, rest) = (&rest[..end], &rest[end + 1..]);
+            let (negate, class) = match class.split_first() {
+                Some((b'!' | b'^', class)) => (true, class),
+                _ => (false, class),
+            };
+            let Some(&c) = name.first() else { return false };
+            let mut hit = false;
+            let mut i = 0;
+            while i < class.len() {
+                if i + 2 < class.len() && class[i + 1] == b'-' {
+                    hit |= (class[i]..=class[i + 2]).contains(&c);
+                    i += 3;
+                } else {
+                    hit |= class[i] == c;
+                    i += 1;
+                }
+            }
+            hit != negate && wildcard(rest, &name[1..])
+        }
+        Some((&b, rest)) => name.first() == Some(&b) && wildcard(rest, &name[1..]),
+    }
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -164,6 +289,7 @@ mod tests {
             "inherit_from:\n  - .rubocop_todo.yml\n\nAllCops:\n  TargetRubyVersion: 3.2\n  Exclude:\n    - 'vendor/**/*'\n\
              Style/StringLiterals:\n  EnforcedStyle: double_quotes # house style\n\
              Style/HashSyntax:\n  Enabled: false\n  EnforcedStyle: hash_rockets\n",
+            "",
         );
         assert_eq!(inherits, [".rubocop_todo.yml"]);
         assert_eq!(
@@ -173,9 +299,32 @@ mod tests {
         assert_eq!(config.get("Style/HashSyntax", "EnforcedStyle"), None);
         assert_eq!(config.get("AllCops", "Exclude"), None);
         assert_eq!(
-            parse("inherit_from: [a.yml, 'b.yml']\n").0,
+            parse("inherit_from: [a.yml, 'b.yml']\n", "").0,
             ["a.yml", "b.yml"]
         );
+    }
+
+    #[test]
+    fn paths_scope_a_cop_as_rubocop_matches_them() {
+        let (_, config) = parse(
+            "AllCops:\n  Exclude:\n    - 'db/**/*'\n\
+             Style/HashSyntax:\n  Exclude:\n    - !ruby/regexp /tmp/\n\
+             Style/StringLiterals:\n  Include:\n  - '**/*.{rb,rake}'\n  Exclude: [lib/legacy/*.rb]\n",
+            "sub",
+        );
+        let inspects = |path| config.inspects("Style/StringLiterals", path);
+        assert!(inspects("sub/lib/a.rb"));
+        assert!(inspects("sub/a.rake"));
+        assert!(!inspects("sub/Gemfile"));
+        assert!(!inspects("sub/db/schema.rb"));
+        assert!(!inspects("sub/lib/legacy/old.rb"));
+        assert!(inspects("sub/lib/legacy/deeper/old.rb"));
+        // The regexp can't be read, so it may exclude anything.
+        assert!(!config.inspects("Style/HashSyntax", "sub/lib/a.rb"));
+        assert!(glob("a/**/*.rb", "a/b.rb"));
+        assert!(glob("a/[b-c]?.rb", "a/cd.rb"));
+        assert!(!glob("a/*", "a/b/c.rb"));
+        assert!(!glob("a", "a/b.rb"));
     }
 
     #[test]

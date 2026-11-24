@@ -202,7 +202,9 @@ fn file_norms(path: &Path, source: &[u8], threshold: f64) -> (FileRecord, Vec<No
     let relative: Vec<String> = (relative.components())
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect();
-    let configured = language.configured(&relative.join("/"), &Worktree(root));
+    let configured = language
+        .configured(&relative.join("/"), &Worktree(root))
+        .styles;
     let norms = language
         .norms()
         .iter()

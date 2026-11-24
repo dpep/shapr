@@ -14,7 +14,7 @@ use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
 /// Neighbor files a directory's evidence reads, at most.
@@ -212,7 +212,10 @@ fn file_styles(
                 .collect(),
         );
     }
-    let configured = snapshot
+    let super::Configured {
+        styles: configured,
+        off,
+    } = snapshot
         .map(|s| language.configured(path, s))
         .unwrap_or_default();
     let neighbors = snapshot.map(|s| directory.read(language, s, path));
@@ -232,6 +235,7 @@ fn file_styles(
         touched,
         neighbors,
         configured,
+        off,
         threshold,
         index: LineIndex::new(&trees.after.source),
     };
@@ -398,6 +402,8 @@ struct File<'a> {
     /// The directory's files, this one among them, with their observations.
     neighbors: Option<Rc<Neighbors>>,
     configured: BTreeMap<&'static str, String>,
+    /// Norms the linter config skips this file for.
+    off: BTreeSet<&'static str>,
     threshold: f64,
     index: LineIndex,
 }
@@ -426,7 +432,12 @@ impl File<'_> {
         if fresh.is_empty() {
             return None;
         }
-        let configured = self.configured.get(def.id).cloned();
+        // Where the linter wouldn't check the norm, its config says nothing
+        // and no edit is offered; the code's own norm still judges.
+        let unchecked =
+            |o: &Observation| self.off.contains(def.id) || self.after.disabled(def.id, o.line);
+        let configured =
+            (self.configured.get(def.id).cloned()).filter(|_| !fresh.iter().all(|o| unchecked(o)));
         let (mut evidence, surrounding) = self.surrounding(def, hunk);
         let renorm = match &surrounding {
             None => self.renorm(def, hunk, &fresh),
@@ -441,9 +452,13 @@ impl File<'_> {
         let found = surrounding.as_ref().or(renorm.as_ref().map(|(f, _, _)| f));
         let expected = found.map(|f| f.style.clone()).or(configured.clone());
         let deviating = |o: &&&Observation| expected.as_ref().is_some_and(|e| o.style != *e);
+        // Config alone never judges a line its linter wouldn't check.
+        let judged: Vec<&Observation> = (fresh.iter().copied())
+            .filter(|o| found.is_some() || !unchecked(o))
+            .collect();
         let direction = match &expected {
             None => Direction::Abstain,
-            Some(_) if fresh.iter().any(|o| deviating(&o)) => Direction::Diverging,
+            Some(_) if judged.iter().any(|o| deviating(&o)) => Direction::Diverging,
             Some(_) if renorm.is_some() || removed.iter().any(|o| deviating(&o)) => {
                 Direction::Converging
             }
@@ -455,7 +470,7 @@ impl File<'_> {
             Convergence::Normalizing
         });
         let deviations = match &expected {
-            Some(expected) => fresh
+            Some(expected) => judged
                 .iter()
                 .filter(|o| o.style != *expected)
                 .map(|o| Deviation {
@@ -464,6 +479,7 @@ impl File<'_> {
                     style: o.style.clone(),
                     expected: expected.clone(),
                     edit: (o.fix.iter())
+                        .filter(|_| !unchecked(o))
                         .find(|(style, _)| style == expected)
                         .filter(|(_, replaces)| self.inside(hunk, replaces))
                         .filter(|(_, replaces)| {
