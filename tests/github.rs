@@ -279,8 +279,8 @@ fn a_pull_request_matches_the_local_three_dot_range() {
         ]
     );
     assert_eq!(remote.status.code(), local.status.code());
-    assert_eq!(local_report["summary"]["source"], Value::Null);
-    let source = &remote_report["summary"]["source"];
+    assert_eq!(local_report["meta"]["source"], Value::Null);
+    let source = &remote_report["meta"]["source"];
     assert_eq!(
         *source,
         json!({"kind": "pr", "url": "https://github.com/acme/widgets/pull/12",
@@ -387,7 +387,7 @@ fn a_fork_head_is_fetched_from_the_pull_ref() {
     f.pull(13, &forked, "From a fork");
     let out = f.shapr(&["-j", "acme/widgets#13"]);
     let r = report(&out);
-    assert_eq!(r["summary"]["source"]["head"], forked);
+    assert_eq!(r["meta"]["source"]["head"], forked);
     assert_eq!(labels(&r).len(), 2, "{}", stderr(&out));
 }
 
@@ -403,7 +403,7 @@ fn a_commit_is_diffed_against_its_parent() {
         labels(&r),
         [("lib/greeter.rb".to_string(), "format_only".to_string())]
     );
-    let source = &r["summary"]["source"];
+    let source = &r["meta"]["source"];
     assert_eq!(source["kind"], "commit");
     assert_eq!(source["title"], "Reformat greet");
     assert_eq!(source["base"], f.fork_point);
@@ -425,8 +425,8 @@ fn a_commit_is_diffed_against_its_parent() {
         labels(&r),
         [("lib/count.rb".to_string(), "logic".to_string())]
     );
-    assert_eq!(r["summary"]["source"]["number"], 12);
-    assert_eq!(r["summary"]["source"]["url"], url);
+    assert_eq!(r["meta"]["source"]["number"], 12);
+    assert_eq!(r["meta"]["source"]["url"], url);
 }
 
 #[test]
@@ -443,8 +443,8 @@ fn a_merge_commit_is_diffed_against_its_first_parent_and_says_so() {
     let r = report(&out);
     let local = report(&f.shapr(&["-j", &format!("{merge}^1..{merge}")]));
     assert_eq!(labels(&r), labels(&local));
-    assert_eq!(r["summary"]["source"]["merge"], true);
-    assert_eq!(r["summary"]["source"]["base"], f.main);
+    assert_eq!(r["meta"]["source"]["merge"], true);
+    assert_eq!(r["meta"]["source"]["base"], f.main);
 
     let text = f.shapr(&[&format!("https://github.com/acme/widgets/commit/{merge}")]);
     let text = String::from_utf8(text.stdout).unwrap();
@@ -479,7 +479,7 @@ fn hash_number_uses_origin_or_the_only_github_remote() {
         ],
     );
     let r = report(&f.shapr(&["-j", "#12"]));
-    assert_eq!(r["summary"]["source"]["repo"], "acme/widgets");
+    assert_eq!(r["meta"]["source"]["repo"], "acme/widgets");
 
     // Without origin, two GitHub repositories is a question, not a guess.
     git(&f.work, &["remote", "remove", "origin"]);
@@ -503,7 +503,7 @@ fn hash_number_uses_origin_or_the_only_github_remote() {
 
     git(&f.work, &["remote", "remove", "fork"]);
     let r = report(&f.shapr(&["-j", "#12"]));
-    assert_eq!(r["summary"]["source"]["repo"], "acme/widgets");
+    assert_eq!(r["meta"]["source"]["repo"], "acme/widgets");
 }
 
 #[test]
@@ -514,7 +514,7 @@ fn a_local_revision_that_looks_like_github_stays_local() {
     assert!(out.status.success(), "{}", stderr(&out));
     let out = f.shapr(&["-j", "acme/widgets#12"]);
     let r = report(&out);
-    assert_eq!(r["summary"]["source"], Value::Null);
+    assert_eq!(r["meta"]["source"], Value::Null);
     assert!(f.server.requests().is_empty());
 }
 
@@ -665,7 +665,7 @@ fn source_fields_are_documented() {
     let f = Fixture::new();
     let r = report(&f.shapr(&["-j", "acme/widgets#12"]));
     let status = report(&f.shapr(&["-j", "--status"]));
-    let records = [&r["summary"]["source"], &status];
+    let records = [&r["meta"]["source"], &status];
     for record in records {
         for key in record.as_object().unwrap().keys() {
             assert!(

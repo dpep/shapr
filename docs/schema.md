@@ -1,24 +1,29 @@
 # Output schema
 
 shapr's JSON is a public contract: field names and the values of closed
-vocabularies (`record`, `kind`, `verdict`, `evidence.method`) change only with
-a bump of `schema` in the summary record. New fields may be added without a
-bump; consumers must ignore fields they don't know.
+vocabularies (`record`, `kind`, `verdict`, `evidence.method`)
+change only with a bump of `schema` in the `meta` record. New fields may be
+added without a bump; consumers must ignore fields they don't know. Fields
+marked *experimental* may change in any release before 1.0.
 
 Schema version: **1**.
 
 ## Formats
 
-- `-J` / `--ndjson` (the primary machine format): one compact object per
-  line. For each file, its `file` record, then its `hunk` records; last, one
-  `summary` record.
-- `-j` / `--json`: one pretty object, `{"files": [...], "hunks": [...],
-  "summary": {...}}`. Each element is the same object as its NDJSON line. A
-  single document can't stream, which is why both formats exist.
+- `-J` / `--ndjson`: one compact object per line, for line-oriented
+  consumers (`jq -c`, `grep`, a log pipeline). First one `meta` record; then
+  for each file, its `file` record and its `hunk` records; last, one
+  `summary` record. Classification looks at the whole change at once (a
+  move pairs hunks across files), so the lines arrive together at the end of
+  the run, not as each file is read.
+- `-j` / `--json`: one pretty object, `{"meta": {...}, "files": [...],
+  "hunks": [...], "summary": {...}}`. Each element is the same object as its
+  NDJSON line.
 - An operational or usage error under either format is one
-  `{"record": "error", "error": "<message>", "code": <exit code>}` object on
-  stdout; the same one-line message is on stderr too. Under `-q` stdout stays
-  empty, error records included: the exit code and stderr carry the error.
+  `{"record": "error", "schema": 1, "error": "<message>", "code": <exit code>}`
+  object on stdout; the same one-line message is on stderr too. Under `-q`
+  stdout stays empty, error records included: the exit code and stderr carry
+  the error.
 
 Every field below is always present. Fields that can be `null` say so.
 
@@ -232,6 +237,18 @@ are stated in Ruby's terms; for Rust:
   parameter types are allowed. Values are dropped when their block ends, so
   moving statements into a function can move a drop: risk `drop` (see
   [Extract and inline](#extract-and-inline)).
+
+## `meta` record
+
+What produced the output, and from what. The first record, so a consumer
+can check `schema` before reading the rest.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"meta"` | |
+| `schema` | int | This schema's version. |
+| `version` | string | shapr's version. |
+| `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local range or stdin. |
 
 ## `file` record
 
@@ -477,7 +494,6 @@ enough to match by chance, and when several units could be its other half.
 | field | type | meaning |
 |---|---|---|
 | `record` | `"summary"` | |
-| `schema` | int | This schema's version. |
 | `verdict` | string | `"structure"`: every part of every hunk is structure. `"behavior"`: no part is. `"mixed"`: both, in one hunk or across hunks. `"empty"`: no hunks. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
@@ -493,7 +509,6 @@ enough to match by chance, and when several units could be its other half.
 | `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings): the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts over all changed lines, generated hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
-| `source` | object or null | The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local range or stdin. |
 
 ## GitHub input
 
@@ -516,7 +531,7 @@ to its head, `git diff BASE...HEAD`, the diff GitHub's Files tab shows. A
 commit is diffed against its first parent; a root commit against the empty
 tree.
 
-`source`:
+`meta.source`:
 
 | field | type | meaning |
 |---|---|---|

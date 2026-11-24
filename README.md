@@ -30,7 +30,7 @@ A hunk's `kind` is a one-word rollup: `logic` unless every part is structure, el
 shapr main..HEAD             # a branch's commits
 shapr main                   # main against the working tree
 git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
-shapr -J main..HEAD          # NDJSON: a line per file and hunk, then a summary
+shapr -J main..HEAD          # NDJSON: a meta line, a line per file and hunk, then a summary
 shapr -j main..HEAD          # one pretty JSON object
 shapr -C app main..HEAD      # in another repository, like git -C
 shapr --message pr.md main   # also read claims from a PR description

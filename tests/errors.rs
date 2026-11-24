@@ -74,6 +74,7 @@ fn error(out: &Output, code: i32) -> String {
     let record: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(record["record"], "error");
     assert_eq!(record["code"], code);
+    assert_eq!(record["schema"], 1);
     let message = record["error"].as_str().unwrap().to_string();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(stderr.trim_end(), format!("shapr: {message}"));
@@ -113,7 +114,12 @@ fn a_rename_without_hunks_on_stdin_is_a_diff() {
 fn an_empty_range_is_an_empty_verdict() {
     let dir = repo(&[&[("a.rb", METHOD)]]);
     let out = shapr(dir.path(), &["-J", "main..main"], "");
-    let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let records: Vec<Value> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(records.len(), 2, "a meta and a summary record");
+    let summary = &records[1];
     assert_eq!(summary["verdict"], "empty");
     assert_eq!(out.status.code(), Some(0));
 }

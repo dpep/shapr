@@ -14,7 +14,7 @@ EXAMPLES
   shapr main..HEAD           classify a branch's commits
   shapr main                 main against the working tree
   git diff --staged | shapr  classify a diff from stdin (needs `git diff` index lines)
-  shapr -J main..HEAD        one JSON line per file and hunk, then a summary line
+  shapr -J main..HEAD        JSON lines: a meta record, each file and hunk, then a summary
   shapr -C app main..HEAD    run in another repository, like git -C
   shapr --message pr.md main..HEAD   also read claims from a PR description
   shapr acme/widgets#12      a GitHub pull request: the diff its Files tab shows
@@ -64,12 +64,12 @@ struct Cli {
     #[arg(short = 'C', value_name = "DIR")]
     dir: Option<PathBuf>,
 
-    /// Emit one pretty JSON object: files, hunks and summary.
+    /// Emit one pretty JSON object: meta, files, hunks and summary.
     #[arg(short = 'j', long)]
     json: bool,
 
-    /// Emit newline-delimited JSON: each file's record then its hunks, then
-    /// one summary line.
+    /// Emit newline-delimited JSON: a meta line, each file's record then its
+    /// hunks, then one summary line.
     #[arg(short = 'J', long, conflicts_with = "json")]
     ndjson: bool,
 
@@ -227,8 +227,12 @@ pub fn run() -> ExitCode {
     }
     let change = change::assemble(files, &git);
     let labels = classify::classify(&change);
-    let mut report = report::build(&change, &labels, Claims::read(&messages));
-    report.summary.source = source;
+    let report = report::build(
+        &change,
+        &labels,
+        Claims::read(&messages),
+        report::Meta::new(source),
+    );
     if !cli.quiet {
         let mut stdout = std::io::stdout().lock();
         let written = report::render(&mut stdout, format, &report).and_then(|()| stdout.flush());
@@ -372,7 +376,12 @@ fn fail(format: Format, message: &str, code: u8) -> ExitCode {
 }
 
 fn emit_error(format: Format, message: &str, code: u8) {
-    let error = serde_json::json!({ "record": "error", "error": message, "code": code });
+    let error = serde_json::json!({
+        "record": "error",
+        "schema": report::SCHEMA,
+        "error": message,
+        "code": code,
+    });
     let rendered = match format {
         Format::Text => return,
         Format::Json => serde_json::to_string_pretty(&error),

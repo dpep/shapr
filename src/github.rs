@@ -229,7 +229,7 @@ fn github_remote(url: &str) -> Option<Repo> {
     Repo::from_path(path.strip_suffix(".git").unwrap_or(path))
 }
 
-/// What a remote run analyzed, as `summary.source` reports it.
+/// What a remote run analyzed, as `meta.source` reports it.
 #[derive(Clone, Debug, Serialize)]
 pub struct Source {
     pub kind: &'static str,

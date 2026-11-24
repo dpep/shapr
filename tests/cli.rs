@@ -336,9 +336,29 @@ fn a_piped_diff_matches_the_range() {
         .iter()
         .map(|l| l["record"].as_str().unwrap())
         .collect();
-    assert_eq!(records, ["file", "hunk", "summary"]);
-    assert_eq!(lines[1]["kind"], "format_only");
+    assert_eq!(records, ["meta", "file", "hunk", "summary"]);
+    assert_eq!(lines[2]["kind"], "format_only");
     assert_eq!(piped.status.code(), Some(0));
+}
+
+#[test]
+fn a_meta_record_leads_with_the_schema_and_tool_versions() {
+    let dir = repo(&[
+        &[("a.rb", METHOD)],
+        &[("a.rb", &METHOD.replace("hi", "yo"))],
+    ]);
+    let out = shapr(dir.path(), &["-J", "HEAD~1..HEAD"], None);
+    let first = out.stdout.split(|&b| b == b'\n').next().unwrap();
+    let meta: Value = serde_json::from_slice(first).unwrap();
+    assert_eq!(meta["record"], "meta");
+    assert_eq!(meta["schema"], 1);
+    assert_eq!(meta["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(meta["source"], Value::Null);
+
+    let out = shapr(dir.path(), &["-j", "HEAD~1..HEAD"], None);
+    let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["meta"], meta);
+    assert_eq!(report["summary"].get("schema"), None);
 }
 
 #[test]
@@ -395,6 +415,7 @@ fn errors_have_their_own_exit_codes() {
         (error["record"].as_str(), error["code"].as_u64()),
         (Some("error"), Some(2))
     );
+    assert_eq!(error["schema"], 1);
 
     let usage = shapr(dir.path(), &["-J", "--bogus"], None);
     assert_eq!(usage.status.code(), Some(64));
@@ -432,6 +453,7 @@ fn every_output_field_is_documented() {
     let after = METHOD.replace("hi", "hello");
     let (report, _) = classify(&[("a.rb", METHOD)], &[("a.rb", &after)]);
     let records = [
+        &report["meta"],
         &report["files"][0],
         &report["hunks"][0],
         &report["hunks"][0]["parts"][0],

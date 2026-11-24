@@ -17,9 +17,31 @@ pub const SCHEMA: u32 = 1;
 
 #[derive(Serialize)]
 pub struct Report<'a> {
+    pub meta: Meta,
     pub files: Vec<FileRecord<'a>>,
     pub hunks: Vec<HunkRecord<'a>>,
     pub summary: Summary,
+}
+
+/// What produced the report and from what: the first NDJSON line.
+#[derive(Serialize)]
+pub struct Meta {
+    record: &'static str,
+    schema: u32,
+    version: &'static str,
+    /// The GitHub pull request or commit analyzed; `None` for a local run.
+    pub source: Option<crate::github::Source>,
+}
+
+impl Meta {
+    pub fn new(source: Option<crate::github::Source>) -> Meta {
+        Meta {
+            record: "meta",
+            schema: SCHEMA,
+            version: env!("CARGO_PKG_VERSION"),
+            source,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default, Serialize)]
@@ -135,7 +157,6 @@ impl Runs {
 #[derive(Serialize)]
 pub struct Summary {
     record: &'static str,
-    schema: u32,
     pub verdict: Verdict,
     hunks: usize,
     unparsed_hunks: usize,
@@ -152,11 +173,9 @@ pub struct Summary {
     behavior_lines: usize,
     structure_share: f64,
     claims: Claims,
-    /// The GitHub pull request or commit analyzed; `None` for a local run.
-    pub source: Option<crate::github::Source>,
 }
 
-pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<'a> {
+pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta) -> Report<'a> {
     let mut files = Vec::new();
     let mut hunks = Vec::new();
     for (file, labels) in change.files.iter().zip(labels) {
@@ -202,6 +221,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims) -> Report<
     }
     let summary = summarize(&files, &hunks, claims);
     Report {
+        meta,
         files,
         hunks,
         summary,
@@ -342,7 +362,6 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
     });
     Summary {
         record: "summary",
-        schema: SCHEMA,
         verdict,
         hunks: hunks.len(),
         unparsed_hunks: hunks.iter().filter(|h| !h.parsed).count(),
@@ -367,7 +386,6 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             round2(structure_lines as f64 / total as f64)
         },
         claims,
-        source: None,
     }
 }
 
@@ -402,6 +420,7 @@ pub fn render(out: &mut impl Write, format: Format, report: &Report) -> io::Resu
             writeln!(out)
         }
         Format::Ndjson => {
+            line(out, &report.meta)?;
             let mut hunks = report.hunks.iter().peekable();
             for file in &report.files {
                 line(out, file)?;
@@ -459,7 +478,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .filter(|(_, n)| **n > 0)
         .map(|(k, n)| format!("{k} {n}"))
         .collect();
-    if let Some(source) = &s.source {
+    if let Some(source) = &report.meta.source {
         write!(out, "{}", source.name())?;
         if source.merge {
             write!(out, " (a merge, against its first parent)")?;
