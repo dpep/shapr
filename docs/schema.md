@@ -343,7 +343,11 @@ A linguist attribute wins over the name either way: `-linguist-generated`
 (or `=false`) unmarks a lockfile, and `-linguist-documentation` a `README`.
 Attributes are read as `git check-attr` sees them, from the working tree's
 `.gitattributes` (for a GitHub run, the head commit's), not the diffed
-revisions'.
+revisions'. A change that edits a `.gitattributes` can't hide itself: a file
+it doesn't add whose category counts toward the verdict under the
+attributes it starts from (`code`, `test`, `config`, `manifest`) keeps that
+category, so marking a file `linguist-generated` in the change that edits it
+leaves the edit `code`.
 
 Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).

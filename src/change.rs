@@ -48,10 +48,37 @@ impl FileChange {
     }
 }
 
-/// Reads and parses every file the diff names.
-pub fn assemble(diffs: Vec<FileDiff>, git: &Git) -> Change {
+/// Reads and parses every file the diff names. BEFORE is the revision the
+/// change starts from, when known.
+pub fn assemble(diffs: Vec<FileDiff>, git: &Git, before: Option<&str>) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
-    let attributes = git.linguist(&paths);
+    let mut attributes = git.linguist(&paths, None);
+    // An attribute the change itself sets mustn't hide the change: where the
+    // change edits a .gitattributes, a file it doesn't add keeps whichever
+    // side's category is reviewed.
+    let edits_attributes = diffs
+        .iter()
+        .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
+        .flatten()
+        .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
+    if edits_attributes {
+        let old: Vec<&str> = diffs.iter().filter_map(|d| d.old_path.as_deref()).collect();
+        let was = before
+            .map(|rev| git.linguist(&old, Some(rev)))
+            .unwrap_or_default();
+        for diff in diffs.iter().filter(|d| !d.binary) {
+            let Some(old) = diff.old_path.as_deref() else {
+                continue;
+            };
+            let after = attributes.get(diff.path()).copied().unwrap_or_default();
+            let before = was.get(old).copied().unwrap_or_default();
+            if Category::of(old, false, before).counted()
+                && !Category::of(diff.path(), false, after).counted()
+            {
+                attributes.insert(diff.path().to_string(), before);
+            }
+        }
+    }
     let mut blobs = Blobs::new(git);
     let mut files = diffs
         .into_iter()
@@ -174,6 +201,14 @@ impl Category {
         Category::Binary,
         Category::Unknown,
     ];
+
+    /// Its hunks count toward the verdict.
+    pub fn counted(self) -> bool {
+        matches!(
+            self,
+            Category::Code | Category::Test | Category::Config | Category::Manifest
+        )
+    }
 
     pub fn as_str(self) -> &'static str {
         match self {

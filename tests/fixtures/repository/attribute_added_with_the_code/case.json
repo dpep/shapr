@@ -1,0 +1,7 @@
+{
+  "description": "a change that marks a file linguist-generated and edits it in the same change still shows the edit as code",
+  "expect": {
+    "hunks": {"$some": {"file": "gen.rb", "category": "code", "verdict": "behavior"}},
+    "summary": {"verdict": "behavior"}
+  }
+}

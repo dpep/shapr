@@ -235,6 +235,26 @@ impl Git {
         )
     }
 
+    /// The revision a change starts from: A of `A..B` (HEAD when A is
+    /// empty), the merge base of `A...B`, R of a single revision or `R^!`;
+    /// `None` for a diff on stdin.
+    pub fn before_revision(&self, range: Option<&str>) -> Option<String> {
+        let range = range?;
+        if let Some(rev) = parent_range(range) {
+            return Some(format!("{rev}^"));
+        }
+        if let Some((from, to)) = range.split_once("...") {
+            let side = |r: &str| if r.is_empty() { "HEAD" } else { r }.to_string();
+            let out = run(self.command().args(["merge-base", &side(from), &side(to)])).ok()?;
+            return Some(String::from_utf8_lossy(&out).trim().to_string());
+        }
+        Some(match range.split_once("..") {
+            Some(("", _)) => "HEAD".to_string(),
+            Some((from, _)) => from.to_string(),
+            None => range.to_string(),
+        })
+    }
+
     /// PATH's contents at REV, or in the index when REV is `""`; `None`
     /// when it has no such file.
     pub fn show(&self, rev: &str, path: &str) -> Option<Vec<u8>> {
@@ -461,31 +481,35 @@ impl Git {
     }
 
     /// Each path's linguist attributes, where .gitattributes sets or unsets
-    /// them. Empty outside a repository.
-    pub fn linguist(&self, paths: &[&str]) -> HashMap<String, Linguist> {
+    /// them: as of revision AT, else the working tree's (a bare repository's
+    /// head commit's). Empty outside a repository.
+    pub fn linguist(&self, paths: &[&str], at: Option<&str>) -> HashMap<String, Linguist> {
         let mut input = Vec::new();
         for path in paths {
             input.extend_from_slice(path.as_bytes());
             input.push(0);
         }
         let mut cmd = self.command();
-        if let Some(bare) = &self.bare {
-            cmd.args(["check-attr", "--source", &bare.attributes_from]);
-        } else {
+        if self.bare.is_none() {
             let Some(toplevel) = self.toplevel() else {
                 return HashMap::new();
             };
             // check-attr reads paths against the cwd; the diff's are from the top.
-            cmd.current_dir(toplevel).arg("check-attr");
+            cmd.current_dir(toplevel);
+        }
+        cmd.arg("check-attr");
+        let source = at.or(self.bare.as_ref().map(|b| b.attributes_from.as_str()));
+        if let Some(source) = source {
+            cmd.args(["--source", source]);
         }
         cmd.args(["-z", "--stdin"]).args(LINGUIST);
         let out = match run_with_input(&mut cmd, &input) {
             Ok(out) => out,
             Err(error) => {
                 // `check-attr --source` needs git 2.40.
-                if self.bare.is_some() {
+                if source.is_some() {
                     crate::verbose!(
-                        "can't read .gitattributes from the head commit ({error:#}): categories by name only"
+                        "can't read .gitattributes from a commit ({error:#}): categories by name only"
                     );
                 }
                 return HashMap::new();

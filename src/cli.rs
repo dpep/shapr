@@ -249,6 +249,11 @@ pub fn run() -> ExitCode {
         Ok(messages) => messages,
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
+    // The range git diffed: a GitHub change's own, in its clone.
+    let range = remote
+        .as_ref()
+        .map(|r| r.range.clone())
+        .or(cli.range.clone());
     if let Some(remote) = remote {
         git = remote.git;
     }
@@ -264,7 +269,8 @@ pub fn run() -> ExitCode {
             "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
         );
     }
-    let change = change::assemble(files, &git);
+    let before = git.before_revision(range.as_deref());
+    let change = change::assemble(files, &git, before.as_deref());
     // The repository as of the change's after side: config and neighbors
     // for norms, uses and library layout for proof.
     let revision = match &state {
