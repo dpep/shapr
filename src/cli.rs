@@ -447,12 +447,9 @@ fn dispatch() -> ExitCode {
         _ => &union,
     };
     let labels = classify::classify(&change, outside);
-    let mut report = report::build(
-        &change,
-        &labels,
-        claims,
-        report::Meta::new("classify", source).input(form, paths),
-    );
+    let mut meta = report::Meta::new("classify", source).input(form, paths);
+    meta.subject = subject(&input, cli.merge_base.as_deref(), &git);
+    let mut report = report::build(&change, &labels, claims, meta);
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
     for ((hunk, style), label) in report
@@ -544,6 +541,46 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
         Some(Shape::Staged(rev)) => (report::Input::Staged, rev),
     };
     Ok(Input::Local { form, range, paths })
+}
+
+/// What INPUT compares, in the words of the text summary; `None` for a
+/// GitHub change, which names its source.
+fn subject(input: &Input, base: Option<&str>, git: &git::Git) -> Option<String> {
+    let Input::Local { form, range, paths } = input else {
+        return matches!(input, Input::Stdin).then(|| "stdin".to_string());
+    };
+    // git's notation with an empty side read as HEAD: `main...` is `main...HEAD`.
+    let sides = |dots: &str| {
+        let (from, to) = range.split_once(dots)?;
+        let side = |s: &str| if s.is_empty() { "HEAD" } else { s }.to_string();
+        Some(format!("{}{dots}{}", side(from), side(to)))
+    };
+    let compared = match form {
+        report::Input::Commit => {
+            let rev = range
+                .strip_suffix("^!")
+                .or_else(|| range.rsplit_once("..").map(|(_, rev)| rev))
+                .unwrap_or(range);
+            format!(
+                "commit {}",
+                git.short(rev).unwrap_or_else(|| rev.to_string())
+            )
+        }
+        report::Input::Range | report::Input::MergeBaseRange => sides("...")
+            .or_else(|| sides(".."))
+            .unwrap_or_else(|| range.clone()),
+        report::Input::MergeBaseWorktree => format!("{}...working tree", base.unwrap_or(range)),
+        report::Input::Worktree => "uncommitted changes".to_string(),
+        report::Input::Staged if range == "HEAD" => "staged changes".to_string(),
+        report::Input::Staged => format!("staged changes against {range}"),
+        report::Input::Stdin | report::Input::GithubPr | report::Input::GithubCommit => {
+            return None;
+        }
+    };
+    Some(match paths.as_slice() {
+        [] => compared,
+        paths => format!("{compared} in {}", paths.join(" ")),
+    })
 }
 
 /// The form revisions take, before git is asked anything.

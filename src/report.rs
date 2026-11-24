@@ -108,6 +108,10 @@ pub struct Meta {
     input: Option<Input>,
     /// Whether paths limited the diff; `None` for `norms`.
     paths: Option<bool>,
+    /// What was compared, for the text summary (`main...HEAD`,
+    /// `uncommitted changes in lib`); a GitHub change names its `source`.
+    #[serde(skip)]
+    pub subject: Option<String>,
 }
 
 impl Meta {
@@ -120,6 +124,7 @@ impl Meta {
             source,
             input: None,
             paths: None,
+            subject: None,
         }
     }
 
@@ -693,6 +698,8 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             write!(out, " (a merge, against its first parent)")?;
         }
         write!(out, ": ")?;
+    } else if let Some(subject) = &report.meta.subject {
+        write!(out, "{subject}: ")?;
     }
     let outside: Vec<String> = [Verdict::None, Verdict::Unknown]
         .iter()

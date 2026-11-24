@@ -84,12 +84,12 @@ GitHub input is experimental: its forms, `meta.source` and the cache may change 
 
 With no arguments, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
 
-Text output, for a commit that reformats one method's signature and changes another's body (mixed):
+Text output, for a commit that reformats one method's signature and changes another's body (mixed). The summary line starts with what was compared (`commit 1a2b3c4`, `main...HEAD`, `uncommitted changes in lib/cart.rb`, `staged changes`, `stdin`), so an empty result names where shapr looked:
 
 ```
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
 lib/greeter.rb:15  logic             1.00  code differs beyond whitespace and comments
-mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
+commit 1a2b3c4: mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
 ```
 
 Hunks in files shapr can't parse are `logic` with confidence 0; in a file of unknown category they are outside the verdict (`unknown`).

@@ -122,6 +122,12 @@ impl Git {
         })
     }
 
+    /// REV's abbreviated commit id.
+    pub fn short(&self, rev: &str) -> Option<String> {
+        let out = run(self.command().args(["rev-parse", "--short", rev, "--"])).ok()?;
+        Some(String::from_utf8_lossy(&out).trim().to_string())
+    }
+
     /// The best common ancestor of A and B.
     pub fn merge_base(&self, a: &str, b: &str) -> Result<String> {
         let out = self
