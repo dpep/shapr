@@ -275,14 +275,6 @@ impl Verdict {
             Verdict::Empty => "empty",
         }
     }
-
-    pub fn exit_code(self) -> u8 {
-        match self {
-            Verdict::Structure | Verdict::Empty => 0,
-            Verdict::Behavior => 1,
-            Verdict::Mixed => 3,
-        }
-    }
 }
 
 /// One label per hunk: `labels[file][hunk]`, parallel to `Change::files`.

@@ -15,7 +15,6 @@ EXAMPLES
   shapr main                 main against the working tree
   git diff --staged | shapr  classify a diff from stdin (needs `git diff` index lines)
   shapr -J main..HEAD        one JSON line per file and hunk, then a summary line
-  shapr -q main..HEAD        no output; the exit code is the verdict
   shapr -C app main..HEAD    run in another repository, like git -C
   shapr --message pr.md main..HEAD   also read claims from a PR description
   shapr acme/widgets#12      a GitHub pull request: the diff its Files tab shows
@@ -37,9 +36,7 @@ GITHUB
   credentials into a cache of partial clones (--cache-dir), never into this repository.
 
 EXIT CODES
-  0   structure: every hunk changes structure, not behavior (or there are no hunks)
-  1   behavior: every hunk changes behavior
-  3   mixed: both
+  0   success, whatever the verdict: the verdict is in the output
   2   error: git failed (not a repository, a bad revision), stdin is not a diff, or GitHub
       failed (unreachable, not found, rate limited)
   64  usage: the command line is wrong, or there is no input (an empty stdin)
@@ -80,8 +77,8 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Write nothing to stdout, not even a JSON error record; the exit code
-    /// still carries the verdict, and errors still go to stderr.
+    /// Write nothing to stdout, not even a JSON error record; errors still go
+    /// to stderr and set the exit code.
     #[arg(short, long)]
     quiet: bool,
 
@@ -241,7 +238,7 @@ pub fn run() -> ExitCode {
             return ExitCode::from(ERROR);
         }
     }
-    ExitCode::from(report.summary.verdict.exit_code())
+    ExitCode::SUCCESS
 }
 
 /// The range's commit messages, then the description: `--message`, else a
@@ -450,13 +447,7 @@ mod tests {
                 );
             }
         }
-        for code in [
-            "0   structure",
-            "1   behavior",
-            "3   mixed",
-            "2   error",
-            "64  usage",
-        ] {
+        for code in ["0   success", "2   error", "64  usage"] {
             assert!(help.contains(code), "{code}");
         }
     }

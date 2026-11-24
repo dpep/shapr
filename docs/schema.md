@@ -478,7 +478,7 @@ enough to match by chance, and when several units could be its other half.
 |---|---|---|
 | `record` | `"summary"` | |
 | `schema` | int | This schema's version. |
-| `verdict` | string | `"structure"`: every part of every hunk is structure. `"behavior"`: no part is. `"mixed"`: both, in one hunk or across hunks. `"empty"`: no hunks. The exit code carries it too. |
+| `verdict` | string | `"structure"`: every part of every hunk is structure. `"behavior"`: no part is. `"mixed"`: both, in one hunk or across hunks. `"empty"`: no hunks. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
 | `generated_hunks` | int | Hunks with `generated: true`. They count in `hunks`, `kinds` and `verdict`, and nowhere below. |
@@ -561,15 +561,16 @@ directory.
 
 ## Exit codes
 
+The verdict is in the output, never in the exit code: a run that classified
+the change exits 0, whatever the verdict.
+
 | code | meaning |
 |---|---|
-| 0 | `structure` or `empty` |
-| 1 | `behavior` |
-| 3 | `mixed` |
+| 0 | success |
 | 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
 | 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
-An empty diff from a range (`shapr main..main`) is the verdict `empty`, exit 0.
+An empty diff from a range (`shapr main..main`) is the verdict `empty`.
 An empty stdin is not: it is what a failed `git diff` upstream of the pipe
 leaves, so it exits 64. A diff whose only change is a rename or mode change
 has file headers and no hunks, and is `empty` too.

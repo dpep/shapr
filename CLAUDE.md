@@ -38,7 +38,8 @@ never edit an old one, mark it Superseded.
   do. Every field is documented in docs/schema.md
   (`every_output_field_is_documented` enforces it).
 - **stdout is data.** Logs go to stderr (`verbose!`), errors are a JSON
-  object under `-j`/`-J`, the exit code carries the verdict.
+  object under `-j`/`-J`. The verdict is in the output; the exit code is 0
+  on success, 2 on an operational error, 64 on a usage error.
 
 ## Layout
 

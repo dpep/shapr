@@ -32,7 +32,6 @@ shapr main                   # main against the working tree
 git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
 shapr -J main..HEAD          # NDJSON: a line per file and hunk, then a summary
 shapr -j main..HEAD          # one pretty JSON object
-shapr -q main..HEAD          # no output; the exit code is the verdict
 shapr -C app main..HEAD      # in another repository, like git -C
 shapr --message pr.md main   # also read claims from a PR description
 shapr https://github.com/acme/widgets/pull/12   # a GitHub pull request, as its Files tab shows it
@@ -46,7 +45,7 @@ A GitHub pull request or commit needs no checkout: shapr reads its metadata from
 
 With no range, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
 
-Text output, for a commit that reformats one method's signature and changes another's body (exit 3, mixed):
+Text output, for a commit that reformats one method's signature and changes another's body (mixed):
 
 ```
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
@@ -67,11 +66,11 @@ Hunks in files shapr can't parse are `logic` with confidence 0. To leave them ou
 
 ## Exit codes
 
+The verdict is in the output; the exit code says only whether shapr ran.
+
 | code | meaning |
 |---|---|
-| 0 | structure (or no hunks) |
-| 1 | behavior |
-| 3 | mixed |
+| 0 | success, whatever the verdict |
 | 2 | error (not a repository, a bad revision, stdin that isn't a diff) |
 | 64 | usage (including no input) |
 

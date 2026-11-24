@@ -356,7 +356,7 @@ fn the_text_summary_names_the_pull_request() {
         summary.starts_with("acme/widgets#12: mixed: 2 hunks"),
         "{summary}"
     );
-    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(out.status.code(), Some(0));
 }
 
 #[test]
@@ -511,11 +511,7 @@ fn a_local_revision_that_looks_like_github_stays_local() {
     let f = Fixture::new();
     git(&f.work, &["branch", "acme/widgets#12", "feature"]);
     let out = f.shapr(&["-j", "main..acme/widgets#12"]);
-    assert!(
-        out.status.success() || out.status.code() == Some(3),
-        "{}",
-        stderr(&out)
-    );
+    assert!(out.status.success(), "{}", stderr(&out));
     let out = f.shapr(&["-j", "acme/widgets#12"]);
     let r = report(&out);
     assert_eq!(r["summary"]["source"], Value::Null);
@@ -553,7 +549,7 @@ fn the_token_is_sent_but_never_printed() {
         json!({"message": "Bad credentials"}),
     );
     let rejected = f.shapr_in(&f.work, &["-v", "acme/widgets#98"], &[("GH_TOKEN", token)]);
-    assert!(ok.status.success() || ok.status.code() == Some(3));
+    assert!(ok.status.success());
     assert_eq!(missing.status.code(), Some(2));
     assert!(
         stderr(&missing).contains("not found on GitHub\n"),

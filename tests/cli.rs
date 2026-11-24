@@ -141,7 +141,7 @@ fn a_magic_comment_is_code() {
     let (report, code) = classify(&[("a.rb", &before)], &[("a.rb", &after)]);
     assert_eq!(kinds(&report), ["logic"]);
     assert_eq!(report["hunks"][0]["code_added"], 1);
-    assert_eq!(code, 1);
+    assert_eq!(code, 0);
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn changing_code_is_logic_with_its_evidence() {
     assert!(lead(hunk)["evidence"]["similarity"].as_f64().unwrap() < 1.0);
     assert_eq!(report["summary"]["verdict"], "behavior");
     assert_eq!(report["summary"]["behavior_lines"], 2);
-    assert_eq!(code, 1);
+    assert_eq!(code, 0);
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn format_and_logic_in_one_change_is_mixed() {
     assert_eq!(summary["review_lines"], 2);
     assert_eq!(summary["structure_share"], 0.5);
     assert_eq!(report["files"][0]["lines_before"], 16);
-    assert_eq!(code, 3);
+    assert_eq!(code, 0);
 }
 
 fn review_lines(report: &Value) -> Vec<u64> {
@@ -256,7 +256,7 @@ fn a_lockfile_drives_the_verdict_but_not_the_size() {
     );
     assert_eq!(summary["behavior_lines"], 0);
     assert_eq!(summary["structure_share"], 1.0);
-    assert_eq!(code, 3);
+    assert_eq!(code, 0);
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn other_languages_are_unparsed_logic() {
     assert_eq!(lead(hunk)["confidence"], 0.0);
     assert_eq!(hunk["language"], Value::Null);
     assert_eq!(lead(hunk)["evidence"]["method"], "none");
-    assert_eq!(code, 1);
+    assert_eq!(code, 0);
 }
 
 #[test]

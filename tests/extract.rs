@@ -201,9 +201,9 @@ fn an_extract_mixed_with_a_logic_edit_in_the_same_method_is_logic() {
     let before = invoice(TOTAL, None);
     let edited = TOTAL_EXTRACTED.replace("puts rounded", "puts rounded.to_s");
     let after = invoice(&edited, Some(APPLY_TAX));
-    let (report, code) = classify(&before, &after);
+    let (report, _) = classify(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    assert_eq!(code, 1);
+    assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
 #[test]
@@ -222,9 +222,9 @@ def scale(a, b)
   a * 2 + b
 end
 ";
-    let (report, code) = classify(before, after);
+    let (report, _) = classify(before, after);
     assert_near(&report, "extract", "wiring");
-    assert_eq!(code, 1);
+    assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
 #[test]
@@ -347,9 +347,9 @@ def report(items)
   puts total.inspect
 end
 ";
-    let (report, code) = classify(before, after);
+    let (report, _) = classify(before, after);
     assert_near(&report, "extract", "wiring");
-    assert_eq!(code, 1);
+    assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
 #[test]
@@ -372,9 +372,9 @@ end
   end
 end
 ";
-    let (report, code) = classify(before, after);
+    let (report, _) = classify(before, after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
-    assert_eq!(code, 1);
+    assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn an_extract_beside_an_edit_to_another_method_is_mixed() {
     let before = invoice(TOTAL, None);
     let after =
         invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("filler2\n    2\n", "filler2\n    20\n");
-    let (report, code) = classify(&before, &after);
+    let (report, _) = classify(&before, &after);
     assert_eq!(
         kinds(&report),
         ["extract", "logic", "extract"],
@@ -478,7 +478,7 @@ fn an_extract_beside_an_edit_to_another_method_is_mixed() {
         lead(&hunks(&report)[0])["detail"]["hunks"],
         serde_json::json!([0, 2])
     );
-    assert_eq!(code, 3);
+    assert_eq!(report["summary"]["verdict"], "mixed");
 }
 
 #[test]
@@ -493,7 +493,7 @@ fn an_extract_sharing_a_hunk_with_another_edit_is_logic() {
 fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_leaves_the_edit_as_logic() {
     let before = invoice(TOTAL, None);
     let after = invoice(TOTAL_EXTRACTED, Some(APPLY_TAX)).replace("    4\n", "    40\n");
-    let (report, code) = classify(&before, &after);
+    let (report, _) = classify(&before, &after);
     assert_eq!(kinds(&report), ["extract", "logic"], "{report:#}");
     let parts: Vec<&str> = hunks(&report)[1]["parts"]
         .as_array()
@@ -512,7 +512,7 @@ fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_leaves_the_edit_as_logic(
     let residual = &hunks(&report)[1]["parts"][1]["lines"];
     assert_eq!(residual["before"][0]["start"], line(&before));
     assert_eq!(residual["after"][0]["start"], line(&after));
-    assert_eq!(code, 3);
+    assert_eq!(report["summary"]["verdict"], "mixed");
 }
 
 #[test]
