@@ -1,0 +1,14 @@
+{
+  "description": "a comment added far above a __LINE__ read is behavior, so a reviewer reads something: its lines and the read",
+  "open": true,
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "review_lines": {
+          "$not": 0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "a comment added far above a __LINE__ read: the refused comment_only leaves logic as sure as the comparison that proved it",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic",
+            "confidence": 1,
+            "detail": {
+              "near": "comment_only"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

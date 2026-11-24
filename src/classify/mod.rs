@@ -382,6 +382,12 @@ fn shifted_reads(change: &Change, labels: &mut Labels) {
             label.parts = kept;
             if let Some(kind) = refused.iter().map(|p| p.kind).max() {
                 let residual = &mut label.residual;
+                // As sure as the comparison that proved the refused parts.
+                let sure = refused
+                    .iter()
+                    .map(|p| p.confidence.get())
+                    .fold(1.0, f64::min);
+                residual.confidence = Confidence::new(sure);
                 residual.reason = format!(
                     "{}, but it moves line {read}, which reads its own position",
                     kind.as_str()
