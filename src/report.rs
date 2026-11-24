@@ -285,7 +285,9 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
         {
             let mut lines = count_lines(file, hunk);
             let mut parts = part_records(file, label);
-            if !reviewed(file.category) {
+            let verdict = hunk_verdict(file, whitespace_only, label);
+            // A `none` hunk changed nothing a reviewer reads.
+            if !reviewed(file.category) || verdict == Verdict::None {
                 parts.iter_mut().for_each(|p| p.review_lines = 0);
             }
             lines.review_lines = parts.iter().map(|p| p.review_lines).sum();
@@ -310,7 +312,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 before: hunk.before,
                 after: hunk.after,
                 kind: label.kind(),
-                verdict: hunk_verdict(file, whitespace_only, label),
+                verdict,
                 lines,
                 parts,
                 style: None,

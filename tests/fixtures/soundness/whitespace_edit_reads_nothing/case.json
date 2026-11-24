@@ -1,0 +1,11 @@
+{
+  "description": "a trailing-whitespace edit in a file shapr doesn't parse is `none`, with no line to read",
+  "expect": {
+    "files": [{"review_lines": 0}, {"review_lines": 0}],
+    "hunks": [
+      {"verdict": "none", "review_lines": 0, "parts": {"$every": {"review_lines": 0}}},
+      {"verdict": "none", "review_lines": 0, "parts": {"$every": {"review_lines": 0}}}
+    ],
+    "summary": {"verdict": "none", "review_lines": 0}
+  }
+}

@@ -437,7 +437,7 @@ can check `schema` before reading the rest.
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `docs`, `generated`, `vendored` or `binary` file. |
+| `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `docs`, `generated`, `vendored` or `binary` file, and in a hunk whose `verdict` is `none`. |
 | `parts` | array | The hunk's parts in the [Parts](#parts) table's order, the residual (`logic`) last. Below. |
 | `style` | object or null | *Experimental.* How the hunk's new code sits against the style norms of the code around it. `null` for a file in a language with no norms (Ruby has them). See [Style](#style). |
 
@@ -454,7 +454,7 @@ Each part:
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
-| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `rename` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. |
+| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `rename` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
 
 ## Evidence
 
