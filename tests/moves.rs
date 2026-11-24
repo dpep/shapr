@@ -1,74 +1,9 @@
 //! End to end: move detection, alone and beside an edit or a new context.
 
 use serde_json::Value;
-use std::path::Path;
-use std::process::Command;
 
-/// The part a hunk's kind stands for: the last of that kind (the residual,
-/// for `logic`), else the first that isn't structure.
-fn lead(hunk: &Value) -> &Value {
-    let parts = hunk["parts"].as_array().unwrap();
-    parts
-        .iter()
-        .rev()
-        .find(|p| p["kind"] == hunk["kind"])
-        .or_else(|| parts.iter().find(|p| p["structure"] == false))
-        .unwrap_or_else(|| panic!("no parts: {hunk:#}"))
-}
-
-/// git and shapr with the caller's repository context removed, so a run
-/// under `git rebase --exec` can't write into the real repository.
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// `shapr -j` on a commit taking `before` to `after`.
-fn classify(before: &[(&str, &str)], after: &[(&str, &str)]) -> Value {
-    let dir = tempfile::tempdir().unwrap();
-    git(dir.path(), &["init", "-q", "-b", "main"]);
-    git(dir.path(), &["config", "user.email", "test@example.com"]);
-    git(dir.path(), &["config", "user.name", "Test"]);
-    for state in [before, after] {
-        for (path, content) in state {
-            std::fs::write(dir.path().join(path), content).unwrap();
-        }
-        git(dir.path(), &["add", "-A"]);
-        git(dir.path(), &["commit", "-q", "-m", "state"]);
-    }
-    let out = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
-        .args(["-j", "HEAD~1..HEAD"])
-        .output()
-        .unwrap();
-    serde_json::from_slice(&out.stdout)
-        .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stderr)))
-}
-
-fn hunks(report: &Value) -> &Vec<Value> {
-    report["hunks"].as_array().unwrap()
-}
-
-fn kinds(report: &Value) -> Vec<&str> {
-    hunks(report)
-        .iter()
-        .map(|h| h["kind"].as_str().unwrap())
-        .collect()
-}
+mod common;
+use common::*;
 
 /// A method with a few statements, so it is well above the size floor.
 fn method(name: &str, value: &str) -> String {
@@ -97,23 +32,13 @@ fn assert_cross_referenced(report: &Value) {
     }
 }
 
-/// The hunk's `move` part.
-fn move_part(hunk: &Value) -> &Value {
-    hunk["parts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|p| p["kind"] == "move")
-        .unwrap_or_else(|| panic!("no move part: {hunk:#}"))
-}
-
 /// Every hunk is a move into a new `context`: a `move` part that isn't
 /// structure, so the hunk is `logic`, reviewing only its moved definitions'
 /// first lines (where the context shows).
 fn assert_context_move(report: &Value, context: &str) {
     assert!(kinds(report).iter().all(|k| *k == "logic"), "{report:#}");
     for hunk in hunks(report) {
-        assert_eq!(move_part(hunk)["structure"], false, "{hunk:#}");
+        assert_eq!(part(hunk, "move")["structure"], false, "{hunk:#}");
     }
     assert_cross_referenced(report);
     for hunk in hunks(report) {
@@ -199,8 +124,8 @@ fn a_moved_method_with_a_changed_line_is_a_move_part_and_logic() {
     );
     assert_eq!(kinds(&report), ["logic", "logic"], "{report:#}");
     let added = &hunks(&report)[1];
-    assert_eq!(move_part(added)["structure"], true);
-    let entry = &move_part(added)["detail"]["moves"][0];
+    assert_eq!(part(added, "move")["structure"], true);
+    let entry = &part(added, "move")["detail"]["moves"][0];
     let similarity = entry["similarity"].as_f64().unwrap();
     assert!(similarity < 1.0 && similarity > 0.5);
     let line = after.lines().position(|l| l.contains("warn(y)")).unwrap() + 1;
@@ -274,7 +199,7 @@ fn a_method_changed_on_its_way_to_another_class_reviews_both() {
     let report = classify(&[("shape.rb", &source)], &[("shape.rb", &target)]);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
     let added = &hunks(&report)[1];
-    let moved = move_part(added);
+    let moved = part(added, "move");
     assert_eq!(moved["detail"]["context"], serde_json::json!(["owner"]));
     assert_eq!(moved["structure"], false);
     let entry = &moved["detail"]["moves"][0];
@@ -472,7 +397,7 @@ fn a_duplicate_candidate_lowers_confidence() {
                         .iter()
                         .any(|p| p["kind"] == "move")
             })
-            .map(|h| move_part(h)["confidence"].as_f64().unwrap())
+            .map(|h| part(h, "move")["confidence"].as_f64().unwrap())
             .fold(f64::INFINITY, f64::min)
     };
     // The copy added to `Other` is new code, and the move it might have been
@@ -487,7 +412,7 @@ fn a_duplicate_candidate_lowers_confidence() {
         .iter()
         .find(|h| h["file"] == "shape.rb")
         .unwrap();
-    assert_eq!(move_part(moved)["evidence"]["candidates"], 2);
+    assert_eq!(part(moved, "move")["evidence"]["candidates"], 2);
     assert!(confidence(&ambiguous, "shape.rb") < confidence(&unique, "shape.rb"));
 }
 
@@ -503,7 +428,7 @@ fn move_fields_are_documented() {
         &[("shape.rb", &class("Shape", &[&b, &a, &filler]))],
         &[("shape.rb", &class("Shape", &[&a, &filler, &changed]))],
     );
-    let moved = move_part(&hunks(&report)[0]);
+    let moved = part(&hunks(&report)[0], "move");
     let records = [
         &moved["evidence"],
         &moved["detail"],
