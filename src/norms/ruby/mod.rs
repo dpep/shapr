@@ -1,6 +1,7 @@
 //! Ruby's norms, observed on a prism parse; RuboCop's cops name them. Each
 //! norm is a module with `NORM`, `STYLES` and a `see` the walk calls per node.
 
+mod braces;
 mod config;
 mod strings;
 
@@ -11,13 +12,48 @@ use std::path::Path;
 
 pub struct Ruby;
 
-static NORMS: &[NormDef] = &[NormDef {
-    id: strings::NORM,
-    styles: strings::STYLES,
-}];
+static NORMS: &[NormDef] = &[
+    NormDef {
+        id: strings::NORM,
+        styles: strings::STYLES,
+    },
+    NormDef {
+        id: braces::NORM,
+        styles: braces::STYLES,
+    },
+];
 
-/// Per-node observers, in `NORMS` order.
-static OBSERVERS: &[fn(&mut Walker, &Node)] = &[strings::see];
+/// Per-node observers.
+static OBSERVERS: &[fn(&mut Walker, &Node)] = &[strings::see, braces::see];
+
+/// A norm's RuboCop setting, and the styles its values map to: a value
+/// not listed sets no style.
+struct Setting {
+    norm: &'static str,
+    key: &'static str,
+    values: &'static [(&'static str, &'static str)],
+}
+
+static SETTINGS: &[Setting] = &[
+    Setting {
+        norm: strings::NORM,
+        key: "EnforcedStyle",
+        values: &[
+            ("single_quotes", "single_quotes"),
+            ("double_quotes", "double_quotes"),
+        ],
+    },
+    Setting {
+        norm: braces::NORM,
+        key: "EnforcedStyle",
+        // `compact` differs from `space` only between nested braces.
+        values: &[
+            ("space", "space"),
+            ("no_space", "no_space"),
+            ("compact", "space"),
+        ],
+    },
+];
 
 impl Language for Ruby {
     fn name(&self) -> &'static str {
@@ -36,6 +72,7 @@ impl Language for Ruby {
         let result = ruby_prism::parse(source);
         let index = LineIndex::new(source);
         let mut walker = Walker {
+            source,
             index: &index,
             observations: Vec::new(),
             scopes: Vec::new(),
@@ -55,15 +92,18 @@ impl Language for Ruby {
             return BTreeMap::new();
         };
         let mut styles = BTreeMap::new();
-        let style = config.get(strings::NORM, "EnforcedStyle");
-        if let Some(s @ ("single_quotes" | "double_quotes")) = style {
-            styles.insert(strings::NORM, s.to_string());
+        for setting in SETTINGS {
+            let value = config.get(setting.norm, setting.key);
+            if let Some((_, style)) = setting.values.iter().find(|(v, _)| Some(*v) == value) {
+                styles.insert(setting.norm, style.to_string());
+            }
         }
         styles
     }
 }
 
 pub struct Walker<'a> {
+    pub source: &'a [u8],
     pub index: &'a LineIndex,
     observations: Vec<Observation>,
     scopes: Vec<Scope>,

@@ -1,0 +1,27 @@
+{
+  "about": "a hash with no space inside its braces, among hashes with",
+  "norm": "Layout/SpaceInsideHashLiteralBraces",
+  "expect": {
+    "hunks": [
+      {
+        "norms": [
+          {
+            "norm": "Layout/SpaceInsideHashLiteralBraces",
+            "scope": "method",
+            "inferred": "space",
+            "direction": "diverging",
+            "deviations": [
+              {
+                "line": 6,
+                "column": 9,
+                "style": "no_space",
+                "expected": "space",
+                "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -6,1 +6,1 @@\n-    w = {d: 4}\n+    w = { d: 4 }\n"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

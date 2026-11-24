@@ -542,11 +542,16 @@ enough to match by chance, and when several units could be its other half.
 *Experimental.* A norm is a style choice a project makes one way, such as
 RuboCop's `Style/StringLiterals` (`single_quotes` or `double_quotes`). shapr
 infers each norm from the code itself and judges only new code against it.
-Deleting code chooses no style, and neither does a string carried over
-unchanged or edited in place: an added string matched by a removed one with
-the same text and quotes, or failing that the same quotes, is kept, not chosen. Ruby's norm is `Style/StringLiterals`:
-quoted strings that could take either quote with the same value, as
-RuboCop counts them.
+Deleting code chooses no style, and neither does code carried over
+unchanged or edited in place: an added observation matched by a removed one with
+the same text and style, or failing that the same style, is kept, not chosen.
+
+Ruby's norms, named by the RuboCop cop whose setting configures them:
+
+| norm | styles | observed on |
+|---|---|---|
+| `Style/StringLiterals` | `single_quotes`, `double_quotes` | each quoted string that could take either quote with the same value, as RuboCop counts them |
+| `Layout/SpaceInsideHashLiteralBraces` | `space`, `no_space` | each non-empty hash literal with spaces inside both braces or neither; a brace beside a line break chooses nothing (RuboCop's `compact` reads as `space`) |
 
 A style is a scope's norm when its share, as `(n + 1) / (total + styles)`, is
 at least `--norm-threshold` (default 0.8): three of three backs a norm, two of

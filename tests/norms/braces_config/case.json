@@ -1,0 +1,18 @@
+{
+  "about": "the configured brace style is reported beside the inferred one",
+  "norm": "Layout/SpaceInsideHashLiteralBraces",
+  "expect": {
+    "hunks": [
+      {
+        "norms": [
+          {
+            "inferred": "space",
+            "configured": "no_space",
+            "expected": "space",
+            "direction": "diverging"
+          }
+        ]
+      }
+    ]
+  }
+}
