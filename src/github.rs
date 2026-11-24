@@ -381,9 +381,9 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
         .into_iter()
         .filter(|s| *s != git::EMPTY_TREE)
         .collect();
-    let git_dir = cache.fetch(repo, &wanted)?;
+    let (git_dir, lock) = cache.fetch(repo, &wanted)?;
     Ok(Remote {
-        git: Git::bare(git_dir, source.head.clone()),
+        git: Git::bare(git_dir, source.head.clone(), lock),
         range: format!("{}..{}", source.base, source.head),
         source,
         commits,
@@ -670,16 +670,25 @@ impl Cache {
             .join(format!("{}.git", repo.name.to_ascii_lowercase()))
     }
 
-    /// The clone of REPO holding WANTED, fetching only the commits it lacks.
-    fn fetch(&self, repo: &Repo, wanted: &[&str]) -> Result<PathBuf> {
+    /// The clone of REPO holding WANTED, fetching only the commits it lacks,
+    /// and the lock that keeps other runs out of it until dropped: git's own
+    /// locks fail a concurrent fetch or config write rather than wait.
+    fn fetch(&self, repo: &Repo, wanted: &[&str]) -> Result<(PathBuf, std::fs::File)> {
         let path = self.repository(repo);
         let url = format!("{}/{repo}.git", env_url("SHAPR_GITHUB_GIT_URL", GIT_URL));
         if !path.exists() {
             create(&path).with_context(|| format!("creating the cache at {}", tilde(&path)))?;
             crate::verbose!("created {}", tilde(&path));
         }
-        // Set each run, so the clone follows SHAPR_GITHUB_GIT_URL.
-        git::run(cache_git(&path).args(["config", "remote.origin.url", &url]))?;
+        let lock = std::fs::File::create(path.join("shapr.lock"))
+            .and_then(|lock| lock.lock().map(|()| lock))
+            .with_context(|| format!("locking {}", tilde(&path)))?;
+        // The clone follows SHAPR_GITHUB_GIT_URL; written only when it moved.
+        let current = git::run(cache_git(&path).args(["config", "--get", "remote.origin.url"]))
+            .unwrap_or_default();
+        if String::from_utf8_lossy(&current).trim() != url {
+            git::run(cache_git(&path).args(["config", "remote.origin.url", &url]))?;
+        }
         let missing: Vec<&str> = wanted
             .iter()
             .copied()
@@ -687,7 +696,7 @@ impl Cache {
             .collect();
         if missing.is_empty() {
             crate::verbose!("{repo}: both commits already cached");
-            return Ok(path);
+            return Ok((path, lock));
         }
         crate::verbose!("{repo}: fetching {} commit(s) from {url}", missing.len());
         let mut cmd = cache_git(&path);
@@ -714,7 +723,7 @@ impl Cache {
             };
             anyhow!("can't fetch {repo} from {HOST}: {last}{hint}")
         })?;
-        Ok(path)
+        Ok((path, lock))
     }
 
     pub fn status(&self) -> CacheStatus {

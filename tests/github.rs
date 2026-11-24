@@ -735,6 +735,21 @@ fn a_second_run_reuses_the_cache_and_clear_cache_empties_it() {
 }
 
 #[test]
+fn runs_at_once_share_the_cache() {
+    let f = Fixture::new();
+    f.shapr(&["--status"]); // sets up the fixture's PATH once
+    let outs: Vec<Output> = std::thread::scope(|scope| {
+        let runs: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| f.shapr(&["-J", "acme/widgets#12"])))
+            .collect();
+        runs.into_iter().map(|r| r.join().unwrap()).collect()
+    });
+    for out in &outs {
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(out));
+    }
+}
+
+#[test]
 fn source_fields_are_documented() {
     let schema =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/schema.md")).unwrap();

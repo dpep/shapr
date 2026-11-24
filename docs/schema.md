@@ -1150,7 +1150,9 @@ clones, `<cache>/github.com/<owner>/<repo>.git`: only the two commits, their
 trees, and the blobs the diff reads. The current repository is never
 written to. The cache is `--cache-dir`, else `SHAPR_CACHE_DIR`, else
 `$XDG_CACHE_HOME/shapr`, else `~/.cache/shapr`; a relative path is a usage
-error. A second run on the same commits fetches nothing. `SHAPR_GITHUB_API_URL`
+error. A second run on the same commits fetches nothing. A run holds a lock
+on its clone (`shapr.lock` inside it) while it fetches and reads, so runs at
+once on one repository take turns. `SHAPR_GITHUB_API_URL`
 and `SHAPR_GITHUB_GIT_URL` replace `https://api.github.com` and
 `https://github.com`.
 

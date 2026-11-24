@@ -38,6 +38,8 @@ pub enum State {
 struct Bare {
     git_dir: PathBuf,
     attributes_from: String,
+    /// Held while this run reads the clone: a blob fetched on demand writes.
+    _lock: std::fs::File,
 }
 
 impl Git {
@@ -55,12 +57,13 @@ impl Git {
     }
 
     /// Runs in the bare repository GIT_DIR, reading attributes from the
-    /// commit ATTRIBUTES_FROM.
-    pub fn bare(git_dir: PathBuf, attributes_from: String) -> Self {
+    /// commit ATTRIBUTES_FROM, holding LOCK on it while it lives.
+    pub fn bare(git_dir: PathBuf, attributes_from: String, lock: std::fs::File) -> Self {
         Git {
             bare: Some(Bare {
                 git_dir,
                 attributes_from,
+                _lock: lock,
             }),
             ..Git::new(None)
         }
