@@ -250,7 +250,7 @@ pub fn run() -> ExitCode {
     );
     // Config and neighbors as of the change's after side.
     let revision = (git.after_revision(cli.range.as_deref()))
-        .map(|rev| crate::norms::Revision { git: &git, rev });
+        .map(|rev| crate::norms::Revision::new(&git, rev));
     let worktree = git.toplevel().map(crate::norms::Worktree);
     let snapshot: Option<&dyn crate::norms::Snapshot> = match (&revision, &worktree) {
         (Some(revision), _) => Some(revision),

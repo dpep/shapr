@@ -4,6 +4,8 @@
 //! top, `/`-separated; nothing above the top is read.
 
 use crate::git::Git;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub trait Snapshot {
@@ -34,14 +36,30 @@ impl Snapshot for Worktree {
     }
 }
 
+/// A revision's files, each read once: every file's config lookup asks for
+/// the same few paths.
 pub struct Revision<'a> {
-    pub git: &'a Git,
-    pub rev: String,
+    git: &'a Git,
+    rev: String,
+    read: RefCell<HashMap<String, Option<Vec<u8>>>>,
+}
+
+impl<'a> Revision<'a> {
+    pub fn new(git: &'a Git, rev: String) -> Self {
+        Revision {
+            git,
+            rev,
+            read: RefCell::default(),
+        }
+    }
 }
 
 impl Snapshot for Revision<'_> {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
-        self.git.show(&self.rev, path)
+        let mut read = self.read.borrow_mut();
+        read.entry(path.to_string())
+            .or_insert_with(|| self.git.show(&self.rev, path))
+            .clone()
     }
 
     fn list(&self, dir: &str) -> Vec<String> {
