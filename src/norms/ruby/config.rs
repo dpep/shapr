@@ -8,6 +8,8 @@ use crate::norms::snapshot::{Snapshot, join, parent, resolve};
 use std::collections::BTreeMap;
 
 const NAME: &str = ".rubocop.yml";
+/// Where `rubocop --auto-gen-config` parks the offenses a project has yet to fix.
+const TODO: &str = ".rubocop_todo.yml";
 
 /// Settings by cop, then by key; a later file overrides what it inherits.
 #[derive(Debug, Default)]
@@ -19,6 +21,9 @@ pub struct Config {
     lists: BTreeMap<String, BTreeMap<String, Vec<Option<String>>>>,
     /// Lines of the file that aren't YAML this reader understands, 1-based.
     unread: Vec<usize>,
+    /// Cops a `.rubocop_todo.yml` in the chain lists: offenses the project
+    /// has parked rather than fixed.
+    todo: std::collections::BTreeSet<String>,
 }
 
 impl Config {
@@ -29,6 +34,11 @@ impl Config {
             return None;
         }
         settings.get(key).map(String::as_str)
+    }
+
+    /// A `.rubocop_todo.yml` the config inherits lists `cop`.
+    pub fn todo(&self, cop: &str) -> bool {
+        self.todo.contains(cop)
     }
 
     /// RuboCop would inspect the file at `path` with `cop`: it is outside
@@ -95,6 +105,10 @@ fn merge(path: &str, snapshot: &dyn Snapshot, config: &mut Config, depth: usize)
         if let (false, Some(file)) = (file.contains("://"), resolve(parent(path), &file)) {
             merge(&file, snapshot, config, depth + 1);
         }
+    }
+    if name == TODO {
+        let cops = own.settings.keys().chain(own.lists.keys());
+        config.todo.extend(cops.cloned());
     }
     for (cop, settings) in own.settings {
         config.settings.entry(cop).or_default().extend(settings);

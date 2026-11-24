@@ -340,6 +340,7 @@ pub fn run() -> ExitCode {
         report::Meta::new("classify", source),
     );
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
+    report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
     for ((hunk, style), label) in report
         .hunks
         .iter_mut()

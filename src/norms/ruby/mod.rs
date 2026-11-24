@@ -340,7 +340,11 @@ impl Language for Ruby {
                 styles.remove(def_spacing::NORM);
             }
         }
-        Configured { styles, off }
+        let todo = (NORMS.iter())
+            .map(|n| n.id)
+            .filter(|id| config.todo(id))
+            .collect();
+        Configured { styles, off, todo }
     }
 }
 
@@ -468,8 +472,26 @@ impl Walker<'_> {
         };
         if let Some(kind) = kind {
             let loc = node.location();
+            let text = |l: Location| {
+                String::from_utf8_lossy(&self.source[l.start_offset()..l.end_offset()]).into_owned()
+            };
+            let name = if let Some(def) = node.as_def_node() {
+                match def.receiver() {
+                    Some(r) => format!("{}.{}", text(r.location()), text(def.name_loc())),
+                    None => text(def.name_loc()),
+                }
+            } else if let Some(class) = node.as_class_node() {
+                text(class.constant_path().location())
+            } else if let Some(module) = node.as_module_node() {
+                text(module.constant_path().location())
+            } else if let Some(singleton) = node.as_singleton_class_node() {
+                format!("class << {}", text(singleton.expression().location()))
+            } else {
+                String::new()
+            };
             self.scopes.push(Scope {
                 kind,
+                name,
                 first: self.index.line(loc.start_offset()),
                 last: self.last_line(&loc),
             });

@@ -4,14 +4,18 @@
 //! style cops; never runs RuboCop. See docs/schema.md, "Style".
 
 mod align;
+mod codebase;
 pub mod command;
 mod edit;
 mod editorconfig;
+mod plan;
 mod ruby;
 pub mod snapshot;
+pub mod trajectory;
 
 pub use align::{HunkStyle, styles, text};
 pub use snapshot::{Index, Revision, Snapshot, Worktree, join};
+pub use trajectory::{Trajectory, trajectory};
 
 use crate::change::Category;
 use serde::Serialize;
@@ -59,6 +63,8 @@ pub enum ScopeKind {
 /// A method or class (module, singleton class) by its lines.
 pub struct Scope {
     pub kind: ScopeKind,
+    /// As the source spells it: `Cart`, `Shop::Cart`, `total`.
+    pub name: String,
     pub first: usize,
     pub last: usize,
 }
@@ -109,6 +115,9 @@ pub struct Configured {
     /// Norms whose linter check skips the file (excluded, or outside the
     /// check's includes): no style is set for them, and no edit offered.
     pub off: BTreeSet<&'static str>,
+    /// Norms whose check the project's todo file lists (RuboCop's
+    /// `.rubocop_todo.yml`): known offenses, parked.
+    pub todo: BTreeSet<&'static str>,
 }
 
 static LANGUAGES: &[&dyn Language] = &[&ruby::Ruby];

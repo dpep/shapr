@@ -57,7 +57,7 @@ shapr https://github.com/acme/widgets/pull/12   # a GitHub pull request, as its 
 shapr acme/widgets#12        # the same; `#12` uses this repository's GitHub remote
 shapr acme/widgets@1a2b3c4   # a GitHub commit, against its first parent
 shapr --status               # the cache of GitHub repositories; --clear-cache empties it
-shapr norms lib/cart.rb      # a file's style norms, no diff needed
+shapr norms lib/             # a codebase's style norms, its hotspots and a cleanup plan, no diff needed
 shapr --completions zsh      # a completion script
 ```
 
@@ -83,6 +83,8 @@ Hunks in files shapr can't parse are `logic` with confidence 0; in a file of unk
 - per file: its `category` (`code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), lines before the change, and the same line counts;
 - a summary: the verdict, hunk counts per verdict and category, `review_lines` with `test_review_lines` split out, counts of parts per kind and facet, `structure_share`, and Kamei's diffusion measures (files, directories, subsystems, entropy);
 - per hunk, experimental: `style`, how its new code sits against the style norms inferred from the code around it (Ruby's, listed in [docs/schema.md](docs/schema.md#style)), with the deviations and a fix for each; deleting code chooses no style;
+- experimental, `summary.config_trajectory`: per norm `.rubocop.yml` sets, whether the change adds or removes offenses against it;
+- experimental, `shapr norms PATH...`: per norm the style the code follows and its adherence (`single_quotes 87% (412/473)`), how far the code is from its config, the files, classes and methods least like the rest, and a cleanup plan in risk tiers (layout, then restyles, then renames) whose steps are `git apply`-ready diffs, written so each tier's pull request classifies as `format_only` or `restyle` ([docs/schema.md](docs/schema.md#shapr-norms));
 - `summary.claims`: what the commit messages and a `--message` description claim (conventional types, purpose words, reverts, issues), with their source; and, experimental, the categories they claim and where the code doesn't bear a claim out. Claims never change a label: shapr reads the code first.
 
 ## Exit codes

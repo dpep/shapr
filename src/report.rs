@@ -272,6 +272,9 @@ pub struct Summary {
     behavior_lines: usize,
     structure_share: f64,
     claims: Claims,
+    /// Experimental: per norm config sets, whether the change moves the
+    /// code toward it; filled in beside the hunks' style.
+    pub config_trajectory: Vec<crate::norms::Trajectory>,
 }
 
 pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta) -> Report<'a> {
@@ -531,6 +534,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             round2(structure_lines as f64 / total as f64)
         },
         claims,
+        config_trajectory: Vec::new(),
     }
 }
 
@@ -631,6 +635,9 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         }
     }
     let s = &report.summary;
+    for line in crate::norms::trajectory::text(&s.config_trajectory) {
+        writeln!(out, "{line}")?;
+    }
     claims(out, &s.claims)?;
     let kinds: Vec<String> = s
         .kinds

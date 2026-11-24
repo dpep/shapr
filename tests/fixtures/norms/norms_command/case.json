@@ -1,5 +1,5 @@
 {
-  "description": "shapr norms reports a file's norms with no diff",
+  "description": "shapr norms reports a file's norms with no diff: adherence and each deviation's place",
   "args": [
     "norms",
     "-j",
@@ -9,34 +9,37 @@
   "expect": {
     "files": [
       {
-        "record": "file",
         "file": "lib/a.rb",
         "language": "ruby",
+        "record": "file",
         "skipped": null
       }
     ],
     "norms": [
       {
-        "record": "norm",
-        "file": "lib/a.rb",
-        "norm": "Style/StringLiterals",
-        "scope": "file",
-        "counts": {
-          "single_quotes": 9,
-          "double_quotes": 1
-        },
-        "inferred": "single_quotes",
         "confidence": 0.83,
         "configured": null,
-        "expected": "single_quotes",
+        "counts": {
+          "double_quotes": 1,
+          "single_quotes": 9
+        },
         "deviations": [
           {
-            "line": 10,
             "column": 5,
+            "expected": "single_quotes",
+            "line": 10,
             "style": "double_quotes",
-            "expected": "single_quotes"
+            "file": "lib/a.rb"
           }
-        ]
+        ],
+        "expected": "single_quotes",
+        "inferred": "single_quotes",
+        "norm": "Style/StringLiterals",
+        "record": "norm",
+        "scope": "file",
+        "adherence": 0.9,
+        "matching": 9,
+        "judged": 10
       }
     ]
   }

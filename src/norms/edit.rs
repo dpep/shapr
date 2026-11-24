@@ -1,6 +1,7 @@
 //! A suggested edit as a unified diff against the file it was found in.
 
 use super::{LineIndex, Replace};
+use crate::classify::proof::{Outside, Search};
 use crate::tree::Tree;
 
 /// Whether applying REPLACES to TREE's source (the file at PATH) leaves a
@@ -12,19 +13,143 @@ pub fn keeps(path: &str, tree: &Tree, replaces: &[Replace], renames: bool) -> bo
     let Some(frontend) = crate::frontend::for_path(path) else {
         return false;
     };
+    let after = frontend.parse(apply(&tree.source, replaces));
+    after.errors.is_empty()
+        && (renames || after.node(Tree::ROOT).canon == tree.node(Tree::ROOT).canon)
+}
+
+/// `source` with `replaces`, which don't overlap, applied.
+pub fn apply(source: &[u8], replaces: &[Replace]) -> Vec<u8> {
     let mut sorted = replaces.to_vec();
-    sorted.sort_by_key(|r| r.span.start);
-    let mut edited = Vec::with_capacity(tree.source.len());
+    sorted.sort_by_key(|r| (r.span.start, r.span.end));
+    let mut edited = Vec::with_capacity(source.len());
     let mut at = 0;
     for r in &sorted {
-        edited.extend_from_slice(&tree.source[at..r.span.start]);
+        edited.extend_from_slice(&source[at..r.span.start]);
         edited.extend_from_slice(r.text.as_bytes());
         at = r.span.end;
     }
-    edited.extend_from_slice(&tree.source[at..]);
-    let after = frontend.parse(edited);
-    after.errors.is_empty()
-        && (renames || after.node(Tree::ROOT).canon == tree.node(Tree::ROOT).canon)
+    edited.extend_from_slice(&source[at..]);
+    edited
+}
+
+/// A rename's old and new names appear in no file of the repository but
+/// `path`: what the search can't settle counts as shared.
+pub fn unshared(outside: &dyn Outside, path: &str, source: &[u8], replaces: &[Replace]) -> bool {
+    let Some(first) = replaces.first() else {
+        return false;
+    };
+    // The whole identifier: a rename keeps a leading `_` outside its span.
+    let start = source[..first.span.start]
+        .iter()
+        .rposition(|&b| b != b'_')
+        .map_or(0, |i| i + 1);
+    let prefix = String::from_utf8_lossy(&source[start..first.span.start]);
+    let old = String::from_utf8_lossy(&source[start..first.span.end]);
+    [old.into_owned(), format!("{prefix}{}", first.text)]
+        .iter()
+        .all(|word| match outside.uses(path, word) {
+            Search::Done {
+                found, mentioned, ..
+            } => found.iter().all(|f| f == path) && mentioned.is_empty(),
+            Search::Capped | Search::Unavailable => false,
+        })
+}
+
+/// Unchanged lines a [`patch`] shows around each change, as `diff -u` does.
+const CONTEXT: usize = 3;
+
+/// `replaces` as a unified diff of the whole file, one `@@` section per
+/// cluster of changed lines with three lines of context, so `git apply`
+/// takes it as is.
+pub fn patch(path: &str, source: &[u8], replaces: &[Replace]) -> Option<String> {
+    let index = LineIndex::new(source);
+    let old: Vec<&[u8]> = source.split_inclusive(|&b| b == b'\n').collect();
+    let mut sorted = replaces.to_vec();
+    sorted.sort_by_key(|r| (r.span.start, r.span.end));
+    // Runs of whole lines (first, last, 1-based) and what they become.
+    let mut runs: Vec<(usize, usize, Vec<Replace>)> = Vec::new();
+    for r in sorted {
+        let first = index.line(r.span.start).max(1);
+        let last = index.line(r.span.end.max(r.span.start + 1) - 1).max(first);
+        match runs.last_mut() {
+            Some(run) if first <= run.1 => {
+                run.1 = run.1.max(last);
+                run.2.push(r);
+            }
+            _ => runs.push((first, last, vec![r])),
+        }
+    }
+    if runs.is_empty() || old.is_empty() {
+        return None;
+    }
+    let runs: Vec<(usize, usize, Vec<u8>)> = (runs.into_iter())
+        .map(|(first, last, replaces)| {
+            let from = index.start(first);
+            let to = index.start(last + 1);
+            let shifted: Vec<Replace> = (replaces.iter())
+                .map(|r| Replace {
+                    span: r.span.start - from..r.span.end - from,
+                    text: r.text.clone(),
+                })
+                .collect();
+            (first, last, apply(&source[from..to], &shifted))
+        })
+        .collect();
+    let mut out = format!("--- a/{path}\n+++ b/{path}\n");
+    let line = |out: &mut String, mark: char, text: &[u8]| {
+        out.push(mark);
+        out.push_str(&String::from_utf8_lossy(text));
+        if !text.ends_with(b"\n") {
+            out.push('\n');
+            out.push_str(NO_NEWLINE);
+        }
+    };
+    // Lines the new side gains over the old, before the section at hand.
+    let mut delta: isize = 0;
+    let mut i = 0;
+    while i < runs.len() {
+        let mut j = i;
+        while j + 1 < runs.len() && runs[j + 1].0 - runs[j].1 - 1 <= 2 * CONTEXT {
+            j += 1;
+        }
+        let start = runs[i].0.saturating_sub(CONTEXT).max(1);
+        let end = (runs[j].1 + CONTEXT).min(old.len());
+        let mut body = String::new();
+        let mut gained: isize = 0;
+        let mut at = start;
+        for (first, last, new) in &runs[i..=j] {
+            for l in at..*first {
+                line(&mut body, ' ', old[l - 1]);
+            }
+            for l in *first..=*last {
+                line(&mut body, '-', old[l - 1]);
+            }
+            let new: Vec<&[u8]> = new.split_inclusive(|&b| b == b'\n').collect();
+            for text in &new {
+                line(&mut body, '+', text);
+            }
+            gained += new.len() as isize - (last - first + 1) as isize;
+            at = last + 1;
+        }
+        for l in at..=end {
+            line(&mut body, ' ', old[l - 1]);
+        }
+        let old_count = end - start + 1;
+        let new_count = (old_count as isize + gained) as usize;
+        let new_start = (start as isize + delta) as usize;
+        let new_start = if new_count == 0 {
+            new_start - 1
+        } else {
+            new_start
+        };
+        out.push_str(&format!(
+            "@@ -{start},{old_count} +{new_start},{new_count} @@\n{body}"
+        ));
+        delta += gained;
+        i = j + 1;
+    }
+    Some(out)
 }
 
 /// `replaces` with each line break they insert written as the file's
@@ -116,6 +241,35 @@ mod tests {
         assert!(!keeps("def fooBar; end\n", "fooBar", "foo_bar", false));
         assert!(keeps("def fooBar; end\n", "fooBar", "foo_bar", true));
         assert!(!keeps("def fooBar; end\n", "fooBar", "1x", true));
+    }
+
+    #[test]
+    fn a_patch_has_context_and_a_section_per_cluster() {
+        let source: String = (1..=12).map(|n| format!("l{n}\n")).collect();
+        let at = |line: &str| source.find(line).unwrap();
+        let replaces = [
+            Replace {
+                span: at("l2\n")..at("l2\n") + 2,
+                text: "L2".into(),
+            },
+            Replace {
+                span: at("l11\n")..at("l12\n"),
+                text: String::new(),
+            },
+        ];
+        assert_eq!(
+            patch("a.rb", source.as_bytes(), &replaces).unwrap(),
+            "--- a/a.rb\n+++ b/a.rb\n@@ -1,5 +1,5 @@\n l1\n-l2\n+L2\n l3\n l4\n l5\n\
+             @@ -8,5 +8,4 @@\n l8\n l9\n l10\n-l11\n l12\n"
+        );
+        let bare = [Replace {
+            span: 5..5,
+            text: "\n".into(),
+        }];
+        assert_eq!(
+            patch("a.rb", b"a = 1", &bare).unwrap(),
+            "--- a/a.rb\n+++ b/a.rb\n@@ -1,1 +1,1 @@\n-a = 1\n\\ No newline at end of file\n+a = 1\n"
+        );
     }
 
     #[test]

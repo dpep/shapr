@@ -868,20 +868,113 @@ Each norm:
 
 ## `shapr norms`
 
-*Experimental.* `shapr norms FILE...` reports each file's norms with no
-diff, as a `meta` record, then per file a `file` record and its `norm`
-records, then a `summary`. Under `-j` they are one object: `meta`, `files`,
-`norms`, `summary`. A directory isn't read yet: naming one is a usage error (exit 64).
+*Experimental.* `shapr norms PATH...` answers "what are this code's norms,
+where is it least like itself, and where do I start?" with no diff. Each
+PATH is a file, or a directory standing for every file under it a language
+has norms for (inside a repository, git's tracked and unignored files);
+none is `.`. A file found under a directory that is generated, vendored or
+docs (as in a hunk's `style.skipped`) is counted in `summary.skipped`, not
+read or listed.
+
+Records, in order: a `meta` record (`command` `norms`), a `file` record per
+file named or judged, a `norm` record per norm, a `hotspot` record per file,
+class and method holding a deviation, a `step` record per plan step, then a
+`summary`. Under `-j` they are one object: `meta`, `files`, `norms`,
+`hotspots`, `steps`, `summary`. Paths are as named, or as found under a named
+directory.
 
 `file`: `file`, `language` (`null` when no language has norms) and
-`skipped` (as in a hunk's `style`, or `unsupported`).
+`skipped` (as in a hunk's `style`, or `unsupported`; `null` when judged).
 
-`norm`: `file`, `norm`, `scope` (`file`), `counts` (per style, the whole
-file), `inferred`, `confidence`, `configured` and `expected` as above, and
-`deviations`, the observations not in the `expected` style, each as a hunk's deviation (`line`, `column`, `style`, `expected`) without `edit`. Schema change: they were bare line numbers.
+### `norm` record
 
-`summary`: `files`, `norms`, `inferred` (norms with a style inferred) and
-`deviations`.
+Each norm pools every judged file: its counts are the whole codebase's, and
+a style is the norm by the rule of succession over them, as a lone scope is
+in [Style](#style). The code's own style is the reference for normalizing
+it, so a file written wholly in another style is a deviation, not a norm of
+its own.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"norm"` | |
+| `norm` | string | The norm, by its RuboCop name. |
+| `scope` | string | What the counts pool: `file` (one file named) or `paths` (every file under the paths named). |
+| `files` | int | Files holding an observation of the norm. |
+| `counts` | object | Per style, the observations. |
+| `inferred`, `confidence` | string, number or null | The style the counts back and its share, as in [Style](#style). |
+| `configured` | string or null | The style `.rubocop.yml` (or `.editorconfig`) sets, where it sets the same one in every file that sets one; `null` when none sets one or files differ. |
+| `expected` | string or null | `inferred`, else `configured`. |
+| `adherence` | number 0–1 or null | `matching` over `judged`, to 2 decimals; `null` when nothing is expected. |
+| `matching`, `judged` | int | Observations held to the expected style (every one when a style is inferred; with only config, those config checks), and those in it. |
+| `config` | object or null | How far the code is from config, when `configured` is set. Below. |
+| `step` | int or null | The plan step that fixes the norm's deviations. |
+| `unplanned` | string or null | Why a norm with deviations has no step: `config_disagrees` (the inferred and configured styles differ; changing the code or the config is a person's call, so the plan does neither), `withheld` (every deviation with an edit is where config doesn't check the cop), `no_edit` (no deviation has an edit that keeps the program); `null` otherwise. |
+| `deviations` | array | Observations not in the style they're held to: `file`, `line`, `column`, `style`, `expected`. |
+
+`config`, the norm's trajectory against its config. It never lists
+RuboCop's offenses line by line; it says how far apart code and config are:
+
+| field | type | meaning |
+|---|---|---|
+| `checked`, `matching` | int | Observations config checks, and those in the configured style. |
+| `adherence` | number 0–1 or null | `matching` over `checked`, to 2 decimals. |
+| `withheld` | int | Observations config doesn't check: the file is outside the cop's `Include` or under an `Exclude` (`.rubocop_todo.yml` writes these), or a `# rubocop:disable`/`todo` covers the line. |
+| `todo` | bool | A `.rubocop_todo.yml` the config inherits lists the cop: offenses the project parked. |
+| `agreement` | string | `agrees` or `disagrees` with `inferred`; `config_only` when nothing is inferred. |
+
+### `hotspot` record
+
+Where the code is least like itself. Each kind is ranked on its own: by the
+norms it breaks, then deviations per line, then deviations.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"hotspot"` | |
+| `kind` | string | `file`, `class` (a class, module or `class << self`) or `method`. |
+| `rank` | int | 1-based, within its kind. |
+| `file` | string | |
+| `name` | string or null | As the source spells it: `Cart`, `Shop::Cart`, `Cart#total`, `Cart.build` (a singleton method); `null` for a file. |
+| `lines` | object | A line run: the unit's first line and its lines. A class counts its own lines, not a nested class's. |
+| `deviations` | int | Deviations in it; a class's own, not a nested class's; a method's in its innermost `def`. |
+| `norms` | array of strings | The norms they break, sorted. |
+| `per_100_lines` | number | `deviations` per 100 of its lines, to 1 decimal. |
+
+### `step` record
+
+The cleanup plan: one step per norm with deviations an edit fixes, ordered
+by risk tier, then by adherence gained per line touched (fixes over
+`judged`, over `lines_touched`). Tier 1 (`layout`) is whitespace and blank
+lines, tier 2 (`lexical`) respellings proven to keep the program (quotes,
+hash syntax, trailing commas), tier 3 (`naming`) renames. Each edit is a
+deviation's own fix, offered only where a hunk's would be: config checks the
+line, the file's config sets no other style, and the edited file parses
+cleanly to the same canonical tree (a rename need only parse, and a
+`Naming/MethodName` rename also needs neither name in another file of the
+repository). Steps are written against the files as the steps before them
+leave them: apply them in order, all of a tier's steps for one pull request
+per tier, and each tier's change classifies as its `expect_kind`.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"step"` | |
+| `step` | int | 1-based order. |
+| `tier`, `risk` | int, string | 1 `layout`, 2 `lexical`, 3 `naming`. |
+| `expect_kind` | string | The kind shapr gives a change made of the step's edits: `format_only`, `restyle` or `rename`. |
+| `norm`, `style` | string | The norm, and the style its edits apply. |
+| `fixes` | int | Deviations its edits fix. |
+| `unfixed` | int | The norm's deviations it leaves: no edit, an edit the guard refused, or `withheld`. |
+| `withheld` | int | Of `unfixed`, those where config doesn't check the cop. |
+| `adherence_before`, `adherence_after` | number 0–1 or null | The norm's adherence before and after the step, to 2 decimals. |
+| `files`, `lines_touched` | int | Files and lines its edits change. |
+| `edits` | array | Per file: `file`, `lines` (the lines it changes, as the steps before leave the file) and `diff`, a unified diff with three lines of context that `git apply` takes. |
+
+For a pull request per tier:
+`shapr norms -J | jq -r 'select(.record == "step" and .tier == 1) | .edits[].diff' | git apply`.
+
+`summary`: `files` (judged), `skipped` (per reason: `generated`, `vendored`,
+`docs`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
+style inferred), `deviations`, `hotspots`, `steps`, `fixes` and
+`lines_touched` (over the steps).
 
 ## `summary` record
 
@@ -906,6 +999,7 @@ file), `inferred`, `confidence`, `configured` and `expected` as above, and
 | `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings, parts with assumptions) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts of hunks whose verdict is `structure` or `mixed`, over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
+| `config_trajectory` | array | *Experimental.* Per norm `.rubocop.yml` (or `.editorconfig`) sets in a changed file, whether the change moves the code toward it: `norm`, `configured`, `before` and `after` (each `checked`, the observations config checks in the changed files, and `offenses`, those not in the configured style), and `direction`, `toward` (fewer offenses), `away` (more) or `level`. Both sides are judged by the config as of the after side; unchanged files hold the same offenses on both sides, so the counts move as the file's, its directory's and the repository's do. Only norms whose counts move are listed. |
 
 ## GitHub input
 

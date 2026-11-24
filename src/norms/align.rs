@@ -9,7 +9,7 @@ use super::{
     ScopeKind, count, edit, for_path, infer, pooled, skipped,
 };
 use crate::change::{Change, FileChange};
-use crate::classify::proof::{Outside, Search};
+use crate::classify::proof::Outside;
 use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
@@ -280,6 +280,7 @@ fn file_styles(
     let super::Configured {
         styles: configured,
         off,
+        ..
     } = snapshot
         .map(|s| language.configured(path, s))
         .unwrap_or_default();
@@ -662,26 +663,9 @@ impl File<'_> {
     }
 
     /// A rename's old and new names appear in no other file of the
-    /// repository: what the search can't settle counts as shared.
+    /// repository.
     fn unshared(&self, replaces: &[Replace]) -> bool {
-        let Some(first) = replaces.first() else {
-            return false;
-        };
-        // The whole identifier: a rename keeps a leading `_` outside its span.
-        let start = self.source[..first.span.start]
-            .iter()
-            .rposition(|&b| b != b'_')
-            .map_or(0, |i| i + 1);
-        let prefix = String::from_utf8_lossy(&self.source[start..first.span.start]);
-        let old = String::from_utf8_lossy(&self.source[start..first.span.end]);
-        [old.into_owned(), format!("{prefix}{}", first.text)]
-            .iter()
-            .all(|word| match self.outside.uses(self.path, word) {
-                Search::Done {
-                    found, mentioned, ..
-                } => found.iter().all(|f| f == self.path) && mentioned.is_empty(),
-                Search::Capped | Search::Unavailable => false,
-            })
+        edit::unshared(self.outside, self.path, self.source, replaces)
     }
 
     /// Every replacement lies in the hunk's changed region: a suggested edit

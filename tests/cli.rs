@@ -500,10 +500,31 @@ fn every_output_field_is_documented() {
         &[("b.rb", &quoted.replace("end", "  w = \"d\"\nend"))],
     );
     let style = &styled["hunks"][0]["style"];
+    let config = ".rubocop.yml";
+    let rule = "Style/StringLiterals:\n  EnforcedStyle: single_quotes\n";
+    let trailing = "def a\n  x = 'a'  \n  y = 'b'\n  z = \"c\"\nend\n";
+    let dir = repo(&[&[(config, rule), ("b.rb", quoted)], &[("b.rb", trailing)]]);
+    let changed = common::report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]));
+    let norms = common::report(&shapr(dir.path(), &["norms", "-j"]));
+    let quotes = (norms["norms"].as_array().unwrap().iter())
+        .find(|n| n["norm"] == "Style/StringLiterals")
+        .unwrap();
     let records = records.into_iter().chain([
         style,
         &style["norms"][0],
         &style["norms"][0]["deviations"][0],
+        &changed["summary"]["config_trajectory"][0],
+        &changed["summary"]["config_trajectory"][0]["before"],
+        &norms["files"][0],
+        quotes,
+        &quotes["config"],
+        &quotes["deviations"][0],
+        &norms["hotspots"][0],
+        &norms["hotspots"][0]["lines"],
+        &norms["steps"][0],
+        &norms["steps"][0]["edits"][0],
+        &norms["summary"],
+        &norms["summary"]["skipped"],
     ]);
     for record in records {
         for key in record.as_object().unwrap().keys() {
