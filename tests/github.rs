@@ -379,7 +379,7 @@ fn the_text_summary_names_the_pull_request() {
     let f = Fixture::new();
     let out = f.shapr(&["acme/widgets#12"]);
     let text = String::from_utf8(out.stdout).unwrap();
-    let summary = text.lines().last().unwrap();
+    let summary = text.lines().next().unwrap();
     assert!(
         summary.starts_with("acme/widgets#12: mixed: 2 hunks"),
         "{summary}"

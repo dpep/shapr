@@ -86,15 +86,16 @@ GitHub input is experimental: its forms, `meta.source` and the cache may change 
 
 With no arguments, shapr reads a diff from stdin and, like any filter, waits while stdin stays open. An empty stdin is a usage error (64), not an empty verdict, so a failed `git diff` upstream doesn't pass as clean.
 
-Text output, for a commit that reformats one method's signature and changes another's body (mixed). The summary line starts with what was compared (`commit 1a2b3c4`, `main...HEAD`, `uncommitted changes in lib/cart.rb`, `staged changes`, `stdin`), so an empty result names where shapr looked:
+Text output, for a commit that reformats one method's signature and changes another's body (mixed). The summary comes first, starting with what was compared (`commit 1a2b3c4`, `main...HEAD`, `uncommitted changes in lib/cart.rb`, `staged changes`, `stdin`), so an empty result names where shapr looked; then each hunk. A line with nothing to say (no claims, no comment changes) is left out:
 
 ```
+commit 1a2b3c4: mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
+claims: refactor in 1 of 1 message
+unproven: claims refactor; 1 hunk not shown structural
+
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
 lib/greeter.rb:11  logic             1.00  [literal_only]
                    style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
-claims: refactor in 1 of 1 message
-unproven: claims refactor; 1 hunk not shown structural
-commit 1a2b3c4: mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
 ```
 
 Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.

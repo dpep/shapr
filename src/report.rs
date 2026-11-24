@@ -648,6 +648,10 @@ fn line(out: &mut impl Write, record: &impl Serialize) -> io::Result<()> {
 }
 
 fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
+    summary_text(out, report)?;
+    if !report.hunks.is_empty() {
+        writeln!(out)?;
+    }
     let width = report
         .hunks
         .iter()
@@ -692,11 +696,12 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             writeln!(out, "{:width$}  {line}", "")?;
         }
     }
+    Ok(())
+}
+
+/// The change's verdict and counts, then claims: the text output's first lines.
+fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     let s = &report.summary;
-    for line in crate::norms::trajectory::text(&s.config_trajectory) {
-        writeln!(out, "{line}")?;
-    }
-    claims(out, &s.claims)?;
     // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     for part in report
@@ -755,7 +760,12 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         } else {
             String::new()
         },
-    )
+    )?;
+    for line in crate::norms::trajectory::text(&s.config_trajectory) {
+        writeln!(out, "{line}")?;
+    }
+    claims(out, &s.claims)?;
+    Ok(())
 }
 
 /// What the messages claim, and where the code doesn't bear a claim out.
@@ -776,7 +786,8 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         if claims.messages == 1 { "" } else { "s" }
     );
     match claimed.as_slice() {
-        [] => writeln!(out, "claims: none in {of}")?,
+        // Nothing claimed: nothing worth a line.
+        [] => {}
         [one] => writeln!(out, "claims: {one} of {of}")?,
         many => writeln!(out, "claims: {} (of {of})", many.join(", "))?,
     }

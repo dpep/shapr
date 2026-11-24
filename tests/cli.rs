@@ -1097,10 +1097,14 @@ fn the_text_summary_counts_kinds_and_leaves_out_what_says_nothing() {
     ]);
     let out = shapr(dir.path(), &["HEAD"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    let last = text.lines().last().unwrap_or_default();
+    let last = text.lines().next().unwrap_or_default();
     assert!(last.contains(": behavior: 1 hunk (1 logic)"), "{text}");
     assert!(!last.contains("comments"), "{text}");
     assert!(!last.contains("structure share"), "{text}");
+    assert!(
+        !text.contains("claims:"),
+        "nothing claimed, no claims line: {text}"
+    );
 }
 
 #[test]
@@ -1111,7 +1115,7 @@ fn the_text_kinds_count_only_hunks_inside_the_verdict() {
     ]);
     let out = shapr(dir.path(), &["HEAD"]);
     let text = String::from_utf8_lossy(&out.stdout);
-    let last = text.lines().last().unwrap_or_default();
+    let last = text.lines().next().unwrap_or_default();
     assert!(
         last.contains("behavior: 2 hunks (1 logic); outside the verdict: 1 none;"),
         "{text}"
@@ -1205,7 +1209,7 @@ fn the_text_summary_names_what_was_compared() {
         let out = shapr(dir.path(), args);
         assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
         let text = String::from_utf8(out.stdout).unwrap();
-        let last = text.lines().last().unwrap_or_default().to_string();
+        let last = text.lines().next().unwrap_or_default().to_string();
         last.split(": ").next().unwrap().to_string()
     };
     let feat = git(dir.path(), &["rev-parse", "--short", "feat"]);
@@ -1224,7 +1228,7 @@ fn the_text_summary_names_what_was_compared() {
     let piped = shapr_stdin(dir.path(), &[], &git(dir.path(), &["diff"]));
     let text = String::from_utf8(piped.stdout).unwrap();
     assert!(
-        text.lines().last().unwrap().starts_with("stdin: behavior"),
+        text.lines().next().unwrap().starts_with("stdin: behavior"),
         "{text}"
     );
 }
@@ -1301,8 +1305,7 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         ],
     ]);
     let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
-    let lines: Vec<String> = text
-        .lines()
+    let lines: Vec<String> = hunk_lines(&text)
         .take(5)
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect();
@@ -1326,7 +1329,7 @@ fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
         &[("a.rb", "def f\n  2\nend\n"), ("b.rb", "def h(\n")],
     ]);
     let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
-    let lines: Vec<&str> = text.lines().take(2).collect();
+    let lines: Vec<&str> = hunk_lines(&text).take(2).collect();
     assert_eq!(
         lines,
         [
@@ -1335,4 +1338,11 @@ fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
         ],
         "{text}"
     );
+}
+
+/// The text output's hunk lines: after the summary block and its blank line.
+fn hunk_lines(text: &str) -> std::str::Lines<'_> {
+    text.split_once("\n\n")
+        .map_or("", |(_, hunks)| hunks)
+        .lines()
 }
