@@ -96,6 +96,8 @@ struct Facts {
     exposed: bool,
     /// A method name the language reaches without a visible call.
     reserved: Option<String>,
+    /// A renamed class or module: its name is a runtime value.
+    typed: bool,
     after_gates: BTreeSet<NodeId>,
     /// The renamed nodes on the after side, by file.
     after_nodes: BTreeSet<(usize, NodeId)>,
@@ -171,6 +173,7 @@ pub(super) fn run(
             entry.reserved = entry.reserved.take().or(reserved);
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
+            entry.typed |= matches!(role, Role::Definition(NameKind::Class | NameKind::Module));
             if role.defines().is_some() {
                 entry.defined = true;
                 entry.definitions.push((hunk.file, diff.before));
@@ -498,6 +501,13 @@ fn holds(
     if let Some(name) = &facts.reserved {
         return Err(format!(
             "{name} is a name the language calls without a visible call"
+        ));
+    }
+    // `Class#name`, `inspect`, Marshal, `std::any::type_name`: any code,
+    // a dependency's included, can read a type's name, so no search settles it.
+    if facts.typed {
+        return Err(format!(
+            "{from} names a class or module, whose name code reads at runtime"
         ));
     }
     if facts.exposed {

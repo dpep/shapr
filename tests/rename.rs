@@ -229,9 +229,19 @@ fn renaming_a_method_that_calls_super_is_logic() {
 }
 
 #[test]
-fn a_class_rename_counts_its_name_once() {
+fn a_class_rename_is_logic() {
+    // `Class#name`, `inspect` and Marshal read it at runtime.
     let before = "class Box\n  def self.build\n    Box.new\n  end\nend\n";
-    let report = ruby(before, &before.replace("Box", "Crate"));
+    logic_because(
+        &ruby(before, &before.replace("Box", "Crate")),
+        "Box names a class or module",
+    );
+}
+
+#[test]
+fn a_constant_rename_counts_its_name_once() {
+    let before = "module M\n  LIMIT = 3\n\n  def self.limit\n    LIMIT\n  end\nend\n";
+    let report = ruby(before, &before.replace("LIMIT", "CAP"));
     assert_eq!(kinds(&report), ["rename"]);
     let rename = &lead(&report["hunks"][0])["detail"]["renames"][0];
     assert_eq!(

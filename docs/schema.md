@@ -323,6 +323,11 @@ every name that differs passes these checks:
   and global variables aren't renamed.
 - Neither name of a method rename is a [reserved name](#reserved-names): the
   language calls those without a call site shapr can see.
+- A class or module (in Rust a struct, enum, union, trait or `mod`) isn't
+  renamed: its name is a runtime value (Ruby's `Class#name`, `inspect`,
+  Marshal and YAML dumps, a Rails STI column; Rust's `std::any::type_name`
+  and `module_path!`) that any code, a dependency's included, can read, so
+  no search settles it.
 - A renamed dynamic reference (`send(:old)` → `send(:new)`) follows a method,
   constant or field rename that passes.
 - Every definition of the new name in its scope after the change is a
@@ -339,8 +344,7 @@ every name that differs passes these checks:
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
 class or module; a `field` in its file when it is a Ruby instance or class
 variable, and in every parsed file of the change when it is a Rust struct
-field; a `method` or `constant` (class and module names included) in every
-parsed file of the change.
+field; a `method` or `constant` in every parsed file of the change.
 
 `detail`:
 
