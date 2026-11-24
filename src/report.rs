@@ -58,6 +58,7 @@ pub struct FileRecord<'a> {
     old_file: Option<&'a str>,
     language: Option<&'static str>,
     parsed: bool,
+    generated: bool,
     lines_before: Option<usize>,
     hunks: usize,
     #[serde(flatten)]
@@ -72,6 +73,7 @@ pub struct HunkRecord<'a> {
     old_file: Option<&'a str>,
     language: Option<&'static str>,
     parsed: bool,
+    generated: bool,
     before: Lines,
     after: Lines,
     kind: Kind,
@@ -121,6 +123,7 @@ pub struct Summary {
     pub verdict: Verdict,
     hunks: usize,
     unparsed_hunks: usize,
+    generated_hunks: usize,
     kinds: BTreeMap<&'static str, usize>,
     files: usize,
     directories: usize,
@@ -138,7 +141,10 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
     for (file, labels) in change.files.iter().zip(labels) {
         let mut totals = LineCounts::default();
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
-            let lines = count_lines(file, hunk, label, hunks.len());
+            let mut lines = count_lines(file, hunk, label, hunks.len());
+            if file.generated {
+                lines.review_lines = 0;
+            }
             totals.add(&lines);
             hunks.push(HunkRecord {
                 record: "hunk",
@@ -147,6 +153,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
                 old_file: file.diff.old_path.as_deref(),
                 language: file.language(),
                 parsed: label.evidence.method == Method::Ast,
+                generated: file.generated,
                 before: hunk.before,
                 after: hunk.after,
                 kind: label.kind,
@@ -165,6 +172,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels) -> Report<'a> {
             parsed: labels
                 .iter()
                 .all(|l: &Label| l.evidence.method == Method::Ast),
+            generated: file.generated,
             lines_before: file.lines_before,
             hunks: labels.len(),
             lines: totals,
@@ -253,10 +261,14 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
     let (mut structure, mut behavior, mut structure_lines, mut behavior_lines) = (0, 0, 0, 0);
     for hunk in hunks {
         *kinds.entry(hunk.kind.as_str()).or_default() += 1;
-        lines.add(&hunk.lines);
+        // A generated hunk sways the verdict but not the size.
+        let size = !hunk.generated;
+        if size {
+            lines.add(&hunk.lines);
+        }
         if hunk.kind.is_structure() {
             structure += 1;
-            structure_lines += hunk.lines.changed();
+            structure_lines += hunk.lines.changed() * usize::from(size);
         } else {
             behavior += 1;
             behavior_lines += hunk.lines.review_lines;
@@ -284,11 +296,17 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord]) -> Summary {
         verdict,
         hunks: hunks.len(),
         unparsed_hunks: hunks.iter().filter(|h| !h.parsed).count(),
+        generated_hunks: hunks.iter().filter(|h| h.generated).count(),
         kinds,
         files: files.len(),
         directories: dirs.len(),
         subsystems: subsystems.len(),
-        entropy: round2(entropy(files.iter().map(|f| f.lines.changed()))),
+        entropy: round2(entropy(
+            files
+                .iter()
+                .filter(|f| !f.generated)
+                .map(|f| f.lines.changed()),
+        )),
         lines,
         behavior_lines,
         structure_share: if total == 0 {
@@ -358,11 +376,16 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     for hunk in &report.hunks {
         writeln!(
             out,
-            "{:width$}  {:<17} {:.2}  {}",
+            "{:width$}  {:<17} {:.2}  {}{}",
             place(hunk),
             hunk.kind.as_str(),
             hunk.confidence.get(),
             hunk.reason,
+            if hunk.generated {
+                " (generated: not counted in size)"
+            } else {
+                ""
+            },
         )?;
     }
     let s = &report.summary;
@@ -374,7 +397,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .collect();
     writeln!(
         out,
-        "{}: {} hunks ({}); review {} lines; comments +{} -{}; structure share {:.2}",
+        "{}: {} hunks ({}); review {} lines{}; comments +{} -{}; structure share {:.2}",
         s.verdict.as_str(),
         s.hunks,
         if kinds.is_empty() {
@@ -383,6 +406,11 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             kinds.join(", ")
         },
         s.lines.review_lines,
+        match s.generated_hunks {
+            0 => String::new(),
+            1 => " (1 generated hunk not counted)".to_string(),
+            n => format!(" ({n} generated hunks not counted)"),
+        },
         s.lines.comment_added,
         s.lines.comment_deleted,
         s.structure_share,

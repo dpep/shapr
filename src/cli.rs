@@ -146,7 +146,7 @@ pub fn run() -> ExitCode {
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
 
-    let change = change::assemble(diff::parse(&text), &mut git::Blobs::new(git));
+    let change = change::assemble(diff::parse(&text), &git);
     let labels = classify::classify(&change);
     let report = report::build(&change, &labels);
     if !cli.quiet {

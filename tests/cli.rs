@@ -219,6 +219,68 @@ fn a_move_with_changes_reviews_only_the_changed_lines() {
 }
 
 #[test]
+fn a_lockfile_drives_the_verdict_but_not_the_size() {
+    let reformatted = METHOD.replace("greet(name)", "greet( name )");
+    let (report, code) = classify(
+        &[
+            ("a.rb", METHOD),
+            ("Gemfile.lock", "rack (2.0)\nrake (13.0)\n"),
+        ],
+        &[
+            ("a.rb", &reformatted),
+            ("Gemfile.lock", "rack (3.0)\nrake (13.1)\n"),
+        ],
+    );
+    assert_eq!(kinds(&report), ["logic", "format_only"]);
+    let lock = &report["hunks"][0];
+    assert_eq!(lock["generated"], true);
+    assert_eq!(lock["added"], 2);
+    assert_eq!(lock["review_lines"], 0);
+    assert_eq!(report["files"][0]["generated"], true);
+    assert_eq!(report["hunks"][1]["generated"], false);
+    let summary = &report["summary"];
+    assert_eq!(summary["verdict"], "mixed");
+    assert_eq!(summary["generated_hunks"], 1);
+    assert_eq!(
+        (summary["added"].as_u64(), summary["review_lines"].as_u64()),
+        (Some(1), Some(0))
+    );
+    assert_eq!(summary["behavior_lines"], 0);
+    assert_eq!(summary["structure_share"], 1.0);
+    assert_eq!(code, 3);
+}
+
+#[test]
+fn gitattributes_mark_generated_files_and_can_unmark_a_lockfile() {
+    let attributes = "gen/** linguist-generated\nyarn.lock -linguist-generated\n";
+    let (report, _) = classify(
+        &[
+            (".gitattributes", attributes),
+            ("gen/api.rb", "X = 1\n"),
+            ("yarn.lock", "a@1\n"),
+        ],
+        &[
+            (".gitattributes", attributes),
+            ("gen/api.rb", "X = 2\n"),
+            ("yarn.lock", "a@2\n"),
+        ],
+    );
+    let generated: Vec<(&str, bool)> = report["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["file"].as_str().unwrap(),
+                f["generated"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(generated, [("gen/api.rb", true), ("yarn.lock", false)]);
+    assert_eq!(report["summary"]["review_lines"], 2);
+}
+
+#[test]
 fn a_syntax_error_falls_back_to_lines_with_capped_confidence() {
     let before = "def a\n  1+1\nend\ndef broken(\n";
     let after = "def a\n  1 + 1\nend\ndef broken(\n";
@@ -285,6 +347,7 @@ fn dash_c_reads_that_repository_whatever_git_dir_says() {
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .unwrap();
         child

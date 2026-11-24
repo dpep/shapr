@@ -2,8 +2,10 @@
 //! blob id.
 
 use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 
 /// Where git runs: the current directory, or the one `-C` names.
 pub struct Git {
@@ -46,10 +48,63 @@ impl Git {
         ]))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
+
+    fn toplevel(&self) -> Option<PathBuf> {
+        let out = run(self.command().args(["rev-parse", "--show-toplevel"])).ok()?;
+        Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
+    }
+
+    /// Each path's `linguist-generated` attribute, where .gitattributes sets
+    /// or unsets it. Empty outside a repository.
+    pub fn linguist_generated(&self, paths: &[&str]) -> HashMap<String, bool> {
+        let mut input = Vec::new();
+        for path in paths {
+            input.extend_from_slice(path.as_bytes());
+            input.push(0);
+        }
+        let Some(toplevel) = self.toplevel() else {
+            return HashMap::new();
+        };
+        // check-attr reads paths against the cwd; the diff's are from the top.
+        let mut cmd = self.command();
+        cmd.current_dir(toplevel)
+            .args(["check-attr", "-z", "--stdin", "linguist-generated"]);
+        let Ok(out) = run_with_input(&mut cmd, &input) else {
+            return HashMap::new();
+        };
+        let out = String::from_utf8_lossy(&out);
+        let fields: Vec<&str> = out.split('\0').collect();
+        let (triples, _) = fields.as_chunks::<3>();
+        triples
+            .iter()
+            .filter_map(|[path, _, value]| {
+                let value = match *value {
+                    "set" | "true" => true,
+                    "unset" | "false" => false,
+                    _ => return None,
+                };
+                Some((path.to_string(), value))
+            })
+            .collect()
+    }
 }
 
 fn run(cmd: &mut Command) -> Result<Vec<u8>> {
-    let output = cmd.output().context("could not run git")?;
+    check(cmd.output().context("could not run git")?)
+}
+
+fn run_with_input(cmd: &mut Command, input: &[u8]) -> Result<Vec<u8>> {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("could not run git")?;
+    child.stdin.take().context("git stdin")?.write_all(input)?;
+    check(child.wait_with_output()?)
+}
+
+fn check(output: Output) -> Result<Vec<u8>> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("git: {}", stderr.trim());
@@ -60,13 +115,13 @@ fn run(cmd: &mut Command) -> Result<Vec<u8>> {
 /// Reads file contents by blob id. Blobs `git diff` names for a working-tree
 /// file aren't in the object store, so those are read from disk when the
 /// file there still hashes to the id.
-pub struct Blobs {
-    git: Git,
+pub struct Blobs<'a> {
+    git: &'a Git,
     toplevel: Option<PathBuf>,
 }
 
-impl Blobs {
-    pub fn new(git: Git) -> Self {
+impl<'a> Blobs<'a> {
+    pub fn new(git: &'a Git) -> Self {
         Blobs {
             git,
             toplevel: None,
@@ -85,8 +140,7 @@ impl Blobs {
 
     fn read_worktree(&mut self, id: &str, path: &str) -> Option<Vec<u8>> {
         if self.toplevel.is_none() {
-            let out = run(self.git.command().args(["rev-parse", "--show-toplevel"])).ok()?;
-            self.toplevel = Some(PathBuf::from(String::from_utf8_lossy(&out).trim()));
+            self.toplevel = self.git.toplevel();
         }
         let file = self.toplevel.as_ref()?.join(path);
         let hashed = run(self.git.command().arg("hash-object").arg(&file)).ok()?;

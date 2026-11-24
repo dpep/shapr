@@ -13,3 +13,4 @@
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
 - `review_lines` counts the code lines a reviewer still has to read: 0 for `format_only`, `comment_only`, `rename` and `move`; only the changed lines inside a `move_with_changes`; every code line of an `extract`, `inline` or `logic` hunk. `behavior_lines` sums `review_lines` over behavior hunks.
 - `-C DIR` runs shapr as if started in DIR, like `git -C`; an inherited `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is ignored when it's given.
+- Lockfiles (`Gemfile.lock`, `Cargo.lock`, `package-lock.json`, `yarn.lock`, `go.sum` and others), `*.min.js`/`*.min.css`, and paths `.gitattributes` marks `linguist-generated` are `generated: true` on file and hunk records. They still count toward the verdict (a dependency change is behavior) but not toward `review_lines` or the summary's size measures; `summary.generated_hunks` counts them.

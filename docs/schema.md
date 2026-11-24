@@ -110,6 +110,31 @@ Where uses can be unseen, the unseen ones are smoothed in as one unknown
 (Laplace's rule of succession): `(renamed + 1) / (uses + 2)`, so a method
 renamed with two call sites scores 0.8, and one with none 0.67.
 
+## Generated files
+
+A file is `generated` when a tool writes it and the change that matters is
+reviewed elsewhere:
+
+- a lockfile, by name in any directory: `Cargo.lock`, `Gemfile.lock`,
+  `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`,
+  `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`,
+  `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`,
+  `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`;
+- a minified asset: `*.min.js`, `*.min.css`;
+- a path `.gitattributes` marks `linguist-generated`. The attribute wins
+  either way: `-linguist-generated` (or `=false`) unmarks a lockfile. It is
+  read as `git check-attr` sees it, from the working tree's
+  `.gitattributes`, not the diffed revisions'.
+
+A generated file's hunks are classified like any other, so a lockfile
+(unparsed) is `logic` and a dependency change sways the verdict to
+`behavior` or `mixed`. They don't count toward size: their `review_lines` is
+0, and the summary's line sums, `behavior_lines`, `entropy` and
+`structure_share` leave them out. Their own `added`, `deleted` and other
+line counts stay as the diff has them. Generated-but-reviewed files such as
+a Rails `db/schema.rb` are not on the list; mark them in `.gitattributes`
+if they should be.
+
 ## `file` record
 
 | field | type | meaning |
@@ -119,9 +144,10 @@ renamed with two call sites scores 0.8, and one with none 0.67.
 | `old_file` | string or null | Path before the change; `null` for an added file. Differs from `file` on a rename. |
 | `language` | string or null | The frontend that parsed it (`"ruby"`); `null` when none did. |
 | `parsed` | bool | Every hunk in the file was compared as trees (`evidence.method` `"ast"`). |
+| `generated` | bool | A lockfile or generated file. See [Generated files](#generated-files). |
 | `lines_before` | int or null | Lines in the file before the change (Kamei's LT); 0 for an added file; `null` when its content couldn't be read. |
 | `hunks` | int | Hunk records that follow for this file. |
-| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the file's hunks. |
+| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the file's hunks, generated or not. |
 
 ## `hunk` record
 
@@ -131,6 +157,7 @@ renamed with two call sites scores 0.8, and one with none 0.67.
 | `id` | int | Position in the output, from 0. Kind-specific `detail` refers to other hunks by `id`. |
 | `file`, `old_file`, `language` | | As in the `file` record. |
 | `parsed` | bool | Compared as trees. `false` when either side has a syntax error (compared as text instead) or the file wasn't parsed at all. |
+| `generated` | bool | The hunk's file is generated: its `review_lines` is 0 and the summary's size sums leave it out. See [Generated files](#generated-files). |
 | `before`, `after` | line run | The changed region on each side. |
 | `kind` | string | See [Hunk kinds](#hunk-kinds). |
 | `confidence` | number 0–1 | How strongly the evidence supports `kind`. See [Confidence](#confidence). |
@@ -139,7 +166,7 @@ renamed with two call sites scores 0.8, and one with none 0.67.
 | `added`, `deleted` | int | `+` and `-` lines (Kamei's LA and LD for this hunk). |
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
-| `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. |
+| `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. 0 in a `generated` file. |
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. |
 
 ## Evidence
@@ -249,14 +276,15 @@ enough to match by chance, and when several units could be its other half.
 | `verdict` | string | `"structure"`: every hunk is a structural kind. `"behavior"`: none is. `"mixed"`: both. `"empty"`: no hunks. The exit code carries it too. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
+| `generated_hunks` | int | Hunks with `generated: true`. They count in `hunks`, `kinds` and `verdict`, and nowhere below. |
 | `kinds` | object | Hunk count per kind, every kind present. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
-| `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`). 0 for one file. |
-| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over all hunks. |
+| `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated. 0 for one file. |
+| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated. |
 | `behavior_lines` | int | `review_lines` summed over hunks of behavior kinds (`logic`, `move_with_changes`): the behavior change's size, comments and unchanged moved lines excluded. |
-| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structural hunks over all changed lines; 0 when nothing changed. |
+| `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structural hunks over all changed lines, generated hunks left out; 0 when nothing changed. |
 
 ## Exit codes
 
