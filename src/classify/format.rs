@@ -27,11 +27,27 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 (true, false) => (Kind::CommentOnly, "same code; comments differ"),
                 (false, _) => (Kind::Logic, "code differs beyond whitespace and comments"),
             };
-            label.kind = kind;
+            // Text equality can't see a change in how whitespace parses
+            // (`puts -x` vs `puts - x`): structure needs tree evidence.
+            let unproven = !trees.clean() && kind.is_structure();
+            let reason = if unproven {
+                format!("{reason}, but text can't prove structure")
+            } else {
+                reason.to_string()
+            };
             label.reason = match broken_sides(trees) {
                 Some(sides) => format!("{reason}; syntax error on {sides}; compared line by line"),
-                None => reason.to_string(),
+                None => reason,
             };
+            if unproven {
+                // The label is the safe default, not a finding.
+                label.confidence = Confidence::new(0.0);
+                label
+                    .detail
+                    .insert("near".into(), Value::from(kind.as_str()));
+                continue;
+            }
+            label.kind = kind;
             label.confidence = Confidence::new(strength(trees, &site.before, &site.after));
             if let Some(similarity) = compared.similarity {
                 let rounded = Confidence::new(similarity).get();

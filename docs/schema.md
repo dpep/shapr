@@ -205,7 +205,7 @@ are stated in Ruby's terms; for Rust:
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
 | `review_lines` | int | Changed code lines a reviewer still has to read. `format_only`, `comment_only`, `rename` and `move`: 0. `move_with_changes`: the hunk's code lines listed in its `detail.moves` `changed_before` (for a unit it removed) or `changed_after` (for a unit it added), plus, for an entry with a `context`, its `from_line` or `to_line` (the unit's first code line, where the new context shows), so the unchanged body of the move is discounted. `extract`, `inline` and `logic`: `code_added + code_deleted`; extracts and inlines are structure but still need reading. 0 in a `generated` file. |
-| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. |
+| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A `logic` hunk that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change a `logic` hunk is, in the table's order; empty for every other kind. See [Facets](#facets). |
 
 ## Evidence
@@ -327,10 +327,13 @@ Confidence is computed from the evidence, not assigned per kind.
   `move_with_changes`, `extract` and `inline` compute their own score: see
   [Renames](#renames), [Moves](#moves) and
   [Extract and inline](#extract-and-inline).
-- `method` `"line"`: at most **0.5** (the line cap): text equality can't see a
-  change in how whitespace parses. It falls in proportion to the region's lines
-  that hold a syntax error: `0.5 × (1 − lines with an error / lines in both
-  regions)`.
+- `method` `"line"`: text equality can't see a change in how whitespace
+  parses (`puts -x` and `puts - x`), so it never proves structure. A hunk
+  whose code text matches is `logic` with confidence 0 and `detail.near`
+  naming the kind it resembles, `"format_only"` or `"comment_only"`. One
+  whose code text differs is `logic` at most **0.5** (the line cap), falling in
+  proportion to the region's lines that hold a syntax error: `0.5 × (1 − lines
+  with an error / lines in both regions)`.
 - `method` `"none"`: 0. The `logic` label is the safe default, not a finding.
 
 ## Moves

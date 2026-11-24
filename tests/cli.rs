@@ -281,15 +281,16 @@ fn gitattributes_mark_generated_files_and_can_unmark_a_lockfile() {
 }
 
 #[test]
-fn a_syntax_error_falls_back_to_lines_with_capped_confidence() {
+fn a_syntax_error_falls_back_to_lines_and_proves_no_structure() {
     let before = "def a\n  1+1\nend\ndef broken(\n";
     let after = "def a\n  1 + 1\nend\ndef broken(\n";
     let (report, _) = classify(&[("a.rb", before)], &[("a.rb", after)]);
     let hunk = &report["hunks"][0];
-    assert_eq!(hunk["kind"], "format_only");
+    assert_eq!(hunk["kind"], "logic");
+    assert_eq!(hunk["detail"]["near"], "format_only");
     assert_eq!(hunk["parsed"], false);
     assert_eq!(hunk["evidence"]["method"], "line");
-    assert!(hunk["confidence"].as_f64().unwrap() <= 0.5);
+    assert_eq!(hunk["confidence"], 0.0);
     assert_eq!(report["summary"]["unparsed_hunks"], 1);
 }
 
