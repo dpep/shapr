@@ -12,6 +12,7 @@ pub mod site;
 mod align;
 mod extract;
 mod format;
+mod hazard;
 mod moves;
 mod rename;
 

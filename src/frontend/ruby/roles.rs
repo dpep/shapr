@@ -2,7 +2,7 @@
 //! on the node itself.
 
 use crate::frontend::Construct;
-use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Tree, Visibility};
+use crate::tree::{Hazard, NameKind, NodeId, Receiver, Role, Tree, Visibility};
 use ruby_prism::Node;
 use std::collections::{HashMap, HashSet};
 
@@ -118,15 +118,15 @@ impl Roles {
                 let name = node.as_global_variable_read_node().map(|n| n.name());
                 // The last match and the last line read are local to the frame.
                 match name.map(|n| n.as_slice()) {
-                    Some(b"$~" | b"$_") => Role::Jump(Jump::Frame),
+                    Some(b"$~" | b"$_") => Role::Hazard(Hazard::Frame),
                     _ => Role::Reference(Global),
                 }
             }
             Node::NumberedReferenceReadNode { .. } | Node::BackReferenceReadNode { .. } => {
-                Role::Jump(Jump::Frame)
+                Role::Hazard(Hazard::Frame)
             }
-            Node::SourceLineNode { .. } => Role::Jump(Jump::Line),
-            Node::SourceFileNode { .. } => Role::Jump(Jump::File),
+            Node::SourceLineNode { .. } => Role::Hazard(Hazard::Line),
+            Node::SourceFileNode { .. } => Role::Hazard(Hazard::File),
             Node::ConstantReadNode { .. } => Role::Reference(Constant),
             Node::ConstantPathNode { .. } => {
                 let name = node.as_constant_path_node().and_then(|n| owned(n.name()));
@@ -161,13 +161,15 @@ impl Roles {
                 };
                 return (Role::DynamicName, Some(value));
             }
-            Node::ReturnNode { .. } => Role::Jump(Jump::Return),
-            Node::BreakNode { .. } => Role::Jump(Jump::Break),
-            Node::NextNode { .. } => Role::Jump(Jump::Next),
-            Node::RedoNode { .. } => Role::Jump(Jump::Redo),
-            Node::RetryNode { .. } => Role::Jump(Jump::Retry),
-            Node::YieldNode { .. } => Role::Jump(Jump::Yield),
-            Node::SuperNode { .. } | Node::ForwardingSuperNode { .. } => Role::Jump(Jump::Super),
+            Node::ReturnNode { .. } => Role::Hazard(Hazard::Return),
+            Node::BreakNode { .. } => Role::Hazard(Hazard::Break),
+            Node::NextNode { .. } => Role::Hazard(Hazard::Next),
+            Node::RedoNode { .. } => Role::Hazard(Hazard::Redo),
+            Node::RetryNode { .. } => Role::Hazard(Hazard::Retry),
+            Node::YieldNode { .. } => Role::Hazard(Hazard::Yield),
+            Node::SuperNode { .. } | Node::ForwardingSuperNode { .. } => {
+                Role::Hazard(Hazard::Super)
+            }
             _ => Role::Other,
         };
         (role, None)
@@ -224,19 +226,19 @@ impl Roles {
                 .and_then(|r| r.as_constant_read_node())
                 .is_some_and(|c| c.name().as_slice() == b"Proc");
         match name {
-            b"block_given?" | b"iterator?" if implicit => Role::Jump(Jump::BlockGiven),
+            b"block_given?" | b"iterator?" if implicit => Role::Hazard(Hazard::BlockGiven),
             // With no block of its own, a proc takes the method's block.
-            b"proc" | b"lambda" if implicit && blockless => Role::Jump(Jump::BlockGiven),
-            _ if proc_new && blockless => Role::Jump(Jump::BlockGiven),
-            b"binding" | b"local_variables" | b"eval" if implicit => Role::Jump(Jump::Binding),
+            b"proc" | b"lambda" if implicit && blockless => Role::Hazard(Hazard::BlockGiven),
+            _ if proc_new && blockless => Role::Hazard(Hazard::BlockGiven),
+            b"binding" | b"local_variables" | b"eval" if implicit => Role::Hazard(Hazard::Binding),
             // A string evaluated in another self still sees the caller's locals.
             b"instance_eval" | b"class_eval" | b"module_eval" if call.arguments().is_some() => {
-                Role::Jump(Jump::Binding)
+                Role::Hazard(Hazard::Binding)
             }
             b"__method__" | b"__callee__" | b"caller" | b"caller_locations" if implicit => {
-                Role::Jump(Jump::Frame)
+                Role::Hazard(Hazard::Frame)
             }
-            b"__dir__" | b"require_relative" if implicit => Role::Jump(Jump::File),
+            b"__dir__" | b"require_relative" if implicit => Role::Hazard(Hazard::File),
             _ => Role::Call(receiver),
         }
     }

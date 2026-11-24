@@ -10,9 +10,10 @@
 //! must equal the chunk once its parameters are renamed to the call's
 //! arguments, and a hunk may change nothing else.
 
+use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Label, Labels, Part, site};
 use crate::change::{Change, Trees};
-use crate::tree::{Jump, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
+use crate::tree::{MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -256,12 +257,12 @@ fn find(
         .collect();
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
-    // The chunk stays in its file, so `__FILE__` reads the same in B.
-    let bound = |n: NodeId| matches!(chunks.node(n).role, Role::Jump(j) if j != Jump::File);
-    // Code anywhere in A that reads its frame (`binding`, `$1`) sees the
-    // chunk's locals and matches leave, or arrive.
-    let frame = |n: NodeId| matches!(chunks.node(n).role, Role::Jump(Jump::Binding | Jump::Frame));
-    let outcome = if in_chunk().any(bound) || chunks.descendants(a_chunk).any(frame) {
+    let blocks = |op: Op, n: NodeId| chunks.node(n).role.hazard().is_some_and(|h| blocks(op, h));
+    let outcome = if in_chunk().any(|n| blocks(Op::Extract, n))
+        || chunks
+            .descendants(a_chunk)
+            .any(|n| blocks(Op::ExtractCaller, n))
+    {
         Err(Risk::Jump)
     } else if in_chunk().any(|n| {
         let node = chunks.node(n);

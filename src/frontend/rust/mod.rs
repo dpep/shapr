@@ -373,7 +373,7 @@ impl<'a> Walker<'a> {
 
     /// Inside a token tree: every token a leaf, every identifier opaque.
     fn token(&mut self, n: Node<'_>) {
-        use crate::tree::{Jump, Role};
+        use crate::tree::{Hazard, Role};
         if is_comment(&n) {
             return self.comment(&n);
         }
@@ -382,8 +382,8 @@ impl<'a> Walker<'a> {
                 let name = self.text(&n);
                 let bang = n.next_sibling().is_some_and(|s| s.kind() == "!");
                 let role = match name {
-                    "line" | "column" if bang => Role::Jump(Jump::Line),
-                    "file" | "module_path" if bang => Role::Jump(Jump::File),
+                    "line" | "column" if bang => Role::Hazard(Hazard::Line),
+                    "file" | "module_path" if bang => Role::Hazard(Hazard::File),
                     _ => Role::Opaque,
                 };
                 self.leaf(&n, Some(name), role);
@@ -391,11 +391,11 @@ impl<'a> Walker<'a> {
             "string_literal" => self.format_string(n),
             _ if n.child_count() == 0 || n.kind() == "raw_string_literal" => {
                 let role = match (n.is_named(), n.kind()) {
-                    (false, "return" | "?") => Role::Jump(Jump::Return),
-                    (false, "break") => Role::Jump(Jump::Break),
-                    (false, "continue") => Role::Jump(Jump::Next),
-                    (false, "await") => Role::Jump(Jump::Await),
-                    (false, "yield") => Role::Jump(Jump::Yield),
+                    (false, "return" | "?") => Role::Hazard(Hazard::Return),
+                    (false, "break") => Role::Hazard(Hazard::Break),
+                    (false, "continue") => Role::Hazard(Hazard::Next),
+                    (false, "await") => Role::Hazard(Hazard::Await),
+                    (false, "yield") => Role::Hazard(Hazard::Yield),
                     _ => Role::Other,
                 };
                 self.leaf(&n, None, role);
@@ -475,7 +475,7 @@ impl<'a> Walker<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::{Jump, NameKind::*, Receiver, Role};
+    use crate::tree::{Hazard, NameKind::*, Receiver, Role};
 
     fn parse(src: &str) -> Tree {
         Rust.parse(src.as_bytes().to_vec())
@@ -646,14 +646,14 @@ mod tests {
              println!(\"{}\", a);\n  return Ok(a);\n}\n",
         );
         for jump in [
-            Jump::Return,
-            Jump::Await,
-            Jump::Break,
-            Jump::Next,
-            Jump::Macro,
+            Hazard::Return,
+            Hazard::Await,
+            Hazard::Break,
+            Hazard::Next,
+            Hazard::Macro,
         ] {
             assert!(
-                found.iter().any(|(r, _)| *r == Role::Jump(jump)),
+                found.iter().any(|(r, _)| *r == Role::Hazard(jump)),
                 "{jump:?}"
             );
         }
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(
             position
                 .iter()
-                .filter(|r| matches!(r, Role::Jump(Jump::Line | Jump::File)))
+                .filter(|r| matches!(r, Role::Hazard(Hazard::Line | Hazard::File)))
                 .count(),
             4
         );
@@ -671,7 +671,7 @@ mod tests {
         assert_eq!(
             jumping_tokens
                 .iter()
-                .filter(|(r, _)| *r == Role::Jump(Jump::Return))
+                .filter(|(r, _)| *r == Role::Hazard(Hazard::Return))
                 .count(),
             2
         );

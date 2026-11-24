@@ -39,9 +39,10 @@ pub enum Role {
     /// Changes the visibility of the definitions after it, or of its arguments.
     Visibility(Visibility),
     /// Code bound to the enclosing method or block (control flow, its
-    /// frame) or to its own position: it means something else once moved
-    /// into a new method.
-    Jump(Jump),
+    /// frame) or to its own position: it can mean something else once
+    /// moved or renamed. `classify::hazard::blocks` says which operations
+    /// each stops.
+    Hazard(Hazard),
     /// An identifier the parser can't resolve, as in a Rust macro's token
     /// tree: it may name anything in scope, locals included.
     Opaque,
@@ -64,6 +65,13 @@ impl Role {
                 NameKind::Method | NameKind::Class | NameKind::Module | NameKind::Constant
             )
         )
+    }
+
+    pub fn hazard(self) -> Option<Hazard> {
+        match self {
+            Role::Hazard(hazard) => Some(hazard),
+            _ => None,
+        }
     }
 
     /// The kind of name the node declares, a [`Role::Bind`] included.
@@ -121,8 +129,8 @@ pub enum Visibility {
     ModuleFunction,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Jump {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Hazard {
     Return,
     Break,
     Next,

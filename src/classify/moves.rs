@@ -21,9 +21,10 @@
 //! unit's lines that changed in the move, which stay logic.
 
 use super::format::{dice, subtree_hashes};
+use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Labels, Part, rounded};
 use crate::change::{Change, Trees};
-use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility, spells};
+use crate::tree::{Hazard, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
 use serde_json::{Map, json};
 use std::collections::HashMap;
@@ -624,11 +625,13 @@ fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
 
 /// Whether the unit reads its own line, or its own file when it changed files.
 fn positional(tree: &Tree, node: NodeId, across: bool) -> bool {
-    tree.descendants(node).any(|d| match tree.node(d).role {
-        Role::Jump(Jump::Line) => true,
-        Role::Jump(Jump::File) => across,
-        _ => false,
-    })
+    let op = if across {
+        Op::MoveAcrossFiles
+    } else {
+        Op::Move
+    };
+    tree.descendants(node)
+        .any(|d| tree.node(d).role.hazard().is_some_and(|h| blocks(op, h)))
 }
 
 /// The section a declaration sits in: the last bare visibility statement
@@ -696,7 +699,7 @@ fn inert(tree: &Tree, node: NodeId) -> bool {
     let n = tree.node(node);
     let calls = || {
         tree.descendants(node)
-            .any(|d| matches!(tree.node(d).role, Role::Call(_) | Role::Jump(_)))
+            .any(|d| matches!(tree.node(d).role, Role::Call(_) | Role::Hazard(_)))
     };
     match n.role {
         Role::Definition(NameKind::Constant) => !calls(),
@@ -721,7 +724,7 @@ fn invokes(tree: &Tree, node: NodeId, name: &str) -> bool {
         n.name.as_deref() == Some(name)
             && matches!(
                 n.role,
-                Role::Reference(NameKind::Macro) | Role::Jump(Jump::Macro) | Role::Opaque
+                Role::Reference(NameKind::Macro) | Role::Hazard(Hazard::Macro) | Role::Opaque
             )
     })
 }

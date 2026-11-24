@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn roles_mark_jumps_and_calls() {
-        use crate::tree::Jump::*;
+        use crate::tree::Hazard::*;
         let found = roles(
             "def run(&blk)\n  return 1 if block_given?\n  loop { break }\n  loop { redo }\n  [1].each { next }\n\
              yield\n  super\n  super(1)\n  begin; rescue; retry; end\n\
@@ -350,13 +350,13 @@ mod tests {
         );
         for jump in [Return, BlockGiven, Break, Redo, Next, Yield, Super, Retry] {
             assert!(
-                found.iter().any(|(r, _)| *r == Role::Jump(jump)),
+                found.iter().any(|(r, _)| *r == Role::Hazard(jump)),
                 "{jump:?}"
             );
         }
         let supers = found
             .iter()
-            .filter(|(r, _)| *r == Role::Jump(Super))
+            .filter(|(r, _)| *r == Role::Hazard(Super))
             .count();
         assert_eq!(supers, 2);
         assert!(has(&found, Role::Call(Receiver::Implicit), Some("go")));
@@ -371,12 +371,12 @@ mod tests {
 
     #[test]
     fn roles_mark_frame_and_position_reads() {
-        use crate::tree::Jump::*;
-        let jumps = |src: &str| -> Vec<crate::tree::Jump> {
+        use crate::tree::Hazard::*;
+        let jumps = |src: &str| -> Vec<crate::tree::Hazard> {
             roles(src)
                 .into_iter()
                 .filter_map(|(r, _)| match r {
-                    Role::Jump(j) => Some(j),
+                    Role::Hazard(j) => Some(j),
                     _ => None,
                 })
                 .collect()

@@ -3,7 +3,7 @@
 
 use super::{Walker, span};
 use crate::frontend::Construct;
-use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Tree};
+use crate::tree::{Hazard, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
 use tree_sitter::Node;
 
@@ -430,10 +430,10 @@ impl Walker<'_> {
                     t.rsplit("::").next().unwrap_or(t)
                 });
                 let role = match name {
-                    Some("line" | "column") => Role::Jump(Jump::Line),
-                    Some("file" | "module_path") => Role::Jump(Jump::File),
+                    Some("line" | "column") => Role::Hazard(Hazard::Line),
+                    Some("file" | "module_path") => Role::Hazard(Hazard::File),
                     Some(name) if PLAIN_MACROS.contains(&name) => Role::Reference(Macro),
-                    _ => Role::Jump(Jump::Macro),
+                    _ => Role::Hazard(Hazard::Macro),
                 };
                 self.open(&n, attrs, name, role);
                 self.children_with(
@@ -452,19 +452,19 @@ impl Walker<'_> {
 
             // Control flow bound to the enclosing function.
             (_, "return_expression" | "try_expression") => {
-                self.branch(n, attrs, None, Role::Jump(Jump::Return), mode, &[])
+                self.branch(n, attrs, None, Role::Hazard(Hazard::Return), mode, &[])
             }
             (_, "break_expression") => {
-                self.branch(n, attrs, None, Role::Jump(Jump::Break), mode, &[])
+                self.branch(n, attrs, None, Role::Hazard(Hazard::Break), mode, &[])
             }
             (_, "continue_expression") => {
-                self.branch(n, attrs, None, Role::Jump(Jump::Next), mode, &[])
+                self.branch(n, attrs, None, Role::Hazard(Hazard::Next), mode, &[])
             }
             (_, "await_expression") => {
-                self.branch(n, attrs, None, Role::Jump(Jump::Await), mode, &[])
+                self.branch(n, attrs, None, Role::Hazard(Hazard::Await), mode, &[])
             }
             (_, "yield_expression") => {
-                self.branch(n, attrs, None, Role::Jump(Jump::Yield), mode, &[])
+                self.branch(n, attrs, None, Role::Hazard(Hazard::Yield), mode, &[])
             }
 
             (

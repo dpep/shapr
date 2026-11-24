@@ -9,9 +9,10 @@
 //! be any of them.
 
 use super::align::{Alignment, Diff, align};
+use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Labels, Part, site};
 use crate::change::{Change, Trees};
-use crate::tree::{Jump, NameKind, NodeId, Role, Tree, spells};
+use crate::tree::{Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -86,9 +87,8 @@ struct Hunk {
 struct Facts {
     renamed: usize,
     defined: bool,
-    calls_super: bool,
-    /// A renamed method reads its own frame (`__method__`).
-    reads_frame: bool,
+    /// Hazards in a renamed method's own body that stop its rename.
+    hazards: BTreeSet<Hazard>,
     /// A renamed definition's name is visible beyond code.
     exposed: bool,
     /// A method name the language reaches without a visible call.
@@ -134,9 +134,9 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
             entry.defined |= role.defines().is_some();
-            let method = role == Role::Definition(NameKind::Method);
-            entry.calls_super |= method && holds(&t.before, diff.before, Jump::Super);
-            entry.reads_frame |= method && holds(&t.before, diff.before, Jump::Frame);
+            if role == Role::Definition(NameKind::Method) {
+                entry.hazards.extend(own_hazards(&t.before, diff.before));
+            }
             entry.exposed |= role.is_declaration() && exposed(&t.before, diff.before);
             entry.after_gates.insert(gate(&t.after, diff.after));
             entry.after_nodes.insert((hunk.file, diff.after));
@@ -346,27 +346,23 @@ fn judge(
             "{name} is a name the language calls without a visible call"
         ));
     }
-    if facts.calls_super {
-        return Err(format!("its super call now reaches the parent's {to}"));
-    }
     if facts.exposed {
         return Err(format!("an attribute may read the name {from}"));
     }
-    if facts.reads_frame {
-        return Err(format!(
-            "it reads its own name (`__method__`), which becomes {to}"
-        ));
+    if let Some(&hazard) = facts.hazards.first() {
+        return Err(hazard_reason(hazard, from, to));
     }
     let scope = pair.space.scope;
     let (before, after) = roots(change, pair, facts);
-    let binding = |&(_, t, root): &(usize, &Tree, NodeId)| {
-        t.descendants(root)
-            .any(|d| t.node(d).role == Role::Jump(Jump::Binding))
-    };
-    if scope == Scope::Local && before.iter().chain(&after).any(binding) {
-        return Err(format!(
-            "its scope reads locals by name at runtime, {from} among them"
-        ));
+    if scope == Scope::Local {
+        let hazard = before.iter().chain(&after).find_map(|&(_, t, root)| {
+            t.descendants(root)
+                .filter_map(|d| t.node(d).role.hazard())
+                .find(|&h| blocks(Op::RenameLocal, h))
+        });
+        if let Some(hazard) = hazard {
+            return Err(hazard_reason(hazard, from, to));
+        }
     }
     if after
         .iter()
@@ -552,8 +548,21 @@ fn exposed(tree: &Tree, def: NodeId) -> bool {
     false
 }
 
-/// Whether method `def`'s own body (not a nested definition's) holds `jump`.
-fn holds(tree: &Tree, def: NodeId, jump: Jump) -> bool {
+/// Hazards in method `def`'s own body (not a nested definition's) that stop
+/// renaming it.
+fn own_hazards(tree: &Tree, def: NodeId) -> impl Iterator<Item = Hazard> + '_ {
     tree.descendants(def)
-        .any(|id| tree.node(id).role == Role::Jump(jump) && gate(tree, id) == def)
+        .filter(move |&id| gate(tree, id) == def)
+        .filter_map(|id| tree.node(id).role.hazard())
+        .filter(|&h| blocks(Op::RenameMethod, h))
+}
+
+/// Why `hazard` stops renaming `from` to `to`.
+fn hazard_reason(hazard: Hazard, from: &str, to: &str) -> String {
+    match hazard {
+        Hazard::Super => format!("its super call now reaches the parent's {to}"),
+        Hazard::Frame => format!("it reads its own name (`__method__`), which becomes {to}"),
+        Hazard::Binding => format!("its scope reads locals by name at runtime, {from} among them"),
+        other => format!("it holds {other:?}, bound to {from}"),
+    }
 }
