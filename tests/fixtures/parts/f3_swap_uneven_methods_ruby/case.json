@@ -1,0 +1,7 @@
+{
+  "description": "two adjacent methods of unequal size swapped are a move, not a rename of one into the other",
+  "expect": {
+    "hunks": {"$every": {"kind": "move", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

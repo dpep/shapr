@@ -689,8 +689,10 @@ Each part's confidence is computed from the evidence, not assigned per kind.
 
 A *unit* is a method, class, module or constant definition of at least 3
 syntax nodes, sitting directly in a file or a class or module body (not in
-a block or conditional). Each file's trees are aligned body by body, larger
-nodes first; a unit the alignment leaves out was removed or added. A removed unit pairs with an
+a block or conditional). Each file's trees are aligned body by body, nodes
+the diff left alone first, then larger nodes first, so of two swapped
+definitions the one git shows moving is the unit; a unit the alignment
+leaves out was removed or added. A removed unit pairs with an
 added one, in the same file or another, by equal tree or, failing that, by
 equal name and kind with `similarity` at least 0.5 (a move whose body also
 changed). Definitions align by name, so one that keeps its place among its

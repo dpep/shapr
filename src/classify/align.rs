@@ -95,7 +95,18 @@ impl File {
         let a: Vec<NodeId> = ta.code_children(after).collect();
         let kb: Vec<Key> = b.iter().map(|&n| key(tb, n)).collect();
         let ka: Vec<Key> = a.iter().map(|&n| key(ta, n)).collect();
-        let weight: Vec<usize> = b.iter().map(|&n| size(tb, n)).collect();
+        // A child the diff left alone outweighs any it changed, so of two
+        // swapped declarations the one git shows moving is the one left out.
+        let sizes: Vec<usize> = b.iter().map(|&n| size(tb, n)).collect();
+        let heavy = sizes.iter().sum::<usize>() + 1;
+        let weight: Vec<usize> = b
+            .iter()
+            .zip(&sizes)
+            .map(|(&n, &size)| match untouched(trees, tb.lines(n)) {
+                true => size * heavy,
+                false => size,
+            })
+            .collect();
         let matched = lcs(b.len(), a.len(), |i, j| kb[i] == ka[j], |i| weight[i]);
         let (mut in_b, mut in_a) = (vec![false; b.len()], vec![false; a.len()]);
         for &(i, j) in &matched {
@@ -116,6 +127,16 @@ impl File {
         self.unmatched.extend(left(&in_b, &b, Side::Removed));
         self.unmatched.extend(left(&in_a, &a, Side::Added));
     }
+}
+
+/// Whether no hunk's changed region on the before side reaches `lines`.
+fn untouched(trees: &Trees, lines: RangeInclusive<usize>) -> bool {
+    trees.sites.iter().all(|site| {
+        let region = site.before.lines;
+        region
+            .last()
+            .is_none_or(|last| last < *lines.start() || *lines.end() < region.start)
+    })
 }
 
 /// How a child lines up with its counterpart on the other side.

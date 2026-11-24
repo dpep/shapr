@@ -1,0 +1,7 @@
+{
+  "description": "two adjacent methods of unequal size swapped, which git splits into two hunks, are one move",
+  "expect": {
+    "hunks": {"$every": {"kind": "move", "verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}
