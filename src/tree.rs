@@ -45,6 +45,10 @@ pub enum Role {
     /// An identifier the parser can't resolve, as in a Rust macro's token
     /// tree: it may name anything in scope, locals included.
     Opaque,
+    /// Makes the enclosing definition's name visible beyond code: an FFI
+    /// export, a route, generated bindings, a derive that prints it
+    /// (Rust's `#[no_mangle]`, `#[derive(Debug)]`).
+    Exposes,
     /// Syntax that only states types or visibility (a parameter's type, a
     /// return type, generics): no code runs there.
     Annotation,

@@ -194,7 +194,13 @@ are stated in Ruby's terms; for Rust:
   enum variants of a type deriving anything but `Clone`, `Copy`, `Default`,
   `Eq`, `Hash`, `Ord`, `PartialEq` or `PartialOrd` (`Debug` prints the names,
   serde reads them), or carrying another attribute that may read them, aren't
-  renamed.
+  renamed. Likewise an item, or a method of an `impl`, under an attribute
+  that may read its name (`#[no_mangle]`, `#[export_name]`, `#[pyfunction]`,
+  `#[wasm_bindgen]`, a route, any attribute macro, a derive beyond that list)
+  isn't renamed; `allow`, `cfg`, `cold`, `deny`, `deprecated`, `doc`,
+  `expect`, `forbid`, `ignore`, `inline`, `must_use`, `non_exhaustive`,
+  `repr`, `rustfmt::skip`, `should_panic`, `test`, `track_caller` and `warn`
+  don't read names.
 - Moves: a unit is a function, struct, enum, union, trait, `impl`, module,
   constant, static or type alias. Each file is its own module, so a
   definition moved to another file is a `move_with_changes` with context

@@ -414,3 +414,40 @@ fn a_computed_dynamic_reference_blocks_method_renames() {
     );
     assert!(kinds(&report).contains(&"rename"), "{report:#}");
 }
+
+#[test]
+fn a_rust_item_under_an_attribute_that_may_read_its_name_is_not_renamed() {
+    for attr in [
+        "#[no_mangle]",
+        "#[export_name = \"foo\"]",
+        "#[pyfunction]",
+        "#[wasm_bindgen]",
+        "#[get(\"/\")]",
+    ] {
+        let report = rust(
+            &format!("{attr}\npub fn foo() -> i32 {{ 1 }}\n"),
+            &format!("{attr}\npub fn bar() -> i32 {{ 1 }}\n"),
+        );
+        assert_eq!(kinds(&report), ["logic"], "{attr}");
+    }
+    // An attribute on the enclosing impl reaches its methods.
+    let report = rust(
+        "struct A;\n#[pymethods]\nimpl A {\n    fn foo(&self) -> i32 { 1 }\n}\n",
+        "struct A;\n#[pymethods]\nimpl A {\n    fn bar(&self) -> i32 { 1 }\n}\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+    // `Debug` prints the type's name.
+    let report = rust(
+        "#[derive(Debug)]\nstruct Foo;\nfn f() -> Foo { Foo }\n",
+        "#[derive(Debug)]\nstruct Bar;\nfn f() -> Bar { Bar }\n",
+    );
+    assert_not_structure(&report);
+    // Attributes that don't read names leave a rename alone.
+    for attr in ["#[inline]", "#[test]", "#[must_use]", "#[allow(dead_code)]"] {
+        let report = rust(
+            &format!("{attr}\nfn foo() -> i32 {{ 1 }}\n"),
+            &format!("{attr}\nfn bar() -> i32 {{ 1 }}\n"),
+        );
+        assert_eq!(kinds(&report), ["rename"], "{attr}");
+    }
+}

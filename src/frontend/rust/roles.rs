@@ -75,15 +75,25 @@ const NAMELESS_DERIVES: &[&str] = &[
     "PartialOrd",
 ];
 
-/// Attributes that don't read member names.
+/// Attributes that don't read the names of the item or its members.
 const NAMELESS_ATTRIBUTES: &[&str] = &[
     "allow",
+    "cfg",
+    "cold",
     "deny",
+    "deprecated",
     "doc",
     "expect",
+    "forbid",
+    "ignore",
+    "inline",
     "must_use",
     "non_exhaustive",
     "repr",
+    "rustfmt::skip",
+    "should_panic",
+    "test",
+    "track_caller",
     "warn",
 ];
 
@@ -169,7 +179,9 @@ impl Walker<'_> {
                 self.named(n, attrs, role);
             }
             (_, "attribute_item" | "inner_attribute_item") => {
-                self.open(&n, &[], None, Role::Other);
+                let exposes = n.kind() == "attribute_item" && names_observed(&[n], self.src);
+                let role = if exposes { Role::Exposes } else { Role::Other };
+                self.open(&n, &[], None, role);
                 self.children(n, Mode::Tokens, &[]);
                 self.b.close();
             }

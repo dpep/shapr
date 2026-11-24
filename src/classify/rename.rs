@@ -94,6 +94,8 @@ struct Facts {
     calls_super: bool,
     /// A renamed method reads its own frame (`__method__`).
     reads_frame: bool,
+    /// A renamed definition's name is visible beyond code.
+    exposed: bool,
     /// A method name the language reaches without a visible call.
     reserved: Option<String>,
     after_gates: BTreeSet<NodeId>,
@@ -138,6 +140,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let method = role == Role::Definition(NameKind::Method);
             entry.calls_super |= method && holds(&t.before, diff.before, Jump::Super);
             entry.reads_frame |= method && holds(&t.before, diff.before, Jump::Frame);
+            entry.exposed |= role.is_declaration() && exposed(&t.before, diff.before);
             entry.after_gates.insert(gate(&t.after, diff.after));
         }
     }
@@ -406,6 +409,9 @@ fn judge(
     if facts.calls_super {
         return Err(format!("its super call now reaches the parent's {to}"));
     }
+    if facts.exposed {
+        return Err(format!("an attribute may read the name {from}"));
+    }
     if facts.reads_frame {
         return Err(format!(
             "it reads its own name (`__method__`), which becomes {to}"
@@ -549,6 +555,33 @@ fn gate(tree: &Tree, id: NodeId) -> NodeId {
         at = tree.node(p).parent;
     }
     Tree::ROOT
+}
+
+/// Whether the definition, or one enclosing it, carries syntax that makes its
+/// name visible beyond code.
+fn exposed(tree: &Tree, def: NodeId) -> bool {
+    let mut at = Some(def);
+    while let Some(id) = at.filter(|&id| id != Tree::ROOT) {
+        let node = tree.node(id);
+        if node
+            .children
+            .iter()
+            .any(|&c| tree.node(c).role == Role::Exposes)
+        {
+            return true;
+        }
+        // A Rust impl keeps its attributes in its header.
+        if node.children.first().is_some_and(|&h| {
+            tree.node(h)
+                .children
+                .iter()
+                .any(|&c| tree.node(c).role == Role::Exposes)
+        }) {
+            return true;
+        }
+        at = node.parent;
+    }
+    false
 }
 
 /// Whether method `def`'s own body (not a nested definition's) holds `jump`.
