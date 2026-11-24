@@ -67,8 +67,8 @@ fn meter(public: &str, private: &str) -> String {
 fn a_private_method_renamed_with_no_use_outside_the_change_is_structure() {
     let report = classify(
         &[GEMSPEC],
-        &[("lib/widgets/meter.rb", &meter("read", "sample"))],
-        &[("lib/widgets/meter.rb", &meter("read", "probe"))],
+        &[("lib/widgets/meter.rb", &meter("level", "sample"))],
+        &[("lib/widgets/meter.rb", &meter("level", "probe"))],
     );
     let rename = any_part(&report, "rename");
     assert_eq!(rename["structure"], true, "{report:#}");
@@ -86,8 +86,8 @@ fn a_rename_whose_old_name_an_unchanged_file_still_uses_is_logic_naming_it() {
     );
     let report = classify(
         &[caller],
-        &[("meter.rb", &meter("read", "sample"))],
-        &[("meter.rb", &meter("read", "probe"))],
+        &[("meter.rb", &meter("level", "sample"))],
+        &[("meter.rb", &meter("level", "probe"))],
     );
     assert!(
         parts(&report).iter().all(|p| p["kind"] == "logic"),
@@ -102,7 +102,7 @@ fn a_rename_whose_old_name_an_unchanged_file_still_uses_is_logic_naming_it() {
 fn a_public_gem_method_renamed_is_behavior_as_public_api() {
     let report = classify(
         &[GEMSPEC],
-        &[("lib/widgets/meter.rb", &meter("read", "sample"))],
+        &[("lib/widgets/meter.rb", &meter("level", "sample"))],
         &[("lib/widgets/meter.rb", &meter("value", "sample"))],
     );
     let rename = any_part(&report, "rename");
@@ -118,7 +118,7 @@ fn a_public_gem_method_renamed_is_behavior_as_public_api() {
 fn the_same_rename_outside_a_gem_is_structure() {
     let report = classify(
         &[],
-        &[("lib/widgets/meter.rb", &meter("read", "sample"))],
+        &[("lib/widgets/meter.rb", &meter("level", "sample"))],
         &[("lib/widgets/meter.rb", &meter("value", "sample"))],
     );
     assert_eq!(any_part(&report, "rename")["structure"], true, "{report:#}");
@@ -215,10 +215,10 @@ fn a_move_with_several_equal_candidates_is_not_proven() {
 fn a_rename_against_the_working_tree_searches_the_working_tree() {
     let dir = based_repo(
         &[],
-        &[("meter.rb", &meter("read", "sample"))],
+        &[("meter.rb", &meter("level", "sample"))],
         &[("README.md", "Meters.\n")],
     );
-    write(dir.path(), &[("meter.rb", &meter("read", "probe"))]);
+    write(dir.path(), &[("meter.rb", &meter("level", "probe"))]);
     let contained = report(&shapr(dir.path(), &["-j", "HEAD"]));
     assert_eq!(
         any_part(&contained, "rename")["structure"],
@@ -287,15 +287,15 @@ fn the_old_name_in_another_files_string_or_comment_is_not_a_use() {
     let template = ("show.erb", "<%= meter.sample %>\n");
     let report = classify(
         &[notes],
-        &[("meter.rb", &meter("read", "sample"))],
-        &[("meter.rb", &meter("read", "probe"))],
+        &[("meter.rb", &meter("level", "sample"))],
+        &[("meter.rb", &meter("level", "probe"))],
     );
     assert_eq!(any_part(&report, "rename")["structure"], true, "{report:#}");
     // A file shapr can't parse holding the word counts as a use.
     let report = classify(
         &[notes, template],
-        &[("meter.rb", &meter("read", "sample"))],
-        &[("meter.rb", &meter("read", "probe"))],
+        &[("meter.rb", &meter("level", "sample"))],
+        &[("meter.rb", &meter("level", "probe"))],
     );
     let reason = any_part(&report, "logic")["reason"].as_str().unwrap();
     assert!(
@@ -314,8 +314,8 @@ const CALLER_GONE: (&str, &str) = ("report.rb", "class Report\n  def show\n  end
 fn a_diff_on_stdin_whose_after_side_is_neither_the_working_tree_nor_the_index_is_unseen() {
     let dir = based_repo(
         &[CALLER],
-        &[("meter.rb", &meter("read", "sample"))],
-        &[("meter.rb", &meter("read", "probe"))],
+        &[("meter.rb", &meter("level", "sample"))],
+        &[("meter.rb", &meter("level", "probe"))],
     );
     commit(dir.path(), &[CALLER_GONE], "drop the call");
     // The working tree no longer calls `sample`, but HEAD~1, where the diff
@@ -332,10 +332,10 @@ fn a_diff_on_stdin_whose_after_side_is_neither_the_working_tree_nor_the_index_is
 fn a_staged_diff_on_stdin_is_searched_in_the_index() {
     let dir = based_repo(
         &[CALLER],
-        &[("meter.rb", &meter("read", "sample"))],
+        &[("meter.rb", &meter("level", "sample"))],
         &[("README.md", "Meters.\n")],
     );
-    write(dir.path(), &[("meter.rb", &meter("read", "probe"))]);
+    write(dir.path(), &[("meter.rb", &meter("level", "probe"))]);
     git(dir.path(), &["add", "meter.rb"]);
     // Unstaged: the working tree drops the call the index still holds.
     write(dir.path(), &[CALLER_GONE]);
@@ -368,8 +368,8 @@ fn a_search_over_thousands_of_files_finishes() {
         .collect();
     let dir = based_repo(
         &base,
-        &[("meter.rb", &meter("read", "sample"))],
-        &[("meter.rb", &meter("read", "probe"))],
+        &[("meter.rb", &meter("level", "sample"))],
+        &[("meter.rb", &meter("level", "probe"))],
     );
     let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
         .args(["-j", "HEAD~1..HEAD"])
@@ -390,10 +390,10 @@ fn a_search_over_thousands_of_files_finishes() {
 fn a_diff_on_stdin_that_could_end_in_the_index_or_the_working_tree_is_searched_in_both() {
     let dir = based_repo(
         &[CALLER_GONE],
-        &[("meter.rb", &meter("read", "sample"))],
+        &[("meter.rb", &meter("level", "sample"))],
         &[("README.md", "Meters.\n")],
     );
-    write(dir.path(), &[("meter.rb", &meter("read", "probe"))]);
+    write(dir.path(), &[("meter.rb", &meter("level", "probe"))]);
     git(dir.path(), &["add", "meter.rb"]);
     // Unstaged, and outside the diff: only the working tree calls `sample`.
     write(dir.path(), &[CALLER]);

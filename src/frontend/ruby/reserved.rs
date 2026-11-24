@@ -1,7 +1,9 @@
 //! Method names Ruby reaches without a call shapr can see: every object's
 //! own methods (`Object`, `Kernel`, `BasicObject`, public and private, so
 //! defining one overrides it for every caller), and the protocol and hook
-//! methods the runtime and core library call by convention.
+//! methods the runtime and core library call by convention: pattern matching
+//! (`deconstruct`), `pp`, `raise` and the error printer (`exception`,
+//! `message`), and IO duck typing (`write`, `readpartial`).
 
 pub(super) const RESERVED: &[&str] = &[
     "Array",
@@ -24,6 +26,7 @@ pub(super) const RESERVED: &[&str] = &[
     "at_exit",
     "autoload",
     "autoload?",
+    "backtrace",
     "binding",
     "block_given?",
     "call",
@@ -32,9 +35,13 @@ pub(super) const RESERVED: &[&str] = &[
     "catch",
     "class",
     "clone",
+    "close",
     "coerce",
     "const_missing",
+    "deconstruct",
+    "deconstruct_keys",
     "define_singleton_method",
+    "detailed_message",
     "display",
     "dup",
     "each",
@@ -44,6 +51,7 @@ pub(super) const RESERVED: &[&str] = &[
     "eql?",
     "equal?",
     "eval",
+    "exception",
     "exec",
     "exit",
     "exit!",
@@ -51,6 +59,7 @@ pub(super) const RESERVED: &[&str] = &[
     "extend_object",
     "extended",
     "fail",
+    "flush",
     "fork",
     "format",
     "freeze",
@@ -84,6 +93,7 @@ pub(super) const RESERVED: &[&str] = &[
     "loop",
     "marshal_dump",
     "marshal_load",
+    "message",
     "method",
     "method_added",
     "method_missing",
@@ -97,6 +107,7 @@ pub(super) const RESERVED: &[&str] = &[
     "pp",
     "prepend_features",
     "prepended",
+    "pretty_print",
     "print",
     "printf",
     "private_methods",
@@ -109,8 +120,10 @@ pub(super) const RESERVED: &[&str] = &[
     "puts",
     "raise",
     "rand",
+    "read",
     "readline",
     "readlines",
+    "readpartial",
     "remove_instance_variable",
     "require",
     "require_relative",
@@ -158,5 +171,6 @@ pub(super) const RESERVED: &[&str] = &[
     "trap",
     "untrace_var",
     "warn",
+    "write",
     "yield_self",
 ];

@@ -376,7 +376,11 @@ never an `extract`, `inline` or `rename`.
   …), since every object already has them; and the protocol and hook methods
   the runtime calls by convention (`each`, `call`, `to_ary`, `to_str`,
   `to_proc`, `coerce`, `marshal_dump`, `included`, `inherited`,
-  `method_added`, `const_missing`, …).
+  `method_added`, `const_missing`, …): pattern matching's `deconstruct` and
+  `deconstruct_keys`, `pp`'s `pretty_print`, `raise`'s `exception`, the
+  error printer's `message`, `detailed_message` and `backtrace`, and the IO
+  methods the standard library calls on an IO-like object (`read`,
+  `readpartial`, `write`, `flush`, `close`).
 - Rust: `main`, and the methods of std traits that syntax or the prelude
   reaches (`drop`, `clone`, `fmt`, `to_string`, `eq`, `cmp`, `hash`, `next`,
   `deref`, `index`, `add` and the other operators, `from`, `into`, `default`,

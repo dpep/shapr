@@ -1,0 +1,4 @@
+{
+  "description": "a method renamed to `deconstruct_keys`, which a hash pattern (`in {a:}`) calls implicitly: logic",
+  "expect": {"hunks": [{"kind": "logic"}]}
+}

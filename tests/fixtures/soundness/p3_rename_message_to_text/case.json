@@ -1,0 +1,4 @@
+{
+  "description": "an exception's `message` renamed away: the error printer calls `message` implicitly, so it is logic",
+  "expect": {"hunks": [{"kind": "logic"}]}
+}

@@ -1,0 +1,4 @@
+{
+  "description": "a method renamed to `write`, which `puts` and `IO.copy_stream` call on an IO-like object: logic",
+  "expect": {"hunks": [{"kind": "logic"}]}
+}
