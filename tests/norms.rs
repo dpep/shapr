@@ -328,3 +328,35 @@ fn a_change_moves_toward_or_away_from_config() {
         "{text}"
     );
 }
+
+/// Config shapr can't read (a gem's, a missing or remote file, lines that
+/// aren't YAML it reads) is named on stderr and in the summary, never
+/// silently dropped.
+#[test]
+fn config_it_cannot_read_is_named() {
+    let config = "inherit_gem:\n  rubocop-shopify: rubocop.yml\n\
+                  inherit_from:\n  - missing.yml\n  - https://example.com/rubocop.yml\n\
+                  Style/StringLiterals: [oops\n";
+    let dir = repo(&[
+        &[(".rubocop.yml", config), ("a.rb", "def a\n  'x'\nend\n")],
+        &[("a.rb", "def a\n  'y'\nend\n")],
+    ]);
+    let notes = [
+        ".rubocop.yml: line 6 not read",
+        "inherit_gem: rubocop-shopify",
+        "inherit_from: missing.yml (not found)",
+        "inherit_from: https://example.com/rubocop.yml (remote)",
+    ];
+    let out = shapr(dir.path(), &["norms", "-j", "a.rb"]);
+    assert_eq!(
+        report(&out)["summary"]["config_unread"],
+        serde_json::json!(notes)
+    );
+    for args in [vec!["norms", "a.rb"], vec!["HEAD~1..HEAD"]] {
+        let stderr = String::from_utf8(shapr(dir.path(), &args).stderr).unwrap();
+        for note in notes {
+            let line = format!("shapr: config not read, norms judge without it: {note}\n");
+            assert_eq!(stderr.matches(&line).count(), 1, "{args:?}: {stderr}");
+        }
+    }
+}

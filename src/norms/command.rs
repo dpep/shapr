@@ -131,6 +131,7 @@ struct Summary {
     steps: usize,
     fixes: usize,
     lines_touched: usize,
+    config_unread: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -271,6 +272,12 @@ fn build(paths: &[PathBuf], collected: Collected, threshold: f64) -> Report {
     for (record, p) in norms.iter_mut().zip(pooled) {
         record.config = p.config;
     }
+    let mut config_unread: Vec<String> = Vec::new();
+    for note in sources.iter().flat_map(|s| &s.configured.unread) {
+        if !config_unread.contains(note) {
+            config_unread.push(note.clone());
+        }
+    }
     let summary = Summary {
         record: "summary",
         files: sources.len(),
@@ -282,6 +289,7 @@ fn build(paths: &[PathBuf], collected: Collected, threshold: f64) -> Report {
         steps: plan.steps.len(),
         fixes: plan.steps.iter().map(|s| s.fixes).sum(),
         lines_touched: plan.steps.iter().map(|s| s.lines_touched).sum(),
+        config_unread,
     };
     Report {
         meta: crate::report::Meta::new("norms", None),

@@ -118,6 +118,20 @@ pub struct Configured {
     /// Norms whose check the project's todo file lists (RuboCop's
     /// `.rubocop_todo.yml`): known offenses, parked.
     pub todo: BTreeSet<&'static str>,
+    /// What the config holds that shapr didn't read, one note each.
+    pub unread: Vec<String>,
+}
+
+/// Names config shapr didn't read on stderr, once per run per note, so a
+/// reader knows the norms were judged without it.
+pub fn warn_unread(notes: &[String]) {
+    static SEEN: std::sync::Mutex<BTreeSet<String>> = std::sync::Mutex::new(BTreeSet::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    for note in notes {
+        if seen.insert(note.clone()) {
+            eprintln!("shapr: config not read, norms judge without it: {note}");
+        }
+    }
 }
 
 static LANGUAGES: &[&dyn Language] = &[&ruby::Ruby];

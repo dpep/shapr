@@ -1043,8 +1043,12 @@ For a pull request per tier:
 
 `summary`: `files` (judged), `skipped` (per reason: `generated`, `vendored`,
 `docs`, `syntax_error`, `unsupported`), `norms`, `inferred` (norms with a
-style inferred), `deviations`, `hotspots`, `steps`, `fixes` and
-`lines_touched` (over the steps).
+style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
+`lines_touched` (over the steps) and `config_unread`: config the files fall
+under that shapr didn't read, one note each (`inherit_gem: NAME`,
+`inherit_from: PATH (not found)` or `(remote)`, `FILE: lines N not read`),
+so their norms were judged without it. Each note is also one stderr line,
+under `shapr norms` and a change's hunks alike.
 
 ## `summary` record
 
