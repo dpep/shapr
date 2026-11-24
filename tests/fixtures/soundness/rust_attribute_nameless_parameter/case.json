@@ -1,0 +1,11 @@
+{
+  "description": "`#[inline]` reads no tokens: a parameter renamed under it is a rename",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "rename",
+        "verdict": "structure"
+      }
+    ]
+  }
+}

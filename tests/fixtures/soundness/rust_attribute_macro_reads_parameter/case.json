@@ -1,0 +1,17 @@
+{
+  "description": "an attribute macro reads its whole item (a route's `<id>` names a parameter): a parameter renamed under one is logic",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ],
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

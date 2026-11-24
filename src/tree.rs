@@ -189,7 +189,8 @@ impl Flags {
     pub const MEMBER: Flags = Flags(1 << 5);
     /// A macro call whose expansion may spell its tokens out as text (Rust's
     /// `stringify!`, `dbg!`, a message-less `assert!`, any macro outside
-    /// std): renaming a name in it changes that text.
+    /// std), or an item an attribute macro reads as written: renaming a
+    /// name in it changes what the macro sees.
     pub const SPELLS: Flags = Flags(1 << 6);
 
     pub fn contains(self, other: Flags) -> bool {

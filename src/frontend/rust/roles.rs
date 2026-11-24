@@ -148,6 +148,9 @@ impl Walker<'_> {
             (_, "impl_item") => {
                 self.open(&n, &[], None, Role::Definition(Class));
                 self.b.flag(Flags::SCOPE);
+                if reads_tokens(attrs, self.src) {
+                    self.b.flag(Flags::SPELLS);
+                }
                 let body = field("body");
                 let start = attrs.first().map_or(n.start_byte(), |a| a.start_byte());
                 let end = body.map_or(n.end_byte(), |b| b.start_byte());
@@ -670,6 +673,20 @@ impl Walker<'_> {
 /// Whether an item's attributes read its members' names: a derive beyond
 /// [`NAMELESS_DERIVES`], or any attribute beyond [`NAMELESS_ATTRIBUTES`].
 fn names_observed(attrs: &[Node<'_>], src: &[u8]) -> bool {
+    beyond(attrs, src, NAMELESS_DERIVES)
+}
+
+/// Whether an item's attributes may read any of its tokens, as an attribute
+/// macro reads its whole item: a derive outside std, or any attribute beyond
+/// [`NAMELESS_ATTRIBUTES`]. std's derives read only names.
+pub(super) fn reads_tokens(attrs: &[Node<'_>], src: &[u8]) -> bool {
+    let std = [NAMELESS_DERIVES, &["Debug"]].concat();
+    beyond(attrs, src, &std)
+}
+
+/// Whether any attribute is a derive beyond `derives`, or another attribute
+/// beyond [`NAMELESS_ATTRIBUTES`].
+fn beyond(attrs: &[Node<'_>], src: &[u8], derives: &[&str]) -> bool {
     attrs.iter().any(|attr| {
         let text = String::from_utf8_lossy(&src[span(attr)]).into_owned();
         let inner = text
@@ -688,7 +705,7 @@ fn names_observed(attrs: &[Node<'_>], src: &[u8]) -> bool {
                 .trim_end_matches(')');
             return args.split(',').map(str::trim).any(|d| {
                 let d = d.rsplit("::").next().unwrap_or(d);
-                !d.is_empty() && !NAMELESS_DERIVES.contains(&d)
+                !d.is_empty() && !derives.contains(&d)
             });
         }
         !NAMELESS_ATTRIBUTES.contains(&head.as_str())

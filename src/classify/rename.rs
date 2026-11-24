@@ -332,11 +332,9 @@ fn judged<'v>(
     }
     let mut ancestors = trees.before.ancestors(diff.before);
     let spelled = ancestors.any(|a| trees.before.node(a).flags.contains(Flags::SPELLS));
-    if spelled && node.role == Role::Opaque {
+    if spelled {
         let from = node.name.as_deref().unwrap_or_default();
-        return Err(format!(
-            "a macro may spell out {from} as text, which changes"
-        ));
+        return Err(format!("a macro may read {from} as written, which changes"));
     }
     let (pair, verdict) = if matches!(node.role, Role::DynamicName | Role::Opaque) {
         // Accepted when it follows a rename made elsewhere in the change;

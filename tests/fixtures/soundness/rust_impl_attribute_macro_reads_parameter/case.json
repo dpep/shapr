@@ -1,0 +1,17 @@
+{
+  "description": "an attribute macro on the enclosing impl reads its methods whole: a parameter renamed in one is logic",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ],
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

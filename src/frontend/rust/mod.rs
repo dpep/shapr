@@ -547,6 +547,10 @@ impl<'a> Walker<'a> {
         if role.defines().is_some() && self.public(n) {
             self.b.flag(Flags::PUBLIC);
         }
+        // An attribute macro may read the item's tokens as written.
+        if roles::reads_tokens(attrs, self.src) {
+            self.b.flag(Flags::SPELLS);
+        }
         for attr in attrs {
             self.emit(*attr, Mode::Expr, &[]);
         }
