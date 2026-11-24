@@ -1,0 +1,11 @@
+{
+  "description": "rustdoc joins an item's doc comments across plain comments and blank lines, so a fence they split is one doctest",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

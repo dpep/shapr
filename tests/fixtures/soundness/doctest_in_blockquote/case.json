@@ -1,0 +1,11 @@
+{
+  "description": "a fenced block inside a `>` blockquote is a doctest",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

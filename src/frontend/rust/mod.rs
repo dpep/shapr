@@ -280,7 +280,7 @@ fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
     }
     let text = |n: &Node<'_>| std::str::from_utf8(&src[span(n)]).unwrap_or_default();
     let mut out = HashSet::new();
-    // Consecutive line docs with one marker, as (marker, nodes).
+    // Line docs with one marker that rustdoc joins into one text, as (marker, nodes).
     let mut runs: Vec<(&str, Vec<Node<'_>>)> = Vec::new();
     for n in docs {
         let t = text(&n);
@@ -304,16 +304,11 @@ fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
                     out.insert(n.start_byte());
                 }
             }
-            runs.push(("", Vec::new()));
             continue;
         };
-        let row = n.start_position().row;
         match runs.last_mut() {
             Some((m, nodes))
-                if *m == marker
-                    && nodes
-                        .last()
-                        .is_some_and(|l: &Node<'_>| l.start_position().row + 1 == row) =>
+                if *m == marker && nodes.last().is_some_and(|last| joined(&n, last)) =>
             {
                 nodes.push(n)
             }
@@ -334,27 +329,72 @@ fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
     out
 }
 
-/// Which lines of a doc comment's text are code to rustdoc's Markdown: a
-/// fenced block with its fences, or an indented block (four columns past
-/// the text, or past an open list item's text, after a blank line). The
-/// text is first unindented by its least indentation, as rustdoc does.
+/// Whether rustdoc reads doc comment `n` as a continuation of `last`: only
+/// comments and attributes, which rustdoc joins or skips, lie between them.
+fn joined(n: &Node<'_>, last: &Node<'_>) -> bool {
+    let mut at = n.prev_sibling();
+    while let Some(s) = at {
+        if s.id() == last.id() {
+            return true;
+        }
+        if !(is_comment(&s) || matches!(s.kind(), "attribute_item" | "inner_attribute_item")) {
+            return false;
+        }
+        at = s.prev_sibling();
+    }
+    false
+}
+
+/// Which lines of a doc comment's text are code to rustdoc's Markdown,
+/// read both as written and with `>` blockquote markers removed, so a
+/// block either reading finds is code.
 fn code_lines(lines: &[&str]) -> Vec<bool> {
+    let unquoted: Vec<&str> = lines.iter().map(|l| unquote(l)).collect();
+    let mut out = blocks(lines);
+    if unquoted != lines {
+        for (o, q) in out.iter_mut().zip(blocks(&unquoted)) {
+            *o |= q;
+        }
+    }
+    out
+}
+
+/// A line with its `>` blockquote markers (each with one optional space)
+/// removed.
+fn unquote(line: &str) -> &str {
+    let mut rest = line;
+    loop {
+        let t = rest.trim_start_matches(' ');
+        match t.strip_prefix('>') {
+            Some(r) if rest.len() - t.len() < 4 => rest = r.strip_prefix(' ').unwrap_or(r),
+            _ => return rest,
+        }
+    }
+}
+
+/// Which lines are a Rust code block: a fenced block with its fences,
+/// unless its info string names only other languages (```text), or an
+/// indented block (four columns past the text, or past an open list item's
+/// text, where no paragraph continues). The text is first unindented by its
+/// least indentation, as rustdoc does.
+fn blocks(lines: &[&str]) -> Vec<bool> {
     let indent = |s: &str| -> usize {
         let lead = s.chars().take_while(|c| *c == ' ' || *c == '\t');
         lead.map(|c| if c == '\t' { 4 } else { 1 }).sum()
     };
     let blank = |s: &str| s.trim().is_empty();
-    let fence = |t: &str| t.starts_with("```") || t.starts_with("~~~");
     let least = lines.iter().filter(|l| !blank(l)).map(|l| indent(l)).min();
     let least = least.unwrap_or(0);
     let mut out = vec![false; lines.len()];
-    let (mut fenced, mut indented, mut after_blank) = (false, false, true);
+    // The open fence: its character, length, and whether it holds Rust.
+    let mut fenced: Option<(char, usize, bool)> = None;
+    let (mut indented, mut para, mut after_blank) = (false, false, true);
     // The column an open list item's text starts at.
     let mut item: Option<usize> = None;
     for (i, line) in lines.iter().enumerate() {
         if blank(line) {
-            out[i] = fenced;
-            after_blank = true;
+            out[i] = fenced.is_some_and(|(_, _, rust)| rust);
+            (para, after_blank) = (false, true);
             continue;
         }
         let (n, text) = (indent(line) - least, line.trim_start());
@@ -362,24 +402,87 @@ fn code_lines(lines: &[&str]) -> Vec<bool> {
             item = None;
         }
         let base = item.unwrap_or(0);
-        if fenced {
-            out[i] = true;
-            fenced = !fence(text);
-        } else if n >= base + 4 && (indented || after_blank) {
+        if let Some((ch, len, rust)) = fenced {
+            out[i] = rust;
+            let run = text.chars().take_while(|&c| c == ch).count();
+            let closes = n < base + 4 && run >= len && text[run..].trim().is_empty();
+            if closes {
+                fenced = None;
+            }
+        } else if n >= base + 4 && (indented || !para) {
             out[i] = true;
             indented = true;
         } else {
             indented = false;
-            if fence(text) {
-                out[i] = true;
-                fenced = true;
+            para = false;
+            if let Some(fence) = fence(text) {
+                out[i] = fence.2;
+                fenced = Some(fence);
+            } else if heading(text) {
             } else if let Some(at) = list_item(text) {
                 item = Some(n + at);
+                para = !text[at..].trim().is_empty();
+            } else {
+                para = true;
             }
         }
         after_blank = false;
     }
     out
+}
+
+/// A fence opening a code block: its character, length, and whether its
+/// info string leaves it Rust (rustdoc's tags, or no language at all).
+fn fence(text: &str) -> Option<(char, usize, bool)> {
+    let ch = text.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let len = text.chars().take_while(|&c| c == ch).count();
+    if len < 3 {
+        return None;
+    }
+    let mut words = text[len..]
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .peekable();
+    let rust = words.peek().is_none() || words.any(rust_tag);
+    Some((ch, len, rust))
+}
+
+/// An info-string word rustdoc reads as a Rust block's, or one it might
+/// (`{.class}` attributes).
+fn rust_tag(word: &str) -> bool {
+    let code = word
+        .strip_prefix('E')
+        .is_some_and(|d| d.bytes().all(|b| b.is_ascii_digit()));
+    matches!(
+        word,
+        "rust"
+            | "ignore"
+            | "should_panic"
+            | "no_run"
+            | "compile_fail"
+            | "test_harness"
+            | "allow_fail"
+            | "standalone_crate"
+    ) || word.starts_with("ignore-")
+        || word.starts_with("edition")
+        || word.starts_with('{')
+        || code
+}
+
+/// A line that ends any paragraph before it and starts none: an ATX
+/// heading, a thematic break or a setext underline.
+fn heading(text: &str) -> bool {
+    let hashes = text.chars().take_while(|&c| c == '#').count();
+    let atx = (1..=6).contains(&hashes)
+        && text[hashes..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace);
+    let rule = text.chars().next().is_some_and(|first| {
+        matches!(first, '-' | '=' | '*' | '_')
+            && text.chars().all(|c| c == first || c == ' ' || c == '\t')
+    });
+    atx || rule
 }
 
 /// Where a list item's text starts in `text` (`- a`, `1. a`, `2) a`).
@@ -751,6 +854,20 @@ mod tests {
     fn recognizes_rust_paths() {
         assert!(Rust.handles("src/main.rs"));
         assert!(!Rust.handles("a.rb") && !Rust.handles("rs") && !Rust.handles("Cargo.toml"));
+    }
+
+    #[test]
+    fn code_blocks_follow_rustdocs_markdown() {
+        let code = |doc: &str| code_lines(&doc.lines().collect::<Vec<_>>());
+        assert_eq!(
+            code("````\n```\nx\n````\ny"),
+            [true, true, true, true, false]
+        );
+        assert_eq!(code("```sh\nx\n```"), [false; 3]);
+        assert_eq!(code("```should_panic,sh\nx\n```"), [true; 3]);
+        assert_eq!(code("Title\n=====\n    x"), [false, false, true]);
+        assert_eq!(code("a\n    b"), [false, false]);
+        assert_eq!(code("> > ```\n> > x\n> > ```"), [true; 3]);
     }
 
     #[test]

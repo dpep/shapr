@@ -1,0 +1,11 @@
+{
+  "description": "a `~~~` fence closes only at `~~~`: a ``` line inside it is code, and so are the lines after",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

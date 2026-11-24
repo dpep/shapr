@@ -1,0 +1,11 @@
+{
+  "description": "an indented block right after a heading, with no blank line, is a doctest: a heading isn't a paragraph it could continue",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

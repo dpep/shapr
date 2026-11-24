@@ -1,0 +1,11 @@
+{
+  "description": "a fence whose info string names no Rust (```text) isn't a doctest: editing it is a comment edit",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "comment_only",
+        "verdict": "structure"
+      }
+    ]
+  }
+}
