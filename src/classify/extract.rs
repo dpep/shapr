@@ -37,12 +37,13 @@ pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels
                 .filter(|&id| calls.node(id).role == Role::Definition(NameKind::Method))
                 .collect();
             let defs = def_counts(chunks);
+            let sites = call_sites(calls);
             for b in methods {
                 // B is new for an extract and gone after an inline.
                 if defs.get(&key(calls, b)) == Some(&1) {
                     continue;
                 }
-                match find(change, calls, chunks, b, dir) {
+                match find(change, calls, chunks, &sites, b, dir) {
                     Ok(mut found) => {
                         reach(change, outside, f, calls, b, &mut found);
                         apply(trees, &file.ids, &found, &mut labels[f]);
@@ -193,20 +194,12 @@ fn find(
     change: &Change,
     calls: &Tree,
     chunks: &Tree,
+    sites: &HashMap<&str, Vec<NodeId>>,
     b: NodeId,
     dir: Dir,
 ) -> Result<Found, &'static str> {
     let method = calls.node(b).name.as_deref().ok_or("no name")?.to_string();
-    let sites: Vec<NodeId> = ids(calls)
-        .filter(|&id| {
-            let node = calls.node(id);
-            matches!(
-                node.role,
-                Role::Call(Receiver::Implicit | Receiver::SelfRef)
-            ) && node.name.as_deref() == Some(method.as_str())
-        })
-        .collect();
-    let [call] = sites[..] else {
+    let Some(&[call]) = sites.get(method.as_str()).map(Vec::as_slice) else {
         return Err("not called exactly once");
     };
     let (stmt, assigned) = statement(calls, call);
@@ -529,6 +522,21 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
             }
         }
     }
+}
+
+/// Calls that may reach a method of the same receiver (`go`, `self.go`), by
+/// name: indexed once per tree, as every new method looks up its own.
+fn call_sites(tree: &Tree) -> HashMap<&str, Vec<NodeId>> {
+    let mut sites: HashMap<&str, Vec<NodeId>> = HashMap::new();
+    for id in ids(tree) {
+        let node = tree.node(id);
+        if let (Role::Call(Receiver::Implicit | Receiver::SelfRef), Some(name)) =
+            (node.role, node.name.as_deref())
+        {
+            sites.entry(name).or_default().push(id);
+        }
+    }
+    sites
 }
 
 fn ids(tree: &Tree) -> impl Iterator<Item = NodeId> + '_ {

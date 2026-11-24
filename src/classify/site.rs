@@ -128,12 +128,23 @@ impl Significance {
 
     /// The region's significant bytes outside `skip`, in order.
     pub fn bytes(&self, tree: &Tree, skip: &[Span]) -> Vec<u8> {
+        // One sweep: `at` is skipped while the furthest end among spans
+        // starting at or before it lies past it.
+        let mut skip: Vec<&Span> = skip.iter().collect();
+        skip.sort_by_key(|s| s.start);
+        let (mut next, mut reach) = (0, 0);
         self.marks
             .iter()
             .enumerate()
             .filter(|(_, m)| **m)
             .map(|(i, _)| self.region.start + i)
-            .filter(|at| !skip.iter().any(|s| s.contains(at)))
+            .filter(|&at| {
+                while next < skip.len() && skip[next].start <= at {
+                    reach = reach.max(skip[next].end);
+                    next += 1;
+                }
+                at >= reach
+            })
             .map(|at| tree.source[at])
             .collect()
     }
