@@ -43,7 +43,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 match find(change, calls, chunks, b, dir) {
                     Ok(found) => apply(file, trees, base, &found, &mut labels[f]),
                     Err(why) => crate::verbose!(
-                        "{}: `{}` not a {}: {why}",
+                        "{}: `{}` not an {}: {why}",
                         file.diff.path(),
                         calls.node(b).name.as_deref().unwrap_or_default(),
                         dir.kind().as_str()

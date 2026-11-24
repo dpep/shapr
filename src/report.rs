@@ -412,7 +412,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .collect();
     writeln!(
         out,
-        "{}: {} hunk{} ({}); review {} lines{}; comments +{} -{}; structure share {:.2}",
+        "{}: {} hunk{} ({}); review {} line{}{}; comments +{} -{}; structure share {:.2}",
         s.verdict.as_str(),
         s.hunks,
         if s.hunks == 1 { "" } else { "s" },
@@ -422,6 +422,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             kinds.join(", ")
         },
         s.lines.review_lines,
+        if s.lines.review_lines == 1 { "" } else { "s" },
         match s.generated_hunks {
             0 => String::new(),
             1 => " (1 generated hunk not counted)".to_string(),

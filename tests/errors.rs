@@ -171,3 +171,24 @@ fn a_syntax_error_is_named_in_the_reason() {
         "{reason}"
     );
 }
+
+#[test]
+fn one_review_line_is_singular() {
+    let after = METHOD.replace("end", "  1\nend");
+    let dir = repo(&[&[("a.rb", METHOD)], &[("a.rb", &after)]]);
+    let out = shapr(dir.path(), &["HEAD~1..HEAD"], "");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("review 1 line;"), "{text}");
+}
+
+#[test]
+fn verbose_names_a_near_extract_with_an() {
+    let before =
+        "def check(order)\n  validate(order)\n  return :empty if order.empty?\n  :ok\nend\n";
+    // `guard`'s body isn't the removed statement, so it is no extract at all.
+    let after = "def check(order)\n  validate(order)\n  guard(order)\n  :ok\nend\n\ndef guard(order)\n  order.clear\nend\n";
+    let dir = repo(&[&[("a.rb", before)], &[("a.rb", after)]]);
+    let out = shapr(dir.path(), &["-q", "-v", "HEAD~1..HEAD"], "");
+    let log = String::from_utf8_lossy(&out.stderr);
+    assert!(log.contains("`guard` not an extract"), "{log}");
+}
