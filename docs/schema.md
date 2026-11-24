@@ -856,7 +856,7 @@ records, then a `summary`. Under `-j` they are one object: `meta`, `files`,
 
 `norm`: `file`, `norm`, `scope` (`file`), `counts` (per style, the whole
 file), `inferred`, `confidence`, `configured` and `expected` as above, and
-`deviations`, the lines not in the `expected` style.
+`deviations`, the observations not in the `expected` style, each as a hunk's deviation (`line`, `column`, `style`, `expected`) without `edit`. Schema change: they were bare line numbers.
 
 `summary`: `files`, `norms`, `inferred` (norms with a style inferred) and
 `deviations`.

@@ -87,7 +87,16 @@ struct NormRecord {
     confidence: Option<f64>,
     configured: Option<String>,
     expected: Option<String>,
-    deviations: Vec<usize>,
+    deviations: Vec<Deviation>,
+}
+
+/// As a hunk's deviation, without an edit.
+#[derive(Serialize)]
+struct Deviation {
+    line: usize,
+    column: usize,
+    style: String,
+    expected: String,
 }
 
 #[derive(Serialize)]
@@ -224,11 +233,17 @@ fn file_norms(path: &Path, source: &[u8], threshold: f64) -> (FileRecord, Vec<No
                 .as_ref()
                 .map(|n| n.style.clone())
                 .or(configured.clone());
-            let mut deviations: Vec<usize> = observations()
-                .filter(|o| expected.as_ref().is_some_and(|e| o.style != *e))
-                .map(|o| o.line)
+            let deviations: Vec<Deviation> = observations()
+                .filter_map(|o| {
+                    let expected = expected.as_ref().filter(|e| o.style != **e)?;
+                    Some(Deviation {
+                        line: o.line,
+                        column: o.column,
+                        style: o.style.clone(),
+                        expected: expected.clone(),
+                    })
+                })
                 .collect();
-            deviations.dedup();
             NormRecord {
                 record: "norm",
                 file: name.clone(),
@@ -306,7 +321,9 @@ fn render(out: &mut impl Write, format: Format, report: &Report) -> std::io::Res
                     write!(out, "; config says {configured}")?;
                 }
                 if !n.deviations.is_empty() {
-                    let lines: Vec<String> = n.deviations.iter().map(usize::to_string).collect();
+                    let mut lines: Vec<String> =
+                        n.deviations.iter().map(|d| d.line.to_string()).collect();
+                    lines.dedup();
                     write!(out, "; deviating lines {}", lines.join(", "))?;
                 }
                 writeln!(out)?;

@@ -30,7 +30,12 @@
         "configured": null,
         "expected": "single_quotes",
         "deviations": [
-          10
+          {
+            "line": 10,
+            "column": 5,
+            "style": "double_quotes",
+            "expected": "single_quotes"
+          }
         ]
       }
     ]
