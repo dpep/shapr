@@ -5,6 +5,9 @@
       "$every": {
         "verdict": {
           "$not": "structure"
+        },
+        "review_lines": {
+          "$not": 0
         }
       }
     },
