@@ -1,0 +1,7 @@
+{
+  "description": "a large fn moved within its file and made pub(crate): the visibility edit is logic even where the bodies are nearly identical",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}},
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

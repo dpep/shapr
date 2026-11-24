@@ -1053,10 +1053,13 @@ fn pair(change: &Change, units: &[Unit]) -> Vec<Pair> {
         if !same {
             return None;
         }
+        // Not identical (the exact pass took those), so never rounded up to
+        // 1.0: that reads as unchanged and skips the changed lines.
         let sim = rounded(dice(
             subtree_hashes(ur.tree(change), &[ur.node]),
             subtree_hashes(ua.tree(change), &[ua.node]),
-        ));
+        ))
+        .min(0.99);
         (sim >= NEAR).then_some(sim)
     };
     let free_r: Vec<usize> = removed.iter().copied().filter(|&u| !taken[u]).collect();
