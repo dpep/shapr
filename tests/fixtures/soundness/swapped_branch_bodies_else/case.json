@@ -1,0 +1,7 @@
+{
+  "description": "branch bodies swapped: the else line git re-adds holds only its node's keyword, and that node's body changed, so it isn't reformatted",
+  "expect": {
+    "hunks": {"$every": {"verdict": "behavior", "parts": {"$every": {"kind": "logic"}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

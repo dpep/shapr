@@ -1,0 +1,7 @@
+{
+  "description": "body and ensure swapped: the ensure line holds only its node's keyword, and that node's body changed",
+  "expect": {
+    "hunks": {"$every": {"verdict": "behavior", "parts": {"$every": {"kind": "logic"}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

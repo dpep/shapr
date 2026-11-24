@@ -1,0 +1,7 @@
+{
+  "description": "cfg attributes swapped between two fns: the fn line git re-adds is the item's own text, and the item's attribute changed",
+  "expect": {
+    "hunks": {"$every": {"verdict": "behavior", "parts": {"$every": {"kind": "logic"}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

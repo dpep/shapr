@@ -120,7 +120,9 @@ pub(super) fn rest(change: &Change, alignments: &Alignments, _: &dyn Outside, la
                 before: code(&trees.before, &free.before, false),
                 after: code(&trees.after, &free.after, false),
             };
-            label.claim(reformat(Kind::FormatOnly, reformatted.minus(&logic)));
+            let reformatted = reformatted.minus(&logic);
+            let unchanged = unchanged_lines(trees, &reformatted);
+            label.claim(reformat(Kind::FormatOnly, reformatted.minus(&unchanged)));
             // Blank lines and comments go with the logic.
             if let (true, Some(i)) = (logic.is_empty(), beside) {
                 let left = label.unclaimed();
@@ -129,6 +131,29 @@ pub(super) fn rest(change: &Change, alignments: &Alignments, _: &dyn Outside, la
                 part.lines.after.extend(left.after);
             }
         }
+    }
+}
+
+/// Of `lines`, those whose text is byte for byte the same on both sides,
+/// paired in order: git deleted and re-added them around reordered code, so
+/// nothing on them was reformatted.
+fn unchanged_lines(trees: &Trees, lines: &Claim) -> Claim {
+    let text = |tree: &Tree, lines: &BTreeSet<usize>| -> Vec<(usize, Vec<u8>)> {
+        let line = |l: usize| {
+            let text = tree.text(&tree.line_span(l, l));
+            let text = text.strip_suffix(b"\n").unwrap_or(text);
+            text.strip_suffix(b"\r").unwrap_or(text).to_vec()
+        };
+        lines.iter().map(|&l| (l, line(l))).collect()
+    };
+    let (b, a) = (
+        text(&trees.before, &lines.before),
+        text(&trees.after, &lines.after),
+    );
+    let matched = super::align::lcs(b.len(), a.len(), |i, j| b[i].1 == a[j].1, |_| 1);
+    Claim {
+        before: matched.iter().map(|&(i, _)| b[i].0).collect(),
+        after: matched.iter().map(|&(_, j)| a[j].0).collect(),
     }
 }
 

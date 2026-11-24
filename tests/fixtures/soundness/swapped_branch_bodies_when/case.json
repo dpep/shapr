@@ -1,0 +1,7 @@
+{
+  "description": "when bodies swapped: the when line holds only its node's own text, and that node's body changed",
+  "expect": {
+    "hunks": {"$every": {"verdict": "behavior", "parts": {"$every": {"kind": "logic"}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}
