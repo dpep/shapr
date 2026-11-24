@@ -72,8 +72,10 @@ pub fn unified(path: &str, source: &[u8], replaces: &[Replace]) -> Option<String
     // Each line keeps its own break, so a CRLF file's edit applies.
     let old: Vec<&str> = old_text.split_inclusive('\n').collect();
     let new: Vec<&str> = new_text.split_inclusive('\n').collect();
+    // An empty side names the line before it, as `diff -u` does.
+    let new_first = if new.is_empty() { first - 1 } else { first };
     let mut out = format!(
-        "--- a/{path}\n+++ b/{path}\n@@ -{first},{} +{first},{} @@\n",
+        "--- a/{path}\n+++ b/{path}\n@@ -{first},{} +{new_first},{} @@\n",
         old.len(),
         new.len()
     );
@@ -139,6 +141,14 @@ mod tests {
             text: "\n".into(),
         }];
         assert_eq!(endings(b"a = 1\r\n", &gap)[0].text, "\r\n");
+        let drop = [Replace {
+            span: 6..7,
+            text: String::new(),
+        }];
+        assert_eq!(
+            unified("a.rb", b"a = 1\n\n", &drop).unwrap(),
+            "--- a/a.rb\n+++ b/a.rb\n@@ -2,1 +1,0 @@\n-\n"
+        );
         assert_eq!(endings(b"a = 1\n", &gap)[0].text, "\n");
         let crlf = b"a = \"x\"\r\n";
         let quote = |at: usize| Replace {

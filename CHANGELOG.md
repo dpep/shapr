@@ -34,5 +34,5 @@ First release.
 - Experimental: the `Naming/MethodName` norm, `snake_case` or `camelCase` method names; a rename is suggested only for a private method whose calls are all in the hunk, and only when no other file of the repository holds its name or the new one (a subclass elsewhere may call it; a method elsewhere by the new name would be overridden).
 - Experimental: the `Naming/VariableName` norm, `snake_case` or `camelCase` local variables, with a rename when every mention of the local is in the hunk.
 - Experimental: the `Layout/SpaceAroundOperators` norm, whitespace on both sides of binary operators and assignments; aligned operators count as spaced.
-- Experimental: the `Layout/EmptyLineBetweenDefs` norm, a blank line between adjacent method definitions or none.
+- Experimental: the `Layout/EmptyLineBetweenDefs` norm, one blank line between adjacent method definitions, two or more (`empty_lines`, as RuboCop's `NumberOfEmptyLines` counts them), or none.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.

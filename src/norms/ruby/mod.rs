@@ -327,6 +327,19 @@ impl Language for Ruby {
                 styles.insert(setting.norm, style);
             }
         }
+        // `Enabled` sets one blank line unless `NumberOfEmptyLines` says
+        // otherwise: two or more is `empty_lines`; a range sets no style.
+        match config.get(def_spacing::NORM, "NumberOfEmptyLines") {
+            None | Some("1") => {}
+            Some(n) if n.parse::<u32>().is_ok_and(|n| n > 1) => {
+                if styles.contains_key(def_spacing::NORM) {
+                    styles.insert(def_spacing::NORM, "empty_lines".to_string());
+                }
+            }
+            Some(_) => {
+                styles.remove(def_spacing::NORM);
+            }
+        }
         Configured { styles, off }
     }
 }

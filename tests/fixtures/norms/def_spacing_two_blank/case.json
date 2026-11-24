@@ -1,0 +1,25 @@
+{
+  "description": "two blank lines between defs among single ones is a style of its own, as RuboCop's NumberOfEmptyLines counts: the edit removes the extra line",
+  "norm": "Layout/EmptyLineBetweenDefs",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "inferred": "empty_line",
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 19,
+                  "style": "empty_lines",
+                  "edit": "--- a/a.rb\n+++ b/a.rb\n@@ -18,2 +18,1 @@\n-\n-  def e\n+  def e\n"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

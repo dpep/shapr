@@ -1,11 +1,14 @@
-//! Layout/EmptyLineBetweenDefs: a blank line between adjacent method
-//! definitions (`empty_line`), or none (`no_empty_line`).
+//! Layout/EmptyLineBetweenDefs: one blank line between adjacent method
+//! definitions (`empty_line`), two or more (`empty_lines`), or none
+//! (`no_empty_line`). RuboCop's `NumberOfEmptyLines` counts them exactly.
 
 use super::Walker;
 use crate::norms::Replace;
 use ruby_prism::Node;
 
 pub const NORM: &str = "Layout/EmptyLineBetweenDefs";
+/// `empty_lines` is counted only where seen, as width's numbers are: a body
+/// with one blank line everywhere weighs two styles, not three.
 pub const STYLES: &[&str] = &["empty_line", "no_empty_line"];
 
 /// The gap between two adjacent `def`s in a body: a blank line in it, or
@@ -41,21 +44,34 @@ pub fn see(w: &mut Walker, node: &Node) {
             .filter(|l| !blank.contains(l))
             .map(|l| String::from_utf8_lossy(line_text(l)).trim().to_string())
             .collect();
-        let (style, other, fix) = if blank.is_empty() {
-            let at = w.index.start(gap.start);
-            let insert = vec![Replace {
-                span: at..at,
-                text: "\n".to_string(),
-            }];
-            ("no_empty_line", "empty_line", insert)
-        } else {
-            let remove = (blank.iter())
+        let remove = |lines: &[usize]| -> Vec<Replace> {
+            (lines.iter())
                 .map(|&l| Replace {
                     span: w.index.start(l)..w.index.start(l + 1).min(w.source.len()),
                     text: String::new(),
                 })
-                .collect();
-            ("empty_line", "no_empty_line", remove)
+                .collect()
+        };
+        let (style, fix) = match blank.len() {
+            0 => {
+                let at = w.index.start(gap.start);
+                let insert = vec![Replace {
+                    span: at..at,
+                    text: "\n".to_string(),
+                }];
+                ("no_empty_line", vec![("empty_line".to_string(), insert)])
+            }
+            1 => (
+                "empty_line",
+                vec![("no_empty_line".to_string(), remove(&blank))],
+            ),
+            _ => (
+                "empty_lines",
+                vec![
+                    ("empty_line".to_string(), remove(&blank[1..])),
+                    ("no_empty_line".to_string(), remove(&blank)),
+                ],
+            ),
         };
         let names =
             |d: &ruby_prism::DefNode| String::from_utf8_lossy(d.name().as_slice()).into_owned();
@@ -71,7 +87,7 @@ pub fn see(w: &mut Walker, node: &Node) {
             next_loc.start_offset(),
             (prev_last, next_first),
             key,
-            vec![(other.to_string(), fix)],
+            fix,
         );
     }
 }
@@ -106,5 +122,7 @@ mod tests {
         let src = "class A\n  def a\n  end\n\n  def b\n  end\n  # c\n  def c\n  end\n  def d; end\n  \
                    def e; end\n  x = 1\n  def f; end\n  def g\n  end\n\n\n  # h\n  def h; end\nend\n";
         assert_eq!(styles(src, super::NORM), "empty_line@5 no_empty_line@8");
+        let src = "def a\n  1\nend\n\n\ndef b\n  2\nend\n";
+        assert_eq!(styles(src, super::NORM), "empty_lines@6");
     }
 }
