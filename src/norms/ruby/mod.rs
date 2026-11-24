@@ -7,6 +7,7 @@ mod config;
 mod final_newline;
 mod hash_syntax;
 mod indentation;
+mod naming;
 mod strings;
 mod whitespace;
 mod width;
@@ -61,6 +62,10 @@ static NORMS: &[NormDef] = &[
         id: width::NORM,
         styles: width::STYLES,
     },
+    NormDef {
+        id: naming::METHOD,
+        styles: naming::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -74,6 +79,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     indentation::see,
     whitespace::see,
     width::see,
+    naming::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -154,7 +160,14 @@ static SETTINGS: &[Setting] = &[
         key: "Width",
         values: ANY_NUMBER,
     },
+    Setting {
+        norm: naming::METHOD,
+        key: "EnforcedStyle",
+        values: NAMING_VALUES,
+    },
 ];
+
+const NAMING_VALUES: &[(&str, &str)] = &[("snake_case", "snake_case"), ("camelCase", "camelCase")];
 
 /// A setting whose value, a number, is the style.
 const ANY_NUMBER: &[(&str, &str)] = &[("*", "*")];
@@ -191,10 +204,12 @@ impl Language for Ruby {
             scopes: Vec::new(),
             embedded: Vec::new(),
             literals: Vec::new(),
+            names: naming::Names::default(),
         };
         walker.visit(&result.node());
         whitespace::lines(&mut walker);
         final_newline::file(&mut walker);
+        naming::methods(&mut walker);
         Analysis {
             observations: walker.observations,
             scopes: walker.scopes,
@@ -263,6 +278,7 @@ pub struct Walker<'a> {
     pub embedded: Vec<bool>,
     /// Byte ranges of string and heredoc contents.
     pub literals: Vec<std::ops::Range<usize>>,
+    names: naming::Names,
 }
 
 impl<'pr> Visit<'pr> for Walker<'_> {

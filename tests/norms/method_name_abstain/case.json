@@ -1,0 +1,18 @@
+{
+  "about": "too few names to infer from and nothing configured: abstain",
+  "norm": "Naming/MethodName",
+  "expect": {
+    "hunks": [
+      {
+        "norms": [
+          {
+            "inferred": null,
+            "expected": null,
+            "direction": "abstain",
+            "deviations": []
+          }
+        ]
+      }
+    ]
+  }
+}

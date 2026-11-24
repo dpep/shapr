@@ -28,4 +28,5 @@ First release.
 - Experimental: `.editorconfig` configures norms beside `.rubocop.yml`, which wins where both set one. The `Layout/TrailingWhitespace` norm, configured by `trim_trailing_whitespace`.
 - Experimental: the `Layout/TrailingEmptyLines` norm, how a file ends, configured by `insert_final_newline`. A suggested edit marks a last line with no line break as unified diffs do.
 - Experimental: the `Layout/IndentationWidth` norm, a body's indentation in spaces, configured by RuboCop's `Width` or `.editorconfig`'s `indent_size`.
+- Experimental: the `Naming/MethodName` norm, `snake_case` or `camelCase` method names; a rename is suggested only for a private method whose calls are all in the hunk.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
