@@ -1,0 +1,6 @@
+{
+  "description": "println! formats its arguments' values, not their text, so spacing there is formatting",
+  "expect": {
+    "hunks": [{"kind": "format_only"}]
+  }
+}

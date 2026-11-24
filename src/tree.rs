@@ -302,19 +302,23 @@ impl Spelling {
     /// Replaces the first occurrence of `name` in `text` that stands as a
     /// whole token with [`MASKED`].
     pub fn mask(&self, text: &mut Vec<u8>, name: &[u8]) {
+        if let Some(i) = self.find(text, name) {
+            text.splice(i..i + name.len(), [MASKED]);
+        }
+    }
+
+    /// Where `name` first stands as a whole token in `text`.
+    fn find(&self, text: &[u8], name: &[u8]) -> Option<usize> {
         let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
         let has = |set: &[char], b: u8| set.contains(&(b as char));
         let suffixed = name.last().is_some_and(|&b| has(self.suffixes, b));
-        let at = (0..text.len()).find(|&i| {
+        (0..text.len()).find(|&i| {
             text[i..].starts_with(name)
                 && (i == 0 || !(word(text[i - 1]) || has(self.sigils, text[i - 1])))
                 && text
                     .get(i + name.len())
                     .is_none_or(|&n| !word(n) && (suffixed || !has(self.glued, n)))
-        });
-        if let Some(i) = at {
-            text.splice(i..i + name.len(), [MASKED]);
-        }
+        })
     }
 
     /// A name a rename can change: an identifier, not an operator.
@@ -425,6 +429,8 @@ pub struct Tree {
     pub semantics: Semantics,
     /// Separators the language ignores, sorted: hashed like whitespace.
     ignored: Vec<Span>,
+    /// Spans whose whitespace is hashed like code, sorted and disjoint.
+    verbatim: Vec<Span>,
     line_starts: Vec<usize>,
     lines: Vec<LineFacts>,
     /// The deepest nesting of nodes below the root.
@@ -571,22 +577,46 @@ impl Tree {
         out
     }
 
-    /// `id`'s own text as the hash reads it, whitespace dropped and [`MARK`]
-    /// where each code child sits. With `mask`, the node's name, where the
-    /// text spells it as a whole token, becomes [`MASKED`], so nodes that
-    /// differ only in name compare equal.
+    /// `id`'s own text as the hash reads it, whitespace dropped (but in a
+    /// [`TreeBuilder::verbatim`] span) and [`MARK`] where each code child
+    /// sits. With `mask`, the node's name, where the text spells it as a
+    /// whole token, becomes [`MASKED`], so nodes that differ only in name
+    /// compare equal.
     pub fn own_text(&self, id: NodeId, mask: bool) -> Vec<u8> {
+        // Each byte, and whether it is kept though whitespace.
         let mut out = Vec::new();
+        let mut kept = Vec::new();
         self.walk_own(id, |piece| match piece {
-            Piece::Text(s) => out.extend_from_slice(&self.source[s]),
-            Piece::Child(c) if !self.node(c).comment => out.push(MARK),
+            Piece::Text(s) => {
+                for at in s {
+                    out.push(self.source[at]);
+                    kept.push(self.verbatim(at));
+                }
+            }
+            Piece::Child(c) if !self.node(c).comment => {
+                out.push(MARK);
+                kept.push(false);
+            }
             Piece::Child(_) => {}
         });
-        if let Some(name) = self.node(id).name.as_deref().filter(|_| mask) {
-            self.semantics.spelling.mask(&mut out, name.as_bytes());
+        let name = self.node(id).name.as_deref().filter(|_| mask);
+        let spelling = &self.semantics.spelling;
+        if let Some((name, i)) = name.and_then(|n| Some((n, spelling.find(&out, n.as_bytes())?))) {
+            out.splice(i..i + name.len(), [MASKED]);
+            kept.splice(i..i + name.len(), [false]);
         }
-        out.retain(|b| !b.is_ascii_whitespace());
-        out
+        let keep = |(b, k): &(u8, bool)| *k || !b.is_ascii_whitespace();
+        out.into_iter()
+            .zip(kept)
+            .filter(keep)
+            .map(|(b, _)| b)
+            .collect()
+    }
+
+    /// Whether whitespace at `at` is code ([`TreeBuilder::verbatim`]).
+    fn verbatim(&self, at: usize) -> bool {
+        let i = self.verbatim.partition_point(|s| s.end <= at);
+        self.verbatim.get(i).is_some_and(|s| s.contains(&at))
     }
 
     /// Hash of the first code child of a namespace with no name (a Rust
@@ -687,6 +717,7 @@ pub struct TreeBuilder {
     errors: Vec<Span>,
     semantics: Semantics,
     ignored: Vec<Span>,
+    verbatim: Vec<Span>,
     canonical: Vec<Option<(&'static str, Canonical)>>,
     depth: usize,
 }
@@ -704,6 +735,7 @@ impl TreeBuilder {
             errors: Vec::new(),
             semantics: Semantics::default(),
             ignored: Vec::new(),
+            verbatim: Vec::new(),
             canonical: Vec::new(),
             depth: 0,
         };
@@ -754,6 +786,13 @@ impl TreeBuilder {
     /// adding or dropping one is a format change.
     pub fn ignore(&mut self, span: Span) {
         self.ignored.push(span);
+    }
+
+    /// A span whose whitespace the language may read, such as the tokens of
+    /// a Rust macro that spells them out: hashed byte for byte, so a
+    /// whitespace change in it is a code change.
+    pub fn verbatim(&mut self, span: Span) {
+        self.verbatim.push(span);
     }
 
     /// Gives the node just opened or reported as a leaf a canonical form, in
@@ -835,6 +874,7 @@ impl TreeBuilder {
                 self.ignored.sort_by_key(|s| s.start);
                 self.ignored
             },
+            verbatim: disjoint(self.verbatim),
         };
         for i in (0..tree.nodes.len()).rev() {
             tree.nodes[i].hash = hash(&tree, i, self.leaf[i], |n| n.hash);
@@ -965,10 +1005,23 @@ fn hash_text(tree: &Tree, span: Span, h: &mut DefaultHasher) {
     };
     for at in span {
         let b = tree.source[at];
-        if !b.is_ascii_whitespace() && !ignored(at) {
+        if (!b.is_ascii_whitespace() || tree.verbatim(at)) && !ignored(at) {
             h.write_u8(b);
         }
     }
+}
+
+/// `spans` sorted, with overlapping ones merged.
+fn disjoint(mut spans: Vec<Span>) -> Vec<Span> {
+    spans.sort_by_key(|s| s.start);
+    let mut out: Vec<Span> = Vec::new();
+    for s in spans {
+        match out.last_mut() {
+            Some(last) if s.start < last.end => last.end = last.end.max(s.end),
+            _ => out.push(s),
+        }
+    }
+    out
 }
 
 fn line_starts(source: &[u8]) -> Vec<usize> {

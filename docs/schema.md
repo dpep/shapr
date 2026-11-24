@@ -457,8 +457,12 @@ are stated in Ruby's terms; for Rust:
   changes the parse, so adding or dropping one is formatting, as rustfmt
   does when it reflows a list. A one-element tuple's comma is code.
 - A macro's arguments can't be parsed: each token is compared on its own
-  (`a << b` and `a < < b` differ), and an identifier in them, or a `{name}`
-  in one of their string literals, may mean anything. A rename leaving the
+  (`a << b` and `a < < b` differ). A macro that may spell its tokens out
+  (`stringify!`, `dbg!`, a message-less `assert!`, any macro outside std)
+  prints their spacing too, so whitespace in its arguments is code; an
+  attribute macro's item is compared ignoring whitespace. An identifier in
+  a macro's arguments, or a `{name}` in one of their string literals, may
+  mean anything. A rename leaving the
   old name there, or one whose new name was already there, is `logic`; one
   renaming it along with a local or a function passes. A macro outside std
   (`bail!`, `ensure!`) may hide a `return`, so a chunk holding one is risk

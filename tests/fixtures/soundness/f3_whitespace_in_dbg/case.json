@@ -1,0 +1,6 @@
+{
+  "description": "dbg! prints its expression as written, so a space inside it changes the output",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

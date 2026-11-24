@@ -1,0 +1,6 @@
+{
+  "description": "stringify! prints its tokens with their spacing, so a space inside it changes the output",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

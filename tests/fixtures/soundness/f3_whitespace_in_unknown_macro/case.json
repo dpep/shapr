@@ -1,0 +1,6 @@
+{
+  "description": "a macro outside std may spell its tokens out, spacing included",
+  "expect": {
+    "hunks": [{"kind": "logic"}]
+  }
+}

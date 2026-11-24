@@ -476,8 +476,10 @@ impl Walker<'_> {
                 self.open(&n, attrs, name, role);
                 let mut c = n.walk();
                 let tokens = n.children(&mut c).find(|c| c.kind() == "token_tree");
-                if spells(name.unwrap_or_default(), tokens) {
+                if let Some(tokens) = tokens.filter(|t| spells(name.unwrap_or_default(), Some(*t)))
+                {
                     self.b.flag(Flags::SPELLS);
+                    self.b.verbatim(span(&tokens));
                 }
                 self.children_with(
                     n,

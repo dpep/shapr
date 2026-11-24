@@ -784,6 +784,7 @@ impl<'a> Walker<'a> {
                     .filter(|i| i.kind() == "identifier");
                 if name.is_some_and(|i| roles::spells(self.text(&i), Some(n))) {
                     self.b.flag(Flags::SPELLS);
+                    self.b.verbatim(span(&n));
                 }
                 self.children(n, Mode::Tokens, &[]);
                 self.b.close();
@@ -948,7 +949,14 @@ mod tests {
         assert_ne!(root("fn a() { \"x y\" }"), root("fn a() { \"x  y\" }"));
         // Macro tokens are compared one by one: `<<` is not `< <`.
         assert_ne!(root("m!(a << b);"), root("m!(a < < b);"));
-        assert_eq!(root("m!(a, b);"), root("m!( a ,b );"));
+        assert_eq!(root("vec!(a, b);"), root("vec!( a ,b );"));
+        // A macro that may spell its tokens out reads their spacing too.
+        assert_ne!(root("m!(a, b);"), root("m!( a ,b );"));
+        assert_ne!(root("f(stringify!(a+b));"), root("f(stringify!(a + b));"));
+        assert_ne!(
+            root("println!(\"{}\", stringify!(a+b));"),
+            root("println!(\"{}\", stringify!(a + b));")
+        );
     }
 
     #[test]
