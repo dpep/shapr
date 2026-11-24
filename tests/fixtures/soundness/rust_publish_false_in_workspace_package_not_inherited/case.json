@@ -1,0 +1,17 @@
+{
+  "description": "a root crate that doesn't inherit `publish` isn't unpublished by its own `[workspace.package]`: a pub fn rename is public API",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": [
+          {
+            "assumptions": [
+              "public_api"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

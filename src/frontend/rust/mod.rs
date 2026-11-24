@@ -181,23 +181,35 @@ impl Frontend for Rust {
     }
 }
 
-/// Whether a crate's manifest allows no registry: `publish = false` or
-/// `publish = []`, or `publish.workspace = true` under a workspace root
-/// (above `dir`) whose `[workspace.package]` says so.
+/// Whether a crate's manifest allows no registry: `[package]` says
+/// `publish = false` or `publish = []`, or `publish.workspace = true` under a
+/// workspace root (above `dir`) whose `[workspace.package]` says so. Any
+/// spelling this doesn't read leaves the crate published.
 fn unpublished(toml: &str, dir: &str, files: &dyn Snapshot) -> bool {
     let compact = |l: &str| l.split_whitespace().collect::<String>();
-    let none = |toml: &str| {
+    // The lines of table `header`, up to the next header.
+    let table = |toml: &str, header: &str| -> Vec<String> {
         toml.lines()
-            .any(|l| matches!(compact(l).as_str(), "publish=false" | "publish=[]"))
+            .skip_while(|l| compact(l) != header)
+            .skip(1)
+            .take_while(|l| !l.trim_start().starts_with('['))
+            .map(compact)
+            .collect()
     };
-    let inherits = toml.lines().any(|l| {
+    let none = |lines: &[String]| {
+        lines
+            .iter()
+            .any(|l| matches!(l.as_str(), "publish=false" | "publish=[]"))
+    };
+    let package = table(toml, "[package]");
+    let inherits = package.iter().any(|l| {
         matches!(
-            compact(l).as_str(),
+            l.as_str(),
             "publish.workspace=true" | "publish={workspace=true}"
         )
     });
     if !inherits {
-        return none(toml);
+        return none(&package);
     }
     // The workspace root: this manifest, or the nearest one above with `[workspace]`.
     let workspace = |toml: &str| toml.lines().any(|l| compact(l) == "[workspace]");
@@ -210,15 +222,7 @@ fn unpublished(toml: &str, dir: &str, files: &dyn Snapshot) -> bool {
             .map(|t| String::from_utf8_lossy(&t).into_owned())
             .filter(|t| workspace(t));
     }
-    let Some(root) = root else { return false };
-    // The `[workspace.package]` table, up to the next header.
-    let table: Vec<&str> = root
-        .lines()
-        .skip_while(|l| compact(l) != "[workspace.package]")
-        .skip(1)
-        .take_while(|l| !l.trim_start().starts_with('['))
-        .collect();
-    none(&table.join("\n"))
+    root.is_some_and(|root| none(&table(&root, "[workspace.package]")))
 }
 
 fn span(n: &Node<'_>) -> Span {

@@ -1,0 +1,17 @@
+{
+  "description": "`publish = false` under a table other than `[package]` (a dependency's, `[package.metadata]`) leaves the crate published: a pub fn rename is public API",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": [
+          {
+            "assumptions": [
+              "public_api"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
