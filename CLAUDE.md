@@ -165,6 +165,29 @@ denied. CI runs the same on ubuntu. Run it before every commit.
 - Prefer a test over a one-off CLI probe; a behavior worth checking once is
   worth keeping.
 
+## Measuring
+
+`script/corpus.py` runs a shapr binary over the history of local repos and
+reports on it (Python 3, stdlib only; it only reads the repos). Repos are
+arguments or `SHAPR_CORPUS` (colon-separated); `--limit` caps commits per repo
+(newest 1000 non-merge by default). Output is cached per repo, commit and
+binary hash under `SHAPR_CORPUS_CACHE` (default `~/.cache/shapr/corpus`), so
+copy a build out of `target/` before comparing it with the next one.
+
+```
+script/corpus.py stats BIN                  hunk and line shares per kind, per-commit review discount
+script/corpus.py diff OLD_BIN NEW_BIN       kind deltas, verdict changes, relabeled lines, sample commits
+script/corpus.py sample BIN --n 200 --seed 1   seeded logic hunks with their diff text, for hand labeling
+```
+
+Options (`--limit`, `--jobs`, `--json`, `--cache-dir`) go before the
+subcommand. `diff` exits 1 when any label changed: run it against main's build before
+landing a detector or a change to hunk output, and explain every row. It
+compares labels line by line over lines both builds cover, so it survives
+changes to hunk boundaries. Record reads live in one block of the script
+(`summary`, `hunks`, `code_lines`, `line_kinds`); a schema change edits
+those.
+
 ## Landing changes
 
 Small, logically connected commits, structure or behavior but not both.
