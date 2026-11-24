@@ -867,7 +867,7 @@ the change exits 0, whatever the verdict.
 | code | meaning |
 |---|---|
 | 0 | success |
-| 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
+| 2 | operational error: git failed (not a repository, a bad revision), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), or GitHub failed (unreachable, not found, rate limited, a fetch refused) |
 | 64 | usage: a bad command line, no input (no range and an empty or blank stdin), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `none`.
