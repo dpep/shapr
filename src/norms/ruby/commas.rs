@@ -1,5 +1,5 @@
-//! Trailing commas in multiline lists: Style/TrailingCommaInArrayLiteral
-//! and Style/TrailingCommaInHashLiteral.
+//! Trailing commas in multiline lists: Style/TrailingCommaInArrayLiteral,
+//! Style/TrailingCommaInHashLiteral and Style/TrailingCommaInArguments.
 
 use super::Walker;
 use crate::norms::Replace;
@@ -7,6 +7,7 @@ use ruby_prism::Node;
 
 pub const ARRAY: &str = "Style/TrailingCommaInArrayLiteral";
 pub const HASH: &str = "Style/TrailingCommaInHashLiteral";
+pub const ARGUMENTS: &str = "Style/TrailingCommaInArguments";
 pub const STYLES: &[&str] = &["comma", "no_comma"];
 
 pub fn see_array(w: &mut Walker, node: &Node) {
@@ -37,6 +38,34 @@ pub fn see_hash(w: &mut Walker, node: &Node) {
     let items: Vec<Node> = hash.elements().iter().collect();
     let (open, close) = (hash.opening_loc(), hash.closing_loc());
     list(w, HASH, open.start_offset(), &items, close.start_offset());
+}
+
+/// A bracketed call's arguments, `f(...)` or `Set[...]`, a block argument
+/// (`&blk`) last.
+pub fn see_arguments(w: &mut Walker, node: &Node) {
+    let Some(call) = node.as_call_node() else {
+        return;
+    };
+    let (Some(opening), Some(closing)) = (call.opening_loc(), call.closing_loc()) else {
+        return;
+    };
+    if !matches!(opening.as_slice(), b"(" | b"[") {
+        return;
+    }
+    // Keyword arguments are items each, as RuboCop reads them.
+    let mut items: Vec<Node> = Vec::new();
+    for arg in call.arguments().iter().flat_map(|a| a.arguments().iter()) {
+        match arg.as_keyword_hash_node() {
+            Some(kwargs) => items.extend(kwargs.elements().iter()),
+            None => items.push(arg),
+        }
+    }
+    items.extend(
+        call.block()
+            .filter(|b| b.as_block_argument_node().is_some()),
+    );
+    let (open, close) = (opening.start_offset(), closing.start_offset());
+    list(w, ARGUMENTS, open, &items, close);
 }
 
 /// A list chooses when each item starts on its own line and the closing
@@ -124,5 +153,12 @@ mod tests {
         let src = "a = {\n  b: 1, # one\n}\nc = [\n  <<~X,\n  body\n  X\n]\n";
         assert_eq!(styles(src, HASH), "comma@2");
         assert_eq!(styles(src, ARRAY), "");
+    }
+
+    #[test]
+    fn parenthesized_arguments_count() {
+        let src = "f(\n  1,\n  &blk\n)\ng(\n  a: 1,\n  b: 2,\n)\nh 1,\n  2\nk(\n  a: 1, b: 2,\n)\nS[\n  :x,\n]\n";
+        assert_eq!(styles(src, ARGUMENTS), "no_comma@3 comma@7 comma@15");
+        assert_eq!(styles(src, HASH), "");
     }
 }

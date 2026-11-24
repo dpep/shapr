@@ -30,6 +30,10 @@ static NORMS: &[NormDef] = &[
         id: commas::HASH,
         styles: commas::STYLES,
     },
+    NormDef {
+        id: commas::ARGUMENTS,
+        styles: commas::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -38,6 +42,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     braces::see,
     commas::see_array,
     commas::see_hash,
+    commas::see_arguments,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -74,6 +79,11 @@ static SETTINGS: &[Setting] = &[
     },
     Setting {
         norm: commas::HASH,
+        key: "EnforcedStyleForMultiline",
+        values: COMMA_VALUES,
+    },
+    Setting {
+        norm: commas::ARGUMENTS,
         key: "EnforcedStyleForMultiline",
         values: COMMA_VALUES,
     },
