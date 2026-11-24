@@ -1,6 +1,5 @@
 {
   "description": "two assignments swapped in a method: the same statements run in another order",
-  "open": true,
   "expect": {
     "hunks": [
       {

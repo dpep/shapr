@@ -927,8 +927,8 @@ fn owner(tree: &Tree, node: NodeId) -> Option<Vec<u64>> {
     Some(chain)
 }
 
-/// What differs around a moved unit in its new place: the code it runs
-/// among, apart from any change to its own body.
+/// What differs around a moved unit in its new place, apart from any change
+/// to its own body; for a reorder, what observes the new order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Context {
     /// Each file is a module (Rust): another file is another module.
@@ -945,10 +945,17 @@ pub enum Context {
     /// The code reads its own line (`__LINE__`), or its own file
     /// (`__FILE__`) and moved to another file.
     Position,
+    /// Reordered entries of a collection whose iteration sees insertion order.
+    IterationOrder,
+    /// Reordered elements whose positions are part of the value.
+    ElementOrder,
+    /// Reordered code that runs in written order.
+    EvaluationOrder,
 }
 
 impl Context {
-    pub const ALL: [Context; 6] = [
+    /// The contexts a `move` can have.
+    pub const MOVE: [Context; 6] = [
         Context::Module,
         Context::Owner,
         Context::Visibility,
@@ -965,6 +972,9 @@ impl Context {
             Context::LoadOrder => "load_order",
             Context::Directives => "directives",
             Context::Position => "position",
+            Context::IterationOrder => "iteration_order",
+            Context::ElementOrder => "element_order",
+            Context::EvaluationOrder => "evaluation_order",
         }
     }
 
@@ -978,6 +988,9 @@ impl Context {
             }
             Context::Directives => "the files' file-level directives differ",
             Context::Position => "it reads its own line or file",
+            Context::IterationOrder => "iteration sees insertion order",
+            Context::ElementOrder => "positions are part of the value",
+            Context::EvaluationOrder => "the code runs in another order",
         }
     }
 }

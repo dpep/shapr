@@ -1,6 +1,5 @@
 {
   "description": "macro statements swapped in a function body run in another order: evaluation order, not item order",
-  "open": true,
   "expect": {
     "hunks": [
       {

@@ -479,7 +479,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
     let mut kinds: BTreeMap<&'static str, usize> =
         Kind::ALL.iter().map(|k| (k.as_str(), 0)).collect();
     let mut move_contexts: BTreeMap<&'static str, usize> =
-        Context::ALL.iter().map(|c| (c.as_str(), 0)).collect();
+        Context::MOVE.iter().map(|c| (c.as_str(), 0)).collect();
     let mut facets: BTreeMap<&'static str, usize> =
         Facet::ALL.iter().map(|f| (f.as_str(), 0)).collect();
     let mut assumptions: BTreeMap<&'static str, usize> =

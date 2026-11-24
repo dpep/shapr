@@ -140,17 +140,19 @@ fn rust(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependen
         "root" | "mod_item" | "impl_item" | "trait_item" | "foreign_mod_item" | "block" => {
             let mut out = Vec::new();
             // `macro_rules!` is in scope only below its definition, as is
-            // what a `#[macro_use]` module or crate brings in; a macro or an
-            // attribute macro (`SPELLS`) may expand differently by order.
+            // what a `#[macro_use]` module or crate brings in; an item-level
+            // macro or an attribute macro (`SPELLS` on an item) may expand
+            // differently by order. In a block a macro call is a statement.
             let textual = tree.code_children(container).any(|c| macro_scoped(tree, c));
             let expands = moved.iter().any(|&m| {
                 let node = tree.node(m);
-                node.kind == "macro_invocation" || node.flags.contains(Flags::SPELLS)
+                let item = ITEMS.contains(&node.kind);
+                (node.kind == "macro_invocation" && kind != "block")
+                    || (item && node.flags.contains(Flags::SPELLS))
             });
             if textual || expands {
                 out.push(Dependence::Load);
             }
-            // In a block a macro call is a statement that runs (`assert!`).
             let statement = |m: &NodeId| {
                 let node = tree.node(*m);
                 let item_macro = node.kind == "macro_invocation" && kind != "block";
@@ -292,7 +294,7 @@ mod tests {
         );
         assert_eq!(
             rust("fn f() { assert!(a); assert!(b); }", "block"),
-            Some(vec![Load, Evaluation])
+            Some(vec![Evaluation])
         );
         assert_eq!(
             rust("fn f() { [1, 2]; }", "array_expression"),

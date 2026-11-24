@@ -103,12 +103,13 @@ fn group(tree: &Tree, nodes: Vec<NodeId>, code: Option<NodeId>) -> Group {
     }
 }
 
-/// What the part's contexts say a reordered element can be observed
-/// through; `None` where shapr has no context to name it yet.
-fn context(dependence: Dependence) -> Option<Context> {
+/// The context naming what observes a reordered element.
+fn context(dependence: Dependence) -> Context {
     match dependence {
-        Dependence::Load => Some(Context::LoadOrder),
-        Dependence::Iteration | Dependence::Elements | Dependence::Evaluation => None,
+        Dependence::Iteration => Context::IterationOrder,
+        Dependence::Elements => Context::ElementOrder,
+        Dependence::Load => Context::LoadOrder,
+        Dependence::Evaluation => Context::EvaluationOrder,
     }
 }
 
@@ -165,10 +166,7 @@ fn prove(trees: &Trees, site: &Site, free: &Claim) -> Option<Part> {
     let language = trees.language;
     let mut dependences = order::reorder(language, tb, cb, &moved_b)?;
     dependences.extend(order::reorder(language, ta, ca, &moved_a)?);
-    let contexts: BTreeSet<Context> = dependences
-        .into_iter()
-        .map(context)
-        .collect::<Option<_>>()?;
+    let contexts: BTreeSet<Context> = dependences.into_iter().map(context).collect();
     let contexts: Vec<Context> = contexts.into_iter().collect();
 
     let lines = |tree: &Tree, span: &Span| tree.line_of(span.start)..=tree.line_of(span.end - 1);

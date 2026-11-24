@@ -1,6 +1,5 @@
 {
   "description": "an array's elements reordered (an expected list in a spec): positions are part of the value",
-  "open": true,
   "expect": {
     "hunks": [
       {

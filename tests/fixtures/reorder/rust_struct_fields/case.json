@@ -1,6 +1,5 @@
 {
   "description": "a struct declaration's fields reordered: layout, derived Ord and Debug output follow declaration order",
-  "open": true,
   "expect": {
     "hunks": [
       {
