@@ -398,7 +398,17 @@ impl File<'_> {
         };
         let region = hunk.after.start..=last;
         replaces.iter().all(|r| {
-            region.contains(&self.index.line(r.span.start))
+            let line = self.index.line(r.span.start);
+            // Line breaks inserted at a line start sit between two lines and
+            // change neither: either one in the region will do.
+            let between = r.span.is_empty()
+                && !r.text.is_empty()
+                && r.text.bytes().all(|b| b == b'\n')
+                && self.index.start(line) == r.span.start;
+            if between && line > 1 && region.contains(&(line - 1)) {
+                return true;
+            }
+            region.contains(&line)
                 && region.contains(
                     &self
                         .index

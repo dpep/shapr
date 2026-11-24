@@ -4,6 +4,7 @@
 mod braces;
 mod commas;
 mod config;
+mod def_spacing;
 mod final_newline;
 mod hash_syntax;
 mod indentation;
@@ -75,6 +76,10 @@ static NORMS: &[NormDef] = &[
         id: operators::NORM,
         styles: operators::STYLES,
     },
+    NormDef {
+        id: def_spacing::NORM,
+        styles: def_spacing::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -91,6 +96,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     naming::see,
     naming::see_variables,
     operators::see,
+    def_spacing::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -185,6 +191,11 @@ static SETTINGS: &[Setting] = &[
         norm: operators::NORM,
         key: "Enabled",
         values: &[("true", "space")],
+    },
+    Setting {
+        norm: def_spacing::NORM,
+        key: "Enabled",
+        values: &[("true", "empty_line")],
     },
 ];
 
