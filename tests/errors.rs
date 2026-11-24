@@ -325,3 +325,50 @@ fn text_output_quotes_control_characters_in_names() {
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.lines().all(|l| !l.starts_with("::")), "{text}");
 }
+
+/// A clone of a three-commit repository, DEPTH commits deep.
+fn shallow(depth: &str) -> (tempfile::TempDir, tempfile::TempDir) {
+    let upstream = repo(&[
+        &[("a.rb", METHOD)],
+        &[("a.rb", "def greet(name)\n  name\nend\n")],
+        &[("a.rb", "def greet(other)\n  other\nend\n")],
+    ]);
+    git(upstream.path(), &["checkout", "-q", "-b", "feat", "HEAD~1"]);
+    commit(upstream.path(), &[("b.rb", METHOD)], "feat");
+    git(upstream.path(), &["checkout", "-q", "main"]);
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", upstream.path().display());
+    git(
+        clone.path(),
+        &[
+            "clone",
+            "-q",
+            "--no-single-branch",
+            "--depth",
+            depth,
+            &url,
+            ".",
+        ],
+    );
+    (upstream, clone)
+}
+
+#[test]
+fn a_range_past_a_shallow_clones_history_is_an_error() {
+    let (_upstream, clone) = shallow("1");
+    for args in [
+        &["-J", "HEAD"][..],
+        &["-J", "HEAD^!"],
+        &["-J", "HEAD^-1"],
+        &["-J", "HEAD~1..HEAD"],
+        &["-J", "--merge-base", "HEAD~2"],
+        &["-J", "origin/feat...HEAD"],
+    ] {
+        let message = error(&shapr(clone.path(), args), 2);
+        assert!(message.contains("shallow clone"), "{args:?}: {message}");
+        assert!(message.contains("fetch-depth: 0"), "{message}");
+    }
+    let (_upstream, clone) = shallow("2");
+    let out = shapr(clone.path(), &["-J", "HEAD"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}

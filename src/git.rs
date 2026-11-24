@@ -19,6 +19,8 @@ pub struct Git {
     toplevel: OnceCell<Option<PathBuf>>,
     parents: RefCell<HashMap<String, usize>>,
     promisor: OnceCell<Option<String>>,
+    /// A shallow clone's boundary commits, whose parents weren't fetched.
+    shallow: OnceCell<Vec<String>>,
     /// Linguist attributes by source revision and path.
     linguist: RefCell<HashMap<(Option<String>, String), Linguist>>,
 }
@@ -47,6 +49,7 @@ impl Git {
             toplevel: OnceCell::new(),
             parents: RefCell::default(),
             promisor: OnceCell::new(),
+            shallow: OnceCell::new(),
             linguist: RefCell::default(),
         }
     }
@@ -95,7 +98,9 @@ impl Git {
         {
             bail!("{}", merge(rev));
         }
-        let text = self.run_diff(range, cached, paths, false)?;
+        let text = self
+            .run_diff(range, cached, paths, false)
+            .map_err(|e| self.shallow_hint(e))?;
         // An attribute (`-diff`, `binary`) makes git call a text file binary,
         // which would take it out of the verdict: diff those again as text.
         let mut blobs = Blobs::new(self);
@@ -176,10 +181,11 @@ impl Git {
         if !out.status.success() {
             self.outside_repository(&String::from_utf8_lossy(&out.stderr))?;
             if let Some(missing) = [a, b].into_iter().find(|r| !self.resolves(r)) {
-                bail!("{missing}: no such revision");
+                return Err(self.shallow_hint(anyhow::anyhow!("{missing}: no such revision")));
             }
         }
-        Ok(String::from_utf8_lossy(&check(out)?).trim().to_string())
+        let out = check(out).map_err(|e| self.shallow_hint(e))?;
+        Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
 
     /// ARGS, given with no `--`, as git reads them: the leading revisions,
@@ -231,7 +237,7 @@ impl Git {
                 } else {
                     "revision or path"
                 };
-                bail!("{name}: no such {what}");
+                return Err(self.shallow_hint(anyhow::anyhow!("{name}: no such {what}")));
             }
             bail!("git: {first}");
         }
@@ -295,10 +301,16 @@ impl Git {
             run(self
                 .command()
                 .args(["rev-list", "--parents", "-n1", END_OF_OPTIONS, rev, "--"]))?;
-        let n = String::from_utf8_lossy(&out)
-            .split_whitespace()
-            .count()
-            .saturating_sub(1);
+        let out = String::from_utf8_lossy(&out);
+        let mut ids = out.split_whitespace();
+        // A boundary commit looks parentless: its parents weren't fetched.
+        if ids
+            .next()
+            .is_some_and(|id| self.boundary().iter().any(|b| b == id))
+        {
+            bail!("{SHALLOW}");
+        }
+        let n = ids.count();
         self.parents.borrow_mut().insert(rev.to_string(), n);
         Ok(n)
     }
@@ -313,7 +325,54 @@ impl Git {
             .output()
             .context("could not run git")?;
         self.outside_repository(&String::from_utf8_lossy(&out.stderr))?;
-        check(out).map(drop)
+        check(out).map(drop).map_err(|e| self.shallow_hint(e))
+    }
+
+    /// ERROR, and in a shallow clone the history it may lack: a revision
+    /// past the boundary doesn't resolve.
+    fn shallow_hint(&self, error: anyhow::Error) -> anyhow::Error {
+        if self.boundary().is_empty() {
+            return error;
+        }
+        let error = format!("{error:#}");
+        match error.trim_end() {
+            // No merge base, and nothing said.
+            "git:" => anyhow::anyhow!("{SHALLOW}"),
+            error => anyhow::anyhow!("{error}; {SHALLOW}"),
+        }
+    }
+
+    /// A shallow clone's boundary commits; empty for a full one.
+    fn boundary(&self) -> &[String] {
+        self.shallow.get_or_init(|| {
+            let Ok(out) = run(self.command().args([
+                "rev-parse",
+                "--is-shallow-repository",
+                "--git-path",
+                "shallow",
+            ])) else {
+                return Vec::new();
+            };
+            let out = String::from_utf8_lossy(&out);
+            let mut lines = out.lines();
+            if lines.next() != Some("true") {
+                return Vec::new();
+            }
+            // Relative to where git ran.
+            let file = PathBuf::from(lines.next().unwrap_or_default());
+            let file = match (&self.dir, file.is_relative()) {
+                (Some(dir), true) => dir.join(file),
+                _ => file,
+            };
+            let ids = std::fs::read_to_string(file).unwrap_or_default();
+            let ids: Vec<String> = ids.lines().map(str::to_string).collect();
+            // Shallow with no boundary read: every commit may be cut short.
+            if ids.is_empty() {
+                vec![String::new()]
+            } else {
+                ids
+            }
+        })
     }
 
     /// Fails in one line when git's STDERR says it ran outside a repository.
@@ -873,6 +932,10 @@ pub fn command() -> Command {
     ]);
     cmd
 }
+
+/// Why a range past a shallow clone's history isn't diffed, and the fix.
+pub const SHALLOW: &str =
+    "shallow clone: the base commit isn't fetched (set fetch-depth: 0, or git fetch --unshallow)";
 
 /// Why a merge's combined diff isn't read, and what to run instead.
 pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
