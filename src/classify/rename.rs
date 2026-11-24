@@ -11,7 +11,8 @@
 
 use super::align::{Alignments, Cover, Diff};
 use super::hazard::{Op, blocks};
-use super::{Claim, Confidence, Kind, Labels, Part, site};
+use super::site::{self, CodeLines};
+use super::{Claim, Confidence, Kind, Labels, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
@@ -162,24 +163,24 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
             label.residual.reason = why.clone();
         }
         // A line holding code that differs, or a rename that fails, is logic.
+        let code = (CodeLines::of(&t.before), CodeLines::of(&t.after));
         let lines = |diffs: &[(&Diff, _)]| -> Claim {
-            let own = |tree: &Tree, side: fn(&Diff) -> NodeId| -> BTreeSet<usize> {
-                diffs
+            let own = |code: &CodeLines, tree: &Tree, lines, side: fn(&Diff) -> NodeId| {
+                let own: BTreeSet<usize> = diffs
                     .iter()
-                    .flat_map(|(d, _)| tree.own_bytes(side(d)))
-                    .map(|(line, _)| line)
-                    .collect()
+                    .flat_map(|(d, _)| tree.own_offsets(side(d)))
+                    .collect();
+                code.touched(lines, |at| own.contains(&at))
             };
             Claim {
-                before: own(&t.before, |d| d.before),
-                after: own(&t.after, |d| d.after),
+                before: own(&code.0, &t.before, &changed.before, |d| d.before),
+                after: own(&code.1, &t.after, &changed.after, |d| d.after),
             }
-            .intersect(&changed)
         };
         let (b, a) = &hunk.alignment.differs;
         let differs = Claim {
-            before: site::lines_in(&t.before, &changed.before, b),
-            after: site::lines_in(&t.after, &changed.after, a),
+            before: code.0.touched(&changed.before, |at| site::in_any(b, at)),
+            after: code.1.touched(&changed.after, |at| site::in_any(a, at)),
         };
         let claimed = lines(&accepted).minus(&lines(&rejected)).minus(&differs);
         if claimed.is_empty() {

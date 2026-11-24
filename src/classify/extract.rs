@@ -12,11 +12,12 @@
 
 use super::align::{Alignments, siblings};
 use super::hazard::{Op, blocks};
-use super::{Claim, Confidence, Kind, Label, Labels, Part, site};
+use super::site::CodeLines;
+use super::{Claim, Confidence, Kind, Label, Labels, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 /// Chunks with fewer syntax nodes than this stay `logic`. Equality of a body
 /// this small says little, and a one-call method is more often a hook for a
@@ -327,40 +328,18 @@ fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
     // (hunk, the lines the refactoring explains)
     let mut touched = Vec::new();
     let [before, after] = &found.regions;
-    let comments = (site::comments(&trees.before), site::comments(&trees.after));
+    let code = (CodeLines::of(&trees.before), CodeLines::of(&trees.after));
     for (h, label) in labels.iter().enumerate() {
         let free = &label.changed;
-        let bytes = |tree: &Tree, comments: &[&Span], lines: &BTreeSet<usize>| {
-            lines
-                .iter()
-                .map(|&l| (l, site::code_bytes(tree, comments, l)))
-                .collect::<Vec<_>>()
+        let touches = |code: &CodeLines, lines, region: &Region| {
+            !code.touched(lines, |at| region.touches(&at)).is_empty()
         };
-        let removed = bytes(&trees.before, &comments.0, &free.before);
-        let added = bytes(&trees.after, &comments.1, &free.after);
-        let touches = |lines: &[(usize, Vec<usize>)], region: &Region| {
-            lines
-                .iter()
-                .flat_map(|(_, b)| b)
-                .any(|at| region.touches(at))
-        };
-        if !touches(&removed, before) && !touches(&added, after) {
+        if !touches(&code.0, &free.before, before) && !touches(&code.1, &free.after, after) {
             continue;
         }
-        // A line without code is explained where it starts.
-        let explained = |tree: &Tree, lines: &[(usize, Vec<usize>)], region: &Region| {
-            lines
-                .iter()
-                .filter(|(l, b)| match b.is_empty() {
-                    true => region.explains(&tree.line_span(*l, *l).start),
-                    false => b.iter().all(|at| region.explains(at)),
-                })
-                .map(|(l, _)| *l)
-                .collect::<BTreeSet<usize>>()
-        };
         let lines = Claim {
-            before: explained(&trees.before, &removed, before),
-            after: explained(&trees.after, &added, after),
+            before: code.0.within(&free.before, |at| before.explains(&at)),
+            after: code.1.within(&free.after, |at| after.explains(&at)),
         };
         touched.push((h, lines));
     }

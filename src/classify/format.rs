@@ -2,7 +2,7 @@
 //! whitespace (and, for `comment_only`, comment text).
 
 use super::align::{Alignments, Cover};
-use super::site::{self, Side, Significance};
+use super::site::{self, CodeLines, Side, Significance};
 use super::{Claim, Confidence, Evidence, Kind, LINE_CAP, Labels, Method, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{NodeId, Span, Tree};
@@ -155,9 +155,10 @@ fn reformat(kind: Kind, lines: Claim) -> Part {
 /// code it kept that also sits on such a line, or changed on one side only
 /// (a reformat closes on both sides).
 fn differing(trees: &Trees, alignment: &Cover, changed: &Claim, free: &Claim) -> Claim {
+    let code = (CodeLines::of(&trees.before), CodeLines::of(&trees.after));
     let lines = |(b, a): &(Vec<Span>, Vec<Span>), within: &Claim| Claim {
-        before: site::lines_in(&trees.before, &within.before, b),
-        after: site::lines_in(&trees.after, &within.after, a),
+        before: code.0.touched(&within.before, |at| site::in_any(b, at)),
+        after: code.1.touched(&within.after, |at| site::in_any(a, at)),
     };
     let renamed = lines(&alignment.renamed(trees), free);
     let mut logic = lines(&alignment.differs, changed);

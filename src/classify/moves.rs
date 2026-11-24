@@ -23,7 +23,7 @@
 use super::align::{Alignments, Side, lcs, namespace_name, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
-use super::{Claim, Confidence, Kind, Labels, Part, rounded};
+use super::{Claim, Confidence, Kind, Labels, Part, rounded, site};
 use crate::change::{Change, Trees};
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
@@ -101,10 +101,9 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
                     .filter(|(_, r)| changed.iter().any(|&l| r.contains(&l) && tree.line(l).code))
                     .collect();
                 mine.extend(here.iter().filter_map(|(u, _)| by_unit.get(u).copied()));
-                let ranges = file.kept(side);
-                let lines = changed.iter().copied().filter(|l| {
-                    ranges.iter().any(|r| r.contains(l)) || here.iter().any(|(_, r)| r.contains(l))
-                });
+                let mut ranges = file.kept(side).to_vec();
+                ranges.extend(here.iter().map(|(_, r)| r.clone()));
+                let lines = site::spanned(changed, &ranges);
                 match side {
                     Side::Removed => explained.before.extend(lines),
                     Side::Added => explained.after.extend(lines),

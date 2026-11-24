@@ -8,6 +8,7 @@
 use crate::diff::{Hunk, Lines};
 use crate::tree::{NodeId, Span, Tree};
 use std::collections::BTreeSet;
+use std::ops::RangeInclusive;
 
 #[derive(Debug)]
 pub struct Site {
@@ -150,36 +151,94 @@ fn contains(outer: &Span, inner: &Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
 
-/// Offsets of the bytes on `line` that carry code: not whitespace, not in a
-/// comment.
-pub fn code_bytes(tree: &Tree, comments: &[&Span], line: usize) -> Vec<usize> {
-    tree.line_span(line, line)
-        .filter(|&at| !tree.source[at].is_ascii_whitespace())
-        .filter(|at| !comments.iter().any(|c| c.contains(at)))
-        .collect()
+/// Which of a hunk's changed lines a part explains, read off the code bytes
+/// on each line: not whitespace, not in a comment. Three quantifiers, one
+/// per kind of evidence: a byte touched, every byte inside, a whole line in
+/// range.
+pub struct CodeLines<'t> {
+    tree: &'t Tree,
+    comments: Vec<&'t Span>,
 }
 
-pub fn comments(tree: &Tree) -> Vec<&Span> {
-    tree.nodes
-        .iter()
-        .filter(|n| n.comment)
-        .map(|n| &n.extent)
-        .collect()
-}
-
-/// Of `lines`, those holding a code byte inside one of `spans`.
-pub fn lines_in(tree: &Tree, lines: &BTreeSet<usize>, spans: &[Span]) -> BTreeSet<usize> {
-    if spans.is_empty() {
-        return BTreeSet::new();
+impl<'t> CodeLines<'t> {
+    pub fn of(tree: &'t Tree) -> CodeLines<'t> {
+        let comments = tree.nodes.iter().filter(|n| n.comment);
+        CodeLines {
+            tree,
+            comments: comments.map(|n| &n.extent).collect(),
+        }
     }
-    let comments = comments(tree);
-    lines
-        .iter()
-        .copied()
-        .filter(|&line| {
-            code_bytes(tree, &comments, line)
-                .iter()
-                .any(|at| spans.iter().any(|s| s.contains(at)))
-        })
-        .collect()
+
+    /// Offsets of the code bytes on `line`.
+    fn bytes(&self, line: usize) -> Vec<usize> {
+        self.tree
+            .line_span(line, line)
+            .filter(|&at| !self.tree.source[at].is_ascii_whitespace())
+            .filter(|at| !self.comments.iter().any(|c| c.contains(at)))
+            .collect()
+    }
+
+    /// Of `lines`, those holding a code byte `pick` accepts.
+    pub fn touched(
+        &self,
+        lines: &BTreeSet<usize>,
+        pick: impl Fn(usize) -> bool,
+    ) -> BTreeSet<usize> {
+        let lines = lines.iter().copied();
+        lines
+            .filter(|&l| self.bytes(l).into_iter().any(&pick))
+            .collect()
+    }
+
+    /// Of `lines`, those whose every code byte `pick` accepts; a line
+    /// without code by where it starts.
+    pub fn within(&self, lines: &BTreeSet<usize>, pick: impl Fn(usize) -> bool) -> BTreeSet<usize> {
+        let inside = |l: usize| match self.bytes(l)[..] {
+            [] => pick(self.tree.line_start(l)),
+            ref bytes => bytes.iter().all(|&at| pick(at)),
+        };
+        lines.iter().copied().filter(|&l| inside(l)).collect()
+    }
+}
+
+/// Of `lines`, those inside one of `ranges`.
+pub fn spanned<'a>(
+    lines: &'a BTreeSet<usize>,
+    ranges: &'a [RangeInclusive<usize>],
+) -> impl Iterator<Item = usize> + 'a {
+    let lines = lines.iter().copied();
+    lines.filter(|l| ranges.iter().any(|r| r.contains(l)))
+}
+
+/// Whether `at` lies in one of `spans`.
+pub fn in_any(spans: &[Span], at: usize) -> bool {
+    spans.iter().any(|s| s.contains(&at))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frontend::{Frontend, Ruby};
+
+    #[test]
+    fn code_lines_quantify_over_code_bytes() {
+        let tree = Ruby.parse(b"x = 1 # one\n\ny = 2\n".to_vec());
+        let code = CodeLines::of(&tree);
+        let lines: BTreeSet<usize> = [1, 2, 3].into();
+        let at = |s: &str| {
+            tree.source
+                .windows(s.len())
+                .position(|w| w == s.as_bytes())
+                .unwrap()
+        };
+        // The comment's bytes aren't code: touching `1` touches line 1.
+        let one = at("1");
+        assert_eq!(code.touched(&lines, |b| b == one), [1].into());
+        assert!(code.touched(&lines, |b| b == at("one")).is_empty());
+        // Every code byte of line 1 is before the comment; the blank line
+        // goes by where it starts.
+        let before_comment = |b: usize| b < at("#") || b == tree.line_start(2);
+        assert_eq!(code.within(&lines, before_comment), [1, 2].into());
+        assert_eq!(spanned(&lines, &[2..=5, 9..=9]).collect::<Vec<_>>(), [2, 3]);
+    }
 }
