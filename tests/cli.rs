@@ -270,6 +270,49 @@ fn a_piped_diff_matches_the_range() {
 }
 
 #[test]
+fn dash_c_reads_that_repository_whatever_git_dir_says() {
+    let repo = repo(&[&[("a.rb", METHOD)]]);
+    write(
+        repo.path(),
+        &[("a.rb", &METHOD.replace("  end", "    end"))],
+    );
+    let diff = git(repo.path(), &["diff"]);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let dir = repo.path().to_str().unwrap();
+    let run = |args: &[&str], stdin: &str| {
+        let mut child = command(env!("CARGO_BIN_EXE_shapr"), elsewhere.path())
+            .env("GIT_DIR", elsewhere.path().join("missing"))
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        (report, out.status.code())
+    };
+    // A range, and a piped diff whose working-tree blob is read from disk.
+    for (args, stdin) in [
+        (vec!["-C", dir, "-j", "HEAD"], ""),
+        (vec!["-C", dir, "-j"], diff.as_str()),
+    ] {
+        let (report, code) = run(&args, stdin);
+        assert_eq!(kinds(&report), ["format_only"], "{args:?}");
+        assert_eq!(code, Some(0));
+    }
+
+    let (error, code) = run(&["-C", "missing", "-J", "HEAD"], "");
+    assert_eq!(error["record"], "error");
+    assert_eq!(code, Some(64));
+}
+
+#[test]
 fn empty_input_is_an_empty_verdict() {
     let dir = repo(&[]);
     let out = shapr(dir.path(), &["-J"], Some(""));

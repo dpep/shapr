@@ -5,6 +5,7 @@ use crate::{change, classify, diff, git};
 use clap::{CommandFactory, Parser};
 use clap_complete::Shell;
 use std::io::{IsTerminal, Read, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 const AFTER_HELP: &str = "\
@@ -14,6 +15,7 @@ EXAMPLES
   git diff --staged | shapr  classify a diff from stdin (needs `git diff` index lines)
   shapr -J main..HEAD        one JSON line per file and hunk, then a summary line
   shapr -q main..HEAD        no output; the exit code is the verdict
+  shapr -C app main..HEAD    run in another repository, like git -C
 
   Only Ruby is parsed so far; hunks in other files are `logic`, confidence 0.
   To leave them out: git diff main -- '*.rb' | shapr
@@ -40,6 +42,12 @@ struct Cli {
     /// it, a unified diff is read from stdin.
     #[arg(value_name = "RANGE")]
     range: Option<String>,
+
+    /// Run as if shapr was started in DIR, like `git -C`. GIT_DIR,
+    /// GIT_WORK_TREE and GIT_INDEX_FILE are ignored, so DIR's repository
+    /// is the one read.
+    #[arg(short = 'C', value_name = "DIR")]
+    dir: Option<PathBuf>,
 
     /// Emit one pretty JSON object: files, hunks and summary.
     #[arg(short = 'j', long)]
@@ -105,11 +113,19 @@ pub fn run() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    if let Some(dir) = cli.dir.as_ref().filter(|d| !d.is_dir()) {
+        return fail(
+            format,
+            &format!("-C {}: not a directory", dir.display()),
+            USAGE,
+        );
+    }
+    let git = git::Git::new(cli.dir);
     let text = match &cli.range {
         Some(range) if range.starts_with('-') => {
             return fail(format, &format!("`{range}` is not a range"), USAGE);
         }
-        Some(range) => git::diff(range),
+        Some(range) => git.diff(range),
         None if std::io::stdin().is_terminal() => {
             return fail(
                 format,
@@ -130,7 +146,7 @@ pub fn run() -> ExitCode {
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
 
-    let change = change::assemble(diff::parse(&text), &mut git::Blobs::default());
+    let change = change::assemble(diff::parse(&text), &mut git::Blobs::new(git));
     let labels = classify::classify(&change);
     let report = report::build(&change, &labels);
     if !cli.quiet {
@@ -178,15 +194,23 @@ fn emit_error(format: Format, message: &str, code: u8) {
 }
 
 /// The format argv asks for, read before clap has parsed it, so a usage
-/// error reaches a JSON caller as JSON. Every short flag but `--completions`
-/// is a switch, so a cluster like `-qJ` reads letter by letter.
+/// error reaches a JSON caller as JSON. Every short flag but `-C` is a
+/// switch, so a cluster like `-qJ` reads letter by letter up to a `C`, whose
+/// value is the rest of the cluster or the next argument.
 fn requested_format() -> Format {
     let mut format = Format::Text;
-    for arg in std::env::args().skip(1).take_while(|a| a != "--") {
+    let mut args = std::env::args().skip(1).take_while(|a| a != "--");
+    while let Some(arg) = args.next() {
         let (json, ndjson) = match arg.strip_prefix("--") {
             Some(long) => (long == "json", long == "ndjson"),
             None => match arg.strip_prefix('-') {
-                Some(short) => (short.contains('j'), short.contains('J')),
+                Some(short) => {
+                    let (switches, dir) = short.split_once('C').unwrap_or((short, "x"));
+                    if dir.is_empty() {
+                        args.next();
+                    }
+                    (switches.contains('j'), switches.contains('J'))
+                }
                 None => (false, false),
             },
         };

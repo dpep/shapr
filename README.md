@@ -15,6 +15,7 @@ git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
 shapr -J main..HEAD          # NDJSON: a line per file and hunk, then a summary
 shapr -j main..HEAD          # one pretty JSON object
 shapr -q main..HEAD          # no output; the exit code is the verdict
+shapr -C app main..HEAD      # in another repository, like git -C
 shapr --completions zsh      # a completion script
 ```
 
