@@ -27,4 +27,5 @@ First release.
 - Experimental: the `Layout/IndentationConsistency` norm, methods after `private` or `protected` at the modifier's column or a step deeper.
 - Experimental: `.editorconfig` configures norms beside `.rubocop.yml`, which wins where both set one. The `Layout/TrailingWhitespace` norm, configured by `trim_trailing_whitespace`.
 - Experimental: the `Layout/TrailingEmptyLines` norm, how a file ends, configured by `insert_final_newline`. A suggested edit marks a last line with no line break as unified diffs do.
+- Experimental: the `Layout/IndentationWidth` norm, a body's indentation in spaces, configured by RuboCop's `Width` or `.editorconfig`'s `indent_size`.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.

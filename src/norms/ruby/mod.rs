@@ -9,6 +9,7 @@ mod hash_syntax;
 mod indentation;
 mod strings;
 mod whitespace;
+mod width;
 
 use super::editorconfig;
 use super::{
@@ -56,6 +57,10 @@ static NORMS: &[NormDef] = &[
         id: final_newline::NORM,
         styles: final_newline::STYLES,
     },
+    NormDef {
+        id: width::NORM,
+        styles: width::STYLES,
+    },
 ];
 
 /// Per-node observers.
@@ -68,6 +73,7 @@ static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
     hash_syntax::see,
     indentation::see,
     whitespace::see,
+    width::see,
 ];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
@@ -143,7 +149,15 @@ static SETTINGS: &[Setting] = &[
             ("final_blank_line", "final_blank_line"),
         ],
     },
+    Setting {
+        norm: width::NORM,
+        key: "Width",
+        values: ANY_NUMBER,
+    },
 ];
+
+/// A setting whose value, a number, is the style.
+const ANY_NUMBER: &[(&str, &str)] = &[("*", "*")];
 
 /// Every comma style wants one where commas are observed: each item on its
 /// own line.
@@ -198,8 +212,16 @@ impl Language for Ruby {
         };
         for setting in SETTINGS {
             let value = config.get(setting.norm, setting.key);
-            if let Some((_, style)) = setting.values.iter().find(|(v, _)| Some(*v) == value) {
-                styles.insert(setting.norm, style.to_string());
+            let style = match value {
+                Some(n) if setting.values == ANY_NUMBER => {
+                    n.parse::<u32>().ok().map(|n| n.to_string())
+                }
+                _ => (setting.values.iter())
+                    .find(|(v, _)| Some(*v) == value)
+                    .map(|(_, style)| style.to_string()),
+            };
+            if let Some(style) = style {
+                styles.insert(setting.norm, style);
             }
         }
         styles
@@ -213,6 +235,16 @@ fn from_editorconfig(properties: &BTreeMap<String, String>) -> BTreeMap<&'static
     // `false` only stops an editor trimming; it asks for no whitespace.
     if get("trim_trailing_whitespace") == Some("true") {
         styles.insert(whitespace::NORM, "no_trailing_whitespace".to_string());
+    }
+    // A tab-indented file measures in tabs, which this norm doesn't.
+    let size = match get("indent_size") {
+        Some("tab") => get("tab_width"),
+        size => size,
+    };
+    if let (false, Some(size)) = (get("indent_style") == Some("tab"), size)
+        && let Ok(size) = size.parse::<u32>()
+    {
+        styles.insert(width::NORM, size.to_string());
     }
     match get("insert_final_newline") {
         Some("true") => styles.insert(final_newline::NORM, "final_newline".to_string()),
