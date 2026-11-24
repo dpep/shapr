@@ -52,7 +52,8 @@ EXIT CODES
 #[command(
     name = "shapr",
     version,
-    about = "Classify the shape of a code change: format, comment, rename, move, extract, or logic.",
+    about = "Classify the shape of a code change: format, comment, restyle, rename, move, extract, inline, or logic.",
+    override_usage = "shapr [OPTIONS] [RANGE]\n       shapr norms [OPTIONS] <FILE>...",
     after_help = AFTER_HELP
 )]
 struct Cli {
@@ -124,10 +125,19 @@ const NO_INPUT: &str =
     "no input: give a range (shapr main..HEAD) or pipe a diff (git diff | shapr)";
 
 pub fn run() -> ExitCode {
-    // A subcommand beside a free RANGE: `norms` is never read as a revision.
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(String::as_str) == Some("norms") {
-        return crate::norms::command::run(args.into_iter().skip(1).collect());
+    // A subcommand beside a free RANGE: `norms` is never read as a revision,
+    // and the format flags may come before it.
+    let mut args: Vec<String> = std::env::args().collect();
+    let first = args.iter().skip(1).position(|a| {
+        !matches!(
+            a.as_str(),
+            "-j" | "-J" | "-v" | "-q" | "--json" | "--ndjson" | "--verbose" | "--quiet"
+        )
+    });
+    if let Some(at) = first.map(|i| i + 1).filter(|&i| args[i] == "norms") {
+        args.remove(at);
+        args[0] = "shapr norms".to_string();
+        return crate::norms::command::run(args);
     }
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

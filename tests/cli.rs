@@ -514,3 +514,44 @@ fn every_output_field_is_documented() {
         }
     }
 }
+
+#[test]
+fn git_range_syntax_passes_through() {
+    let dir = repo(&[
+        &[("a.rb", METHOD)],
+        &[("a.rb", &METHOD.replace("  end", "    end"))],
+    ]);
+    let caret = shapr(dir.path(), &["-j", "HEAD^!"]);
+    assert_eq!(caret.status.code(), Some(0), "{caret:?}");
+    let ranged = shapr(dir.path(), &["-j", "HEAD~1..HEAD"]);
+    assert_eq!(report(&caret)["hunks"], report(&ranged)["hunks"]);
+    assert_eq!(report(&caret)["summary"], report(&ranged)["summary"]);
+}
+
+#[test]
+fn global_format_flags_may_precede_norms() {
+    let dir = repo(&[&[("a.rb", "A = 'a'\n")]]);
+    let out = shapr(dir.path(), &["-J", "norms", "a.rb"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(records(&out).iter().any(|r| r["record"] == "summary"));
+}
+
+#[test]
+fn help_and_usage_name_every_kind_and_both_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let help = shapr(dir.path(), &["--help"]);
+    let first = String::from_utf8_lossy(&help.stdout)
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    for kind in [
+        "format", "comment", "restyle", "rename", "move", "extract", "inline", "logic",
+    ] {
+        assert!(first.contains(kind), "{first}");
+    }
+    let usage = shapr(dir.path(), &["-J", "--bogus"]);
+    let stderr = String::from_utf8_lossy(&usage.stderr);
+    assert!(!stderr.contains("shapr --ndjson"), "{stderr}");
+    assert!(stderr.contains("shapr norms"), "{stderr}");
+}

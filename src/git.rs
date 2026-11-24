@@ -93,7 +93,7 @@ impl Git {
     pub fn messages(&self, range: &str) -> Result<Vec<(String, String)>> {
         let commits = match range.split_once("...") {
             Some((from, to)) => format!("{from}..{to}"),
-            None if range.contains("..") => range.to_string(),
+            None if range.contains("..") || parent_range(range).is_some() => range.to_string(),
             None => format!("{range}..HEAD"),
         };
         let out = run(self.command().args([
@@ -171,6 +171,9 @@ impl Git {
             return Some(bare.attributes_from.clone());
         }
         let range = range?;
+        if let Some(rev) = parent_range(range) {
+            return Some(rev.to_string());
+        }
         let (_, to) = range.split_once("...").or_else(|| range.split_once(".."))?;
         Some(if to.is_empty() { "HEAD" } else { to }.to_string())
     }
@@ -460,6 +463,15 @@ const LINGUIST: [&str; 3] = [
     "linguist-vendored",
     "linguist-documentation",
 ];
+
+/// R of `R^!` or `R^-` (`R^-N`): git's shorthand for R against a parent.
+fn parent_range(range: &str) -> Option<&str> {
+    if let Some(rev) = range.strip_suffix("^!") {
+        return Some(rev);
+    }
+    let (rev, n) = range.rsplit_once("^-")?;
+    n.bytes().all(|b| b.is_ascii_digit()).then_some(rev)
+}
 
 /// Whether ID, a possibly abbreviated blob id from a diff (all zeros for no
 /// file), is PATH's blob in FILES.
