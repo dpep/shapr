@@ -17,7 +17,7 @@ pub struct NodeId(pub u32);
 /// What a node means, in terms the core can act on. Set by the frontend;
 /// most nodes are [`Role::Other`]. The identifier, where there is one, is
 /// [`Node::name`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Role {
     #[default]
     Other,
@@ -85,7 +85,7 @@ impl Role {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NameKind {
     Method,
     Class,
@@ -112,7 +112,7 @@ pub enum NameKind {
     Macro,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Receiver {
     /// `name(...)`.
     Implicit,
@@ -122,7 +122,7 @@ pub enum Receiver {
     Explicit,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Visibility {
     Public,
     Protected,
@@ -130,7 +130,7 @@ pub enum Visibility {
     ModuleFunction,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Hazard {
     Return,
     Break,
