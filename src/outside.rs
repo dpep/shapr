@@ -12,6 +12,7 @@ use crate::norms::Snapshot;
 use crate::tree::{Role, Tree, spells};
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 
 /// Most files of one language searched. Beyond it, a partial clone would
 /// fetch too much to answer one change; the part keeps `search_capped`.
@@ -28,6 +29,8 @@ pub struct Repository<'a> {
     searches: RefCell<HashMap<(&'static str, String), Search>>,
     /// Per language, the files that name a method computed at runtime.
     computed: RefCell<HashMap<&'static str, Option<Computed>>>,
+    /// Files parsed for a proof, each once however many names it's read for.
+    parsed: RefCell<HashMap<String, Option<Rc<Tree>>>>,
 }
 
 /// Files holding a name computed at runtime ([`Role::DynamicName`] with a
@@ -46,6 +49,7 @@ impl<'a> Repository<'a> {
             prefetched: RefCell::default(),
             searches: RefCell::default(),
             computed: RefCell::default(),
+            parsed: RefCell::default(),
         }
     }
 
@@ -171,6 +175,10 @@ impl Repository<'_> {
         frontend: &dyn Frontend,
         candidates: &[&(String, String)],
     ) -> Option<Computed> {
+        // Only a dispatch word reaches a method by a computed name.
+        if frontend.dispatch_words().is_empty() {
+            return Some(Computed::new());
+        }
         let sources: Vec<Option<Vec<u8>>> = match self.state {
             State::Worktree => candidates
                 .iter()
@@ -225,6 +233,19 @@ impl Outside for Repository<'_> {
 
     fn read(&self, path: &str) -> Option<Vec<u8>> {
         self.snapshot.read(path)
+    }
+
+    fn parse(&self, path: &str) -> Option<Rc<Tree>> {
+        if let Some(tree) = self.parsed.borrow().get(path) {
+            return tree.clone();
+        }
+        let tree = frontend::for_path(path)
+            .zip(self.read(path))
+            .map(|(frontend, source)| Rc::new(frontend.parse(source)));
+        self.parsed
+            .borrow_mut()
+            .insert(path.to_string(), tree.clone());
+        tree
     }
 }
 
@@ -325,6 +346,29 @@ mod tests {
         fn list(&self, _: &str) -> Vec<String> {
             Vec::new()
         }
+    }
+
+    /// Counts reads.
+    struct Counted(std::cell::Cell<usize>);
+    impl Snapshot for Counted {
+        fn read(&self, _: &str) -> Option<Vec<u8>> {
+            self.0.set(self.0.get() + 1);
+            Some(b"def go\nend\n".to_vec())
+        }
+        fn list(&self, _: &str) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_file_is_read_and_parsed_once() {
+        let snapshot = Counted(Default::default());
+        let shell = Git::new(None);
+        let repo = Repository::new(&shell, State::Worktree, &snapshot);
+        let first = repo.parse("a.rb").unwrap();
+        assert!(Rc::ptr_eq(&first, &repo.parse("a.rb").unwrap()));
+        assert_eq!(snapshot.0.get(), 1);
+        assert!(repo.parse("notes.txt").is_none());
     }
 
     #[test]

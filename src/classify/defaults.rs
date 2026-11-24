@@ -23,6 +23,7 @@ use crate::frontend::{self, Arguments, Frontend};
 use crate::tree::{Flags, MARK, NameKind, NodeId, Receiver, Role, Span, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
 
 pub(super) fn run(
     change: &Change,
@@ -402,7 +403,7 @@ fn receiver(tree: &Tree, def: NodeId) -> Option<u64> {
 /// search left open.
 struct Lookup {
     /// (path, its tree, the definition).
-    defs: Vec<(String, Tree, NodeId)>,
+    defs: Vec<(String, Rc<Tree>, NodeId)>,
     assumption: Option<Assumption>,
     searched: Option<usize>,
 }
@@ -487,7 +488,7 @@ impl<'c> Lookups<'c> {
             }
         }
         for d in &mut defs {
-            d.extend(lookup.defs.iter().map(|(p, t, id)| (p.as_str(), t, *id)));
+            d.extend(lookup.defs.iter().map(|(p, t, id)| (p.as_str(), &**t, *id)));
         }
         let [Some(def_b), Some(def_a)] = defs.map(|d| match d[..] {
             [one] => Some(one),
@@ -598,9 +599,7 @@ impl<'c> Lookups<'c> {
                     lookup.assumption = Some(Assumption::UnseenUses);
                 }
                 for file in found.iter().filter(|f| !self.covered.contains(f.as_str())) {
-                    let tree = frontend::for_path(file)
-                        .zip(self.outside.read(file))
-                        .map(|(frontend, source)| frontend.parse(source))
+                    let tree = (self.outside.parse(file))
                         .filter(|tree| tree.errors.is_empty())
                         .ok_or_else(|| {
                             format!("`{method}` is named in {file}, which can't be parsed")

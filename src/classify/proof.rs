@@ -12,6 +12,7 @@ use crate::frontend;
 use crate::tree::{Flags, NameKind, NodeId, Role, Tree, Visibility};
 use serde::Serialize;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 /// Something a part relies on and shapr hasn't verified. Closed vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -79,6 +80,13 @@ pub trait Outside {
 
     /// The contents of the file at `path`.
     fn read(&self, path: &str) -> Option<Vec<u8>>;
+
+    /// The file at `path` parsed by its language's frontend; `None` for a
+    /// file of no language shapr reads, or one it can't read.
+    fn parse(&self, path: &str) -> Option<Rc<Tree>> {
+        let frontend = frontend::for_path(path)?;
+        Some(Rc::new(frontend.parse(self.read(path)?)))
+    }
 }
 
 /// No repository: nothing can be verified.
@@ -121,9 +129,7 @@ pub(super) fn verify(
     uses: &dyn Fn(&Tree) -> bool,
 ) -> Verified {
     let used_in = |file: &str| {
-        let tree = frontend::for_path(file)
-            .zip(outside.read(file))
-            .map(|(frontend, source)| frontend.parse(source));
+        let tree = outside.parse(file);
         tree.is_none_or(|tree| !tree.errors.is_empty() || uses(&tree))
     };
     match outside.uses(path, word) {
