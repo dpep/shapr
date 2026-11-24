@@ -139,7 +139,7 @@ fn comment_text(tree: &Tree, span: &Span) -> String {
         .join("\n")
 }
 
-fn subtree_hashes(tree: &Tree, cover: &[NodeId]) -> Vec<u64> {
+pub(super) fn subtree_hashes(tree: &Tree, cover: &[NodeId]) -> Vec<u64> {
     let mut out = Vec::new();
     let mut stack: Vec<NodeId> = cover.to_vec();
     while let Some(id) = stack.pop() {
@@ -154,7 +154,7 @@ fn subtree_hashes(tree: &Tree, cover: &[NodeId]) -> Vec<u64> {
 }
 
 /// Dice coefficient of two sorted multisets.
-fn dice(a: Vec<u64>, b: Vec<u64>) -> f64 {
+pub(super) fn dice(a: Vec<u64>, b: Vec<u64>) -> f64 {
     if a.is_empty() && b.is_empty() {
         return 1.0;
     }
