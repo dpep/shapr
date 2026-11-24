@@ -40,7 +40,9 @@ Every field below is always present. Fields that can be `null` say so.
   outside any comment, and *carries a comment* when it holds comment text. A
   line can do both (`x = 1 # note`), and a blank line does neither. A magic
   comment (`# frozen_string_literal: true`) and a first-line shebang
-  (`#!/usr/bin/env ruby`) are code. In a file shapr didn't
+  (`#!/usr/bin/env ruby`) are code. Type annotations in comments (RBS
+  inline `#:`, YARD tags) are comments: a type checker reads them, Ruby
+  doesn't. In a file shapr didn't
   parse, every changed line counts as code.
 
 ## Parts
