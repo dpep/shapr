@@ -305,7 +305,13 @@ impl<'a> Walker<'a> {
         match n.kind() {
             "identifier" => {
                 let name = self.text(&n);
-                self.leaf(&n, Some(name), Role::Opaque);
+                let bang = n.next_sibling().is_some_and(|s| s.kind() == "!");
+                let role = match name {
+                    "line" | "column" if bang => Role::Jump(Jump::Line),
+                    "file" | "module_path" if bang => Role::Jump(Jump::File),
+                    _ => Role::Opaque,
+                };
+                self.leaf(&n, Some(name), role);
             }
             "string_literal" => self.format_string(n),
             _ if n.child_count() == 0 || n.kind() == "raw_string_literal" => {
@@ -577,6 +583,15 @@ mod tests {
             );
         }
         assert_has(&found, &[(Role::Reference(Macro), "println")]);
+        let position = roles("fn a() { line!(); file!(); m!(column!(), module_path!(), line); }");
+        let position: Vec<Role> = position.into_iter().map(|(r, _)| r).collect();
+        assert_eq!(
+            position
+                .iter()
+                .filter(|r| matches!(r, Role::Jump(Jump::Line | Jump::File)))
+                .count(),
+            4
+        );
         let jumping_tokens = roles("fn a() { m!(return); m!(x?); }");
         assert_eq!(
             jumping_tokens

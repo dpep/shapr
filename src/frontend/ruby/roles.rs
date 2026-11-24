@@ -97,7 +97,19 @@ impl Roles {
             Node::InstanceVariableReadNode { .. } | Node::ClassVariableReadNode { .. } => {
                 Role::Reference(Field)
             }
-            Node::GlobalVariableReadNode { .. } => Role::Reference(Global),
+            Node::GlobalVariableReadNode { .. } => {
+                let name = node.as_global_variable_read_node().map(|n| n.name());
+                // The last match and the last line read are local to the frame.
+                match name.map(|n| n.as_slice()) {
+                    Some(b"$~" | b"$_") => Role::Jump(Jump::Frame),
+                    _ => Role::Reference(Global),
+                }
+            }
+            Node::NumberedReferenceReadNode { .. } | Node::BackReferenceReadNode { .. } => {
+                Role::Jump(Jump::Frame)
+            }
+            Node::SourceLineNode { .. } => Role::Jump(Jump::Line),
+            Node::SourceFileNode { .. } => Role::Jump(Jump::File),
             Node::ConstantReadNode { .. } => Role::Reference(Constant),
             Node::ConstantPathNode { .. } => {
                 let name = node.as_constant_path_node().and_then(|n| owned(n.name()));
@@ -164,14 +176,31 @@ impl Roles {
                 }
             }
         }
-        match visibility {
-            Some(v) => Role::Visibility(v),
-            None if receiver == Receiver::Implicit
-                && matches!(name, b"block_given?" | b"iterator?") =>
-            {
-                Role::Jump(Jump::BlockGiven)
+        if let Some(v) = visibility {
+            return Role::Visibility(v);
+        }
+        let implicit = receiver == Receiver::Implicit;
+        let blockless = call.block().is_none();
+        let proc_new = name == b"new"
+            && call
+                .receiver()
+                .and_then(|r| r.as_constant_read_node())
+                .is_some_and(|c| c.name().as_slice() == b"Proc");
+        match name {
+            b"block_given?" | b"iterator?" if implicit => Role::Jump(Jump::BlockGiven),
+            // With no block of its own, a proc takes the method's block.
+            b"proc" | b"lambda" if implicit && blockless => Role::Jump(Jump::BlockGiven),
+            _ if proc_new && blockless => Role::Jump(Jump::BlockGiven),
+            b"binding" | b"local_variables" | b"eval" if implicit => Role::Jump(Jump::Binding),
+            // A string evaluated in another self still sees the caller's locals.
+            b"instance_eval" | b"class_eval" | b"module_eval" if call.arguments().is_some() => {
+                Role::Jump(Jump::Binding)
             }
-            None => Role::Call(receiver),
+            b"__method__" | b"__callee__" | b"caller" | b"caller_locations" if implicit => {
+                Role::Jump(Jump::Frame)
+            }
+            b"__dir__" | b"require_relative" if implicit => Role::Jump(Jump::File),
+            _ => Role::Call(receiver),
         }
     }
 }

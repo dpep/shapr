@@ -205,3 +205,44 @@ fn constants_whose_values_run_code_keep_their_order() {
     );
     assert_eq!(kinds(&report), ["move"]);
 }
+
+// Extract and inline: code bound to its method's frame or its position.
+
+/// `go`'s `chunk` (lines indented four spaces) extracted into `show(a)`.
+fn extract(chunk: &str) -> Value {
+    ruby(
+        &format!("class A\n  def go(a)\n{chunk}    1\n  end\nend\n"),
+        &format!(
+            "class A\n  def go(a)\n    show(a)\n    1\n  end\n\n  def show(a)\n{chunk}  end\nend\n"
+        ),
+    )
+}
+
+#[test]
+fn a_chunk_reading_its_frame_is_not_extracted() {
+    for chunk in [
+        "    t = a * 2 + 1\n    puts binding.local_variables.to_s + t.to_s\n",
+        "    t = eval('a * 2')\n    puts t.to_s + a.to_s + 'z'\n",
+        "    n = __method__\n    puts n.to_s + a.to_s + 'x'\n",
+        "    puts caller.first.to_s + a.to_s\n    puts a.to_s + 'y' + 'z'\n",
+        "    puts caller_locations.first.to_s + a.to_s\n    puts a.to_s + 'y'\n",
+        "    t = a * 2 + 1\n    puts t.to_s + 'zz' + __LINE__.to_s\n",
+        "    t = Proc.new.call + a * 2\n    puts t.to_s + 'zz' + a.to_s\n",
+        "    puts $1.to_s + a.to_s + 'zz'\n    puts a.to_s * 2\n",
+        "    puts $~.to_s + a.to_s + 'zz'\n    puts a.to_s * 2\n",
+    ] {
+        assert_near(&extract(chunk), "extract", Some("jump"));
+    }
+    // The file is the same file: `__FILE__` reads the same in the new method.
+    let report = extract("    t = a * 2 + 1\n    puts t.to_s + 'zz' + __FILE__\n");
+    assert_eq!(kinds(&report), ["extract"]);
+}
+
+#[test]
+fn a_rust_chunk_reading_its_line_is_not_extracted() {
+    let report = rust(
+        "fn go(a: u32) -> u32 {\n    let t = a * 2 + 1;\n    println!(\"{} {}\", t, line!());\n    1\n}\n",
+        "fn go(a: u32) -> u32 {\n    show(a);\n    1\n}\n\nfn show(a: u32) {\n    let t = a * 2 + 1;\n    println!(\"{} {}\", t, line!());\n}\n",
+    );
+    assert_near(&report, "extract", Some("jump"));
+}

@@ -351,6 +351,35 @@ mod tests {
     }
 
     #[test]
+    fn roles_mark_frame_and_position_reads() {
+        use crate::tree::Jump::*;
+        let jumps = |src: &str| -> Vec<crate::tree::Jump> {
+            roles(src)
+                .into_iter()
+                .filter_map(|(r, _)| match r {
+                    Role::Jump(j) => Some(j),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            jumps("binding\neval('1')\nlocal_variables\nx.instance_eval('y')\n"),
+            [Binding, Binding, Binding, Binding]
+        );
+        assert_eq!(
+            jumps("__method__\ncaller\ncaller_locations\n$~\n$1\n$&\n"),
+            [Frame, Frame, Frame, Frame, Frame, Frame]
+        );
+        assert_eq!(
+            jumps("__LINE__\n__FILE__\n__dir__\nrequire_relative 'a'\n"),
+            [Line, File, File, File]
+        );
+        assert_eq!(jumps("Proc.new\nproc\nlambda\n"), [BlockGiven; 3]);
+        // A block makes them ordinary calls; a receiver makes them methods.
+        assert!(jumps("proc { 1 }\nx.binding\nx.instance_eval { 1 }\n$stdout\n").is_empty());
+    }
+
+    #[test]
     fn fields_of_a_fixed_node_type_reach_the_tree() {
         let tree = parse("def a(x, &b)\n  foo(1) if x\nend\n");
         let kinds = kinds(&tree, false);

@@ -35,8 +35,9 @@ pub enum Role {
     DynamicName,
     /// Changes the visibility of the definitions after it, or of its arguments.
     Visibility(Visibility),
-    /// Control flow bound to the enclosing method or block: it means
-    /// something else once moved into a new method.
+    /// Code bound to the enclosing method or block (control flow, its
+    /// frame) or to its own position: it means something else once moved
+    /// into a new method.
     Jump(Jump),
     /// An identifier the parser can't resolve, as in a Rust macro's token
     /// tree: it may name anything in scope, locals included.
@@ -131,6 +132,18 @@ pub enum Jump {
     /// A macro the frontend can't see into, which may expand to any of the
     /// above (Rust's `bail!`).
     Macro,
+    /// Reads or writes the enclosing method's locals by name at runtime
+    /// (`binding`, `eval`): a local can't be renamed under it.
+    Binding,
+    /// Reads the enclosing method's frame: its name (`__method__`), its
+    /// callers (`caller`), the last regexp match (`$~`, `$1`).
+    Frame,
+    /// Reads its own source line (`__LINE__`, `line!()`): moving the code
+    /// changes the value.
+    Line,
+    /// Reads its own file (`__FILE__`, `file!()`): moving the code to
+    /// another file changes the value.
+    File,
 }
 
 /// Facts about a language's semantics that the core acts on, set by the

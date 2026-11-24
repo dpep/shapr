@@ -254,7 +254,10 @@ fn find(
         .collect();
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
-    let outcome = if in_chunk().any(|n| matches!(chunks.node(n).role, Role::Jump(_))) {
+    // The chunk stays in its file, so `__FILE__` reads the same in B.
+    let bound =
+        |n: NodeId| matches!(chunks.node(n).role, Role::Jump(j) if j != crate::tree::Jump::File);
+    let outcome = if in_chunk().any(bound) {
         Err(Risk::Jump)
     } else if in_chunk().any(|n| {
         let node = chunks.node(n);

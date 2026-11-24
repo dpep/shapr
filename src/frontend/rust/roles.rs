@@ -35,7 +35,6 @@ const PLAIN_MACROS: &[&str] = &[
     "assert_eq",
     "assert_ne",
     "cfg",
-    "column",
     "compile_error",
     "concat",
     "dbg",
@@ -45,14 +44,11 @@ const PLAIN_MACROS: &[&str] = &[
     "env",
     "eprint",
     "eprintln",
-    "file",
     "format",
     "format_args",
     "include_bytes",
     "include_str",
-    "line",
     "matches",
-    "module_path",
     "option_env",
     "panic",
     "print",
@@ -422,6 +418,8 @@ impl Walker<'_> {
                     t.rsplit("::").next().unwrap_or(t)
                 });
                 let role = match name {
+                    Some("line" | "column") => Role::Jump(Jump::Line),
+                    Some("file" | "module_path") => Role::Jump(Jump::File),
                     Some(name) if PLAIN_MACROS.contains(&name) => Role::Reference(Macro),
                     _ => Role::Jump(Jump::Macro),
                 };
