@@ -3,9 +3,10 @@
 pub(crate) mod generated;
 mod reserved;
 mod roles;
+mod signature;
 pub(crate) mod variants;
 
-use super::{Construct, Frontend};
+use super::{Arguments, Construct, Frontend, Signature};
 use crate::norms::Snapshot;
 use crate::tree::{NodeId, Role, Semantics, Span, Spelling, Tree, TreeBuilder};
 use ruby_prism::{Location, Node, Visit};
@@ -132,6 +133,22 @@ impl Frontend for Ruby {
 
     fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {
         roles::construct(tree, id)
+    }
+
+    fn signature(&self, tree: &Tree, def: NodeId) -> Option<Signature> {
+        signature::signature(tree, def)
+    }
+
+    fn arguments(&self, tree: &Tree, call: NodeId) -> Option<Arguments> {
+        signature::arguments(tree, call)
+    }
+
+    fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool {
+        signature::plain_literal(tree, id)
+    }
+
+    fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool {
+        signature::rebinds_self(tree, id)
     }
 }
 

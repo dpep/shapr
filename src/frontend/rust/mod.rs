@@ -10,7 +10,7 @@
 
 mod roles;
 
-use super::{Construct, Frontend};
+use super::{Arguments, Construct, Frontend, Signature};
 use crate::norms::Snapshot;
 use crate::tree::{Flags, NodeId, Semantics, Span, Spelling, Tree, TreeBuilder};
 use roles::{Mode, Plan};
@@ -183,6 +183,23 @@ impl Frontend for Rust {
 
     fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {
         roles::construct(tree, id)
+    }
+
+    /// Rust has no default arguments: no argument restates one.
+    fn signature(&self, _: &Tree, _: NodeId) -> Option<Signature> {
+        None
+    }
+
+    fn arguments(&self, _: &Tree, _: NodeId) -> Option<Arguments> {
+        None
+    }
+
+    fn plain_literal(&self, _: &Tree, _: NodeId) -> bool {
+        false
+    }
+
+    fn rebinds_self(&self, _: &Tree, _: NodeId) -> bool {
+        false
     }
 }
 

@@ -42,6 +42,46 @@ pub trait Frontend: Sync {
     /// Whether the file at `path` is library code another package can depend
     /// on, judged from the repository's layout at the after revision.
     fn library(&self, path: &str, files: &dyn Snapshot) -> bool;
+
+    /// How method definition `def` receives arguments, when every parameter
+    /// is required, optional or a keyword (or a block): `None` for one that
+    /// collects the rest (`*args`, `**opts`, `...`), and so can tell what it
+    /// was passed, and in a language without default arguments.
+    fn signature(&self, tree: &Tree, def: NodeId) -> Option<Signature>;
+
+    /// How `call` passes its arguments, when each is a plain expression or a
+    /// keyword named by a literal: `None` when one splats or forwards.
+    fn arguments(&self, tree: &Tree, call: NodeId) -> Option<Arguments>;
+
+    /// `id` is a literal every evaluation of which gives an equal value no
+    /// other evaluation shares: a number, symbol, plain string, `nil`,
+    /// `true`, `false`, or an empty collection.
+    fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool;
+
+    /// Code inside `id` may run with another `self` than the code around it
+    /// (a Ruby block, which `instance_eval` can rebind, or a class body).
+    fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool;
+}
+
+/// A method's parameters, as [`Frontend::signature`] reads them.
+#[derive(Debug, Default, PartialEq)]
+pub struct Signature {
+    /// The parameter list, absent for a method with none.
+    pub list: Option<NodeId>,
+    /// Required positional parameters, all before the optional ones.
+    pub required: usize,
+    /// Each optional positional parameter's default, in order.
+    pub optional: Vec<NodeId>,
+    /// Keyword parameters in order, with an optional one's default.
+    pub keywords: Vec<(String, Option<NodeId>)>,
+}
+
+/// A call's arguments, as [`Frontend::arguments`] reads them.
+#[derive(Debug, Default, PartialEq)]
+pub struct Arguments {
+    pub positional: Vec<NodeId>,
+    /// Keyword arguments in order: the keyword and its value.
+    pub keywords: Vec<(String, NodeId)>,
 }
 
 /// A language construct that tells one kind of logic change from another.
