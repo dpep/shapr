@@ -528,12 +528,21 @@ impl Tree {
     /// child's extent holds: an operator, a keyword, punctuation.
     pub fn own_offsets(&self, id: NodeId) -> impl Iterator<Item = usize> + '_ {
         let node = self.node(id);
+        // One sweep over children sorted by start: `at` is held when the
+        // furthest end among children starting at or before it lies past it.
+        let mut held: Vec<Span> = node
+            .children
+            .iter()
+            .map(|&c| self.node(c).extent.clone())
+            .collect();
+        held.sort_by_key(|s| s.start);
+        let (mut next, mut reach) = (0, 0);
         node.span.clone().filter(move |&at| {
-            !self.source[at].is_ascii_whitespace()
-                && !node
-                    .children
-                    .iter()
-                    .any(|&c| self.node(c).extent.contains(&at))
+            while next < held.len() && held[next].start <= at {
+                reach = reach.max(held[next].end);
+                next += 1;
+            }
+            at >= reach && !self.source[at].is_ascii_whitespace()
         })
     }
 
