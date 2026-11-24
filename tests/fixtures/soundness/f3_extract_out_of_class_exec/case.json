@@ -1,0 +1,6 @@
+{
+  "description": "class_exec runs its block with the class as self",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}}
+  }
+}

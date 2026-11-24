@@ -1,0 +1,6 @@
+{
+  "description": "Class.new runs its block with the new class as self",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}}
+  }
+}

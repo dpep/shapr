@@ -45,12 +45,35 @@ const SENDERS: &[&str] = &[
     "respond_to?",
 ];
 
-/// Remembers which literals are arguments to a dynamic call, and the
-/// argument lists of dynamic calls whose name is computed; prism visits a
-/// call before its arguments.
+/// Calls that run their block with another object as `self`.
+const REBINDING: &[&str] = &[
+    "instance_eval",
+    "instance_exec",
+    "class_eval",
+    "class_exec",
+    "module_eval",
+    "module_exec",
+    "define_method",
+    "define_singleton_method",
+];
+
+/// Constructors that run their block with the new class as `self`, as
+/// (receiver, method).
+const REBINDING_NEW: &[(&str, &str)] = &[
+    ("Class", "new"),
+    ("Module", "new"),
+    ("Struct", "new"),
+    ("Data", "define"),
+];
+
+/// Remembers which literals are arguments to a dynamic call, the argument
+/// lists of dynamic calls whose name is computed, and the blocks run with
+/// another `self`; prism visits a call before its arguments and block.
 #[derive(Default)]
 pub(super) struct Roles {
     dynamic_args: HashSet<usize>,
+    /// Blocks of [`REBINDING`] calls, by start offset.
+    rebinding: HashSet<usize>,
     /// Argument lists, by start offset, with the pattern their computed
     /// name matches.
     computed: HashMap<usize, Vec<u8>>,
@@ -178,6 +201,9 @@ impl Roles {
             Node::SuperNode { .. } | Node::ForwardingSuperNode { .. } => {
                 Role::Hazard(Hazard::Super)
             }
+            Node::BlockNode { .. } if self.rebinding.remove(&node.location().start_offset()) => {
+                Role::Hazard(Hazard::Rebind)
+            }
             _ => Role::Other,
         };
         (role, None)
@@ -188,6 +214,11 @@ impl Roles {
             return Role::Other;
         };
         let name = call.name().as_slice();
+        if let Some(block) = call.block().and_then(|b| b.as_block_node())
+            && rebinds(&call)
+        {
+            self.rebinding.insert(block.location().start_offset());
+        }
         let receiver = match call.receiver() {
             None => Receiver::Implicit,
             Some(r) if r.as_self_node().is_some() && names_its_message(&call) => Receiver::SelfRef,
@@ -270,6 +301,19 @@ pub(super) fn flags(node: &Node<'_>) -> Flags {
         Node::ImplicitNode { .. } => Flags::MEMBER,
         _ => Flags::default(),
     }
+}
+
+/// Whether a call runs its block with another object as `self`.
+fn rebinds(call: &ruby_prism::CallNode<'_>) -> bool {
+    let name = call.name().as_slice();
+    let constant = call
+        .receiver()
+        .and_then(|r| r.as_constant_read_node())
+        .map(|c| c.name().as_slice());
+    REBINDING.iter().any(|r| r.as_bytes() == name)
+        || REBINDING_NEW
+            .iter()
+            .any(|(r, m)| constant == Some(r.as_bytes()) && m.as_bytes() == name)
 }
 
 /// Whether a call on `self` spells the method it calls the plain way:
