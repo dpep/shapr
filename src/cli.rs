@@ -277,7 +277,11 @@ pub fn run() -> ExitCode {
         );
     }
     let before = git.before_revision(range.as_deref());
-    let change = change::assemble(files, &git, before.as_deref());
+    let after = match &state {
+        Some(git::State::Revision(rev)) => Some(rev.as_str()),
+        _ => None,
+    };
+    let change = change::assemble(files, &git, before.as_deref(), after);
     // The repository as of the change's after side: config and neighbors
     // for norms, uses and library layout for proof.
     let revision = match &state {

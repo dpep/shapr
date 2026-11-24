@@ -1,0 +1,7 @@
+{
+  "description": "a historical range reads attributes as of its after commit, not as the working tree has them since",
+  "expect": {
+    "hunks": [{"file": "lib/a.rb", "category": "code", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

@@ -52,11 +52,16 @@ impl FileChange {
 /// The passes recurse once per level.
 pub const MAX_DEPTH: usize = 10_000;
 
-/// Reads and parses every file the diff names. BEFORE is the revision the
-/// change starts from, when known.
-pub fn assemble(diffs: Vec<FileDiff>, git: &Git, before: Option<&str>) -> Change {
+/// Reads and parses every file the diff names. BEFORE and AFTER are the
+/// revisions the change starts from and ends in, when known.
+pub fn assemble(
+    diffs: Vec<FileDiff>,
+    git: &Git,
+    before: Option<&str>,
+    after: Option<&str>,
+) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
-    let mut attributes = git.linguist(&paths, None);
+    let mut attributes = git.linguist(&paths, after);
     // An attribute the change itself sets mustn't hide the change: where the
     // change edits a .gitattributes, a file it doesn't add keeps whichever
     // side's category is reviewed.

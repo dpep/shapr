@@ -343,9 +343,9 @@ still parsed and classified. The first rule that matches wins:
 
 A linguist attribute wins over the name either way: `-linguist-generated`
 (or `=false`) unmarks a lockfile, and `-linguist-documentation` a `README`.
-Attributes are read as `git check-attr` sees them, from the working tree's
-`.gitattributes` (for a GitHub run, the head commit's), not the diffed
-revisions'. A change that edits a `.gitattributes` can't hide itself: a file
+Attributes are read as `git check-attr` sees them in the revision the
+change ends in (B of `A..B`, a GitHub change's head), or in the working
+tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change that edits a `.gitattributes` can't hide itself: a file
 it doesn't add whose category counts toward the verdict under the
 attributes it starts from (`code`, `test`, `config`, `manifest`) keeps that
 category, so marking a file `linguist-generated` in the change that edits it
