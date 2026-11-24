@@ -5,5 +5,5 @@ fn main() -> std::process::ExitCode {
         .stack_size(1 << 30)
         .spawn(shapr::run)
         .expect("spawn the main thread");
-    run.join().unwrap_or(std::process::ExitCode::from(101))
+    run.join().unwrap_or(std::process::ExitCode::from(2))
 }

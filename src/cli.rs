@@ -187,9 +187,42 @@ pub(crate) fn usage_message(error: &clap::Error) -> String {
 
 pub fn run() -> ExitCode {
     let started = std::time::Instant::now();
-    let code = dispatch();
+    // A panic is reported as an error by `guarded`, in one line.
+    std::panic::set_hook(Box::new(|info| {
+        if let Ok(mut at) = PANICKED_AT.lock() {
+            *at = info.location().map(|l| l.to_string());
+        }
+    }));
+    let code = guarded(dispatch);
     crate::usage::finish(started, flag_names(std::env::args().skip(1)));
     code
+}
+
+static PANICKED_AT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// RUN's exit code; a panic is an error (2), with a JSON error record under
+/// `-j`/`-J` like any other, so a gate reading the exit code fails closed.
+fn guarded(run: impl FnOnce() -> ExitCode + std::panic::UnwindSafe) -> ExitCode {
+    let payload = match std::panic::catch_unwind(run) {
+        Ok(code) => return code,
+        Err(payload) => payload,
+    };
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic".to_string());
+    let at = PANICKED_AT.lock().ok().and_then(|mut at| at.take());
+    fail(
+        requested_format(),
+        &internal_error(&message, at.as_deref()),
+        ERROR,
+    )
+}
+
+fn internal_error(message: &dyn std::fmt::Display, at: Option<&str>) -> String {
+    let at = at.map(|at| format!(" at {at}")).unwrap_or_default();
+    format!("internal error: {message}{at}, please report it")
 }
 
 /// The canonical names of the flags in ARGS (`json` for `-j`), never their
@@ -1053,6 +1086,17 @@ mod tests {
         );
         assert!(s(&["f", "g"], Some("main"), false).is_err());
         assert!(s(&[], Some("a..b"), false).is_err());
+    }
+
+    #[test]
+    fn a_panic_is_an_error_not_a_crash() {
+        assert_eq!(guarded(|| ExitCode::SUCCESS), ExitCode::SUCCESS);
+        let code = guarded(|| panic!("boom"));
+        assert_eq!(code, ExitCode::from(ERROR));
+        assert_eq!(
+            internal_error(&"boom", Some("src/x.rs:1:2")),
+            "internal error: boom at src/x.rs:1:2, please report it"
+        );
     }
 
     #[test]
