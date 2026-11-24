@@ -88,6 +88,8 @@ pub enum HintKind {
     Breaking,
     /// "No behavior change", "no functional change", "NFC".
     NoBehaviorChange,
+    /// "Test-only", "tests only": the change is to test code.
+    TestOnly,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -217,9 +219,15 @@ impl Claims {
             })
         };
         if !behavior {
+            // A test claim says the tests changed: only code outside them
+            // can contradict a refactor or docs claim beside it.
+            let (finding, count) = match claimed(Category::Test) {
+                true => (Finding::NonTestBehaviorHunks, code.non_test_behavior),
+                false => (Finding::BehaviorHunks, code.behavior),
+            };
             for claim in [Category::Refactor, Category::Docs] {
-                if claimed(claim) && code.behavior > 0 {
-                    conflict(claim, Finding::BehaviorHunks, code.behavior);
+                if claimed(claim) && count > 0 {
+                    conflict(claim, finding, count);
                 }
             }
             if claimed(Category::Test) && code.non_test_behavior > 0 {
@@ -335,6 +343,9 @@ const NO_BEHAVIOR_CHANGE: &[&str] = &[
     "pure refactor",
 ];
 
+/// Phrases saying the change is to test code, matched as `NO_BEHAVIOR_CHANGE`.
+const TEST_ONLY: &[&str] = &["test only", "tests only", "spec only", "specs only"];
+
 /// Words before an issue reference that say it was a bug.
 const FIXING: &[&str] = &["fix", "fixes", "fixed"];
 
@@ -388,8 +399,7 @@ fn hints_in(message: &Message) -> Vec<Hint> {
             }
             words = rest;
         }
-        for word in tokens(words) {
-            let word = word.to_ascii_lowercase();
+        for word in purpose_words(words) {
             if let Some((_, category)) = KEYWORDS.iter().find(|(k, _)| *k == word) {
                 add(HintKind::Keyword, &word, Some(*category), Field::Subject);
             }
@@ -427,6 +437,11 @@ fn hints_in(message: &Message) -> Vec<Hint> {
                 );
             }
         }
+        for phrase in TEST_ONLY {
+            if normal.contains(phrase) && !normal.contains(&format!("not {phrase}")) {
+                add(HintKind::TestOnly, phrase, Some(Category::Test), field);
+            }
+        }
         if tokens(text).any(|w| w == "NFC") {
             add(
                 HintKind::NoBehaviorChange,
@@ -456,6 +471,30 @@ fn conventional(subject: &str) -> Option<(String, bool, &str)> {
         .iter()
         .any(|(t, _)| *t == kind)
         .then_some((kind, breaking, rest))
+}
+
+/// The lowercase words that can name a purpose: not inside a path or an
+/// identifier (`spec/support`, `spec_helper`, `Foo::move`), and not denied by
+/// a `no` or `not a` before them ("an edit, not a rename").
+fn purpose_words(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut previous: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        let code = ["/", "_", "::", "#"].iter().any(|c| word.contains(c));
+        for token in tokens(word) {
+            let token = token.to_ascii_lowercase();
+            let denied = match previous.as_slice() {
+                [.., no] if no == "no" => true,
+                [.., not, a] if not == "not" && (a == "a" || a == "an") => true,
+                _ => false,
+            };
+            if !code && !denied {
+                out.push(token.clone());
+            }
+            previous.push(token);
+        }
+    }
+    out
 }
 
 fn tokens(text: &str) -> impl Iterator<Item = &str> {
@@ -540,6 +579,30 @@ mod tests {
         for no in ["UTF-8", "SHA-256", "#abc", "x-1", "A-1", "re-run"] {
             assert_eq!(issue(no), None, "{no}");
         }
+    }
+
+    #[test]
+    fn paths_identifiers_and_denials_claim_nothing() {
+        for subject in [
+            "Consolidate spec/support helpers",
+            "Share spec_helper setup",
+            "Treat a kept name as an edit, not a rename",
+            "Say there was no regression",
+        ] {
+            let found = hints(subject);
+            assert!(found.is_empty(), "{subject}: {found:?}");
+        }
+        assert_eq!(hints("Re-add the gate")[0].1, "add");
+        assert_eq!(hints("Don't crash on empty input")[0].1, "crash");
+    }
+
+    #[test]
+    fn test_only_is_a_test_claim_unless_denied() {
+        assert_eq!(
+            hints("Tidy\n\nTest-only.")[1],
+            (HintKind::TestOnly, "test only".into(), Some(Category::Test))
+        );
+        assert!(hints("Tidy\n\nThis is not test-only.").len() == 1);
     }
 
     #[test]

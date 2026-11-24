@@ -188,7 +188,7 @@ fn claims_show_in_text_output() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("claims: refactor 1 (1 message)"), "{text}");
     assert!(
-        text.contains("conflict: claims refactor; 1 behavior hunk"),
+        text.contains("unproven: claims refactor; 1 hunk not shown structural"),
         "{text}"
     );
 }
@@ -213,4 +213,32 @@ fn every_claims_field_is_documented() {
             );
         }
     }
+}
+
+/// A test-only claim checks a refactor claim against the hunks outside
+/// tests: changed specs alone don't contradict "no behavior change".
+#[test]
+fn a_test_only_refactor_is_checked_outside_tests() {
+    let spec = "describe 'gate' do\n  it { expect(1).to eq(1) }\nend\n";
+    let dir = tempfile::tempdir().unwrap();
+    init(dir.path());
+    commit(dir.path(), &[("spec/gate_spec.rb", spec)], "Start");
+    commit(
+        dir.path(),
+        &[("spec/gate_spec.rb", &spec.replace("eq(1)", "eq(2)"))],
+        "Simplify the gate checks\n\nTest-only, no behavior change.",
+    );
+    let claims = &report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]))["summary"]["claims"];
+    let kinds: Vec<&str> = claims["hints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["hint"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["keyword", "no_behavior_change", "test_only"],
+        "{claims}"
+    );
+    assert_eq!(claims["experimental"]["conflicts"], json!([]), "{claims}");
 }

@@ -701,16 +701,24 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
     )?;
     for conflict in &claims.experimental.conflicts {
         let plural = if conflict.count == 1 { "" } else { "s" };
-        let finding = match conflict.finding {
-            Finding::BehaviorHunks => format!("{} behavior hunk{plural}", conflict.count),
-            Finding::NonTestBehaviorHunks => {
-                format!("{} behavior hunk{plural} outside tests", conflict.count)
-            }
-            Finding::NoBehaviorHunks => "every hunk is structure".to_string(),
+        // Hunks shapr couldn't prove structural aren't proof of behavior.
+        let (label, finding) = match conflict.finding {
+            Finding::BehaviorHunks => (
+                "unproven",
+                format!("{} hunk{plural} not shown structural", conflict.count),
+            ),
+            Finding::NonTestBehaviorHunks => (
+                "unproven",
+                format!(
+                    "{} hunk{plural} outside tests not shown structural",
+                    conflict.count
+                ),
+            ),
+            Finding::NoBehaviorHunks => ("conflict", "every hunk is structure".to_string()),
         };
         writeln!(
             out,
-            "conflict: claims {}; {finding}",
+            "{label}: claims {}; {finding}",
             conflict.claim.as_str()
         )?;
     }
