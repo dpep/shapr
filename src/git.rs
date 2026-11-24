@@ -104,8 +104,9 @@ impl Git {
         let text = self
             .run_diff(range, cached, paths, false)
             .map_err(|e| self.shallow_hint(e))?;
-        // An attribute (`-diff`, `binary`) makes git call a text file binary,
-        // which would take it out of the verdict: diff those again as text.
+        // An attribute (`-diff`, `binary`) or a NUL in code makes git call a
+        // file binary, which would take it out of the verdict: diff those
+        // again as text.
         let mut blobs = Blobs::new(self);
         let attributed: Vec<FileDiff> = crate::diff::parse(&text)
             .into_iter()
@@ -982,9 +983,18 @@ pub fn binary_content(content: &[u8]) -> bool {
     content[..content.len().min(8000)].contains(&0)
 }
 
-/// Whether a file git diffed as binary holds binary content on either side;
-/// a side shapr can't read counts as binary, as git said.
+/// Whether a file git diffed as binary is binary to shapr: content binary on
+/// either side (a side shapr can't read counts, as git said), in a language
+/// shapr doesn't parse. A language reads a NUL as its own: Ruby runs the code
+/// before it, Rust takes it as content.
 pub fn holds_binary(blobs: &mut Blobs, file: &FileDiff) -> bool {
+    let parsed = [&file.old_path, &file.new_path]
+        .into_iter()
+        .flatten()
+        .any(|path| crate::frontend::for_path(path).is_some());
+    if parsed {
+        return false;
+    }
     let side = |blobs: &mut Blobs, id: &Option<String>, path: &Option<String>| match (id, path) {
         (_, None) => false,
         (Some(id), Some(path)) => blobs.read(id, path).is_none_or(|c| binary_content(&c)),

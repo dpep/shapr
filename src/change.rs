@@ -140,8 +140,9 @@ fn file_change(
     was: &HashMap<String, Linguist>,
     spent: &mut usize,
 ) -> FileChange {
-    // git calls a text file binary under an attribute (`-diff`, `binary`);
-    // a range is diffed again as text, a diff on stdin can't be.
+    // git calls a text file binary under an attribute (`-diff`, `binary`),
+    // and code holding a NUL; a range is diffed again as text, a diff on
+    // stdin can't be.
     let attributed = diff.binary && !crate::git::holds_binary(blobs, &diff);
     let binary = diff.binary && !attributed;
     let category = |path: &str, attributes: &HashMap<String, Linguist>| {
@@ -175,7 +176,7 @@ fn file_change(
             .collect();
     }
     let trees = if attributed {
-        Err("git diffed it as binary for an attribute (`-diff`, `binary`): give the range, or pipe `git diff --text`".to_string())
+        Err("git diffed it as binary (an attribute, or a NUL in code): give the range, or pipe `git diff --text`".to_string())
     } else if diff.binary {
         Err("binary file".to_string())
     } else if category == Category::Fixture {

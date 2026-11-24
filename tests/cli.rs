@@ -1407,6 +1407,40 @@ fn hunk_lines(text: &str) -> std::str::Lines<'_> {
         .lines()
 }
 
+/// A NUL makes git call a file binary, but Ruby runs the code before it and
+/// Rust reads it as content: a file a frontend parses is code, judged.
+#[test]
+fn a_code_file_holding_a_nul_counts_toward_the_verdict() {
+    let dir = repo(&[
+        &[
+            ("lib/a.rb", "def f\n  1\nend\n\0junk\n"),
+            ("src/b.rs", "fn g() -> &'static str {\n    \"a\0b\"\n}\n"),
+            ("lib/c.rb", "def h\n  1\nend\n"),
+        ],
+        &[
+            ("lib/a.rb", "def f\n  system(\"x\")\nend\n\0junk\n"),
+            ("src/b.rs", "fn g() -> &'static str {\n    \"c\0d\"\n}\n"),
+            ("lib/c.rb", "def h\n    1\nend\n"),
+        ],
+    ]);
+    let report = report(&shapr(dir.path(), &["-j", "HEAD"]));
+    let mut got = categories(&report);
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("lib/a.rb", "code"),
+            ("lib/c.rb", "code"),
+            ("src/b.rs", "code")
+        ]
+    );
+    for file in ["lib/a.rb", "src/b.rs"] {
+        let hunk = hunks(&report).iter().find(|h| h["file"] == file).unwrap();
+        assert_eq!(hunk["verdict"], "behavior", "{hunk:#}");
+    }
+    assert_eq!(report["summary"]["verdict"], "mixed");
+}
+
 #[test]
 fn a_diff_on_stdin_that_git_called_binary_for_an_attribute_is_code() {
     let dir = repo(&[
