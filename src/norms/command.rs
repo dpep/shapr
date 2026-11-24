@@ -116,10 +116,8 @@ pub fn run(args: Vec<String>) -> ExitCode {
             if !error.use_stderr() {
                 return ExitCode::SUCCESS;
             }
-            let first = error.to_string();
-            let first = first.lines().next().unwrap_or_default();
-            let message = first.strip_prefix("error: ").unwrap_or(first);
-            crate::cli::emit_error(crate::cli::requested_format(), message, crate::cli::USAGE);
+            let message = crate::cli::usage_message(&error);
+            crate::cli::emit_error(crate::cli::requested_format(), &message, crate::cli::USAGE);
             return ExitCode::from(crate::cli::USAGE);
         }
     };

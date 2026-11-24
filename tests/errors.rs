@@ -219,3 +219,13 @@ fn a_merge_as_a_combined_diff_on_stdin_is_an_error() {
     let message = error(&shapr_stdin(dir.path(), &["-J"], &diff), 2);
     assert!(message.contains("merge"), "{message}");
 }
+
+#[test]
+fn a_usage_error_keeps_the_whole_message() {
+    let dir = repo(&[]);
+    // clap prints its own usage to stderr; the record carries its message.
+    let out = shapr(dir.path(), &["-J", "norms"]);
+    assert_eq!(out.status.code(), Some(64));
+    let message = report(&out)["error"].as_str().unwrap().to_string();
+    assert!(message.contains("<FILE>"), "{message}");
+}

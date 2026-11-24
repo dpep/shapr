@@ -124,6 +124,22 @@ pub(crate) const USAGE: u8 = 64;
 const NO_INPUT: &str =
     "no input: give a range (shapr main..HEAD) or pipe a diff (git diff | shapr)";
 
+/// A clap error's message as one line: its first paragraph, which may
+/// continue onto indented lines (the missing arguments), without the tips.
+pub(crate) fn usage_message(error: &clap::Error) -> String {
+    let text = error.to_string();
+    let message: Vec<&str> = text
+        .lines()
+        .take_while(|l| !l.trim().is_empty())
+        .map(str::trim)
+        .collect();
+    let message = message.join(" ");
+    message
+        .strip_prefix("error: ")
+        .unwrap_or(&message)
+        .to_string()
+}
+
 pub fn run() -> ExitCode {
     // A subcommand beside a free RANGE: `norms` is never read as a revision,
     // and the format flags may come before it.
@@ -146,13 +162,7 @@ pub fn run() -> ExitCode {
             if !error.use_stderr() {
                 return ExitCode::SUCCESS;
             }
-            let first = error.to_string();
-            let first = first.lines().next().unwrap_or_default();
-            emit_error(
-                requested_format(),
-                first.strip_prefix("error: ").unwrap_or(first),
-                USAGE,
-            );
+            emit_error(requested_format(), &usage_message(&error), USAGE);
             return ExitCode::from(USAGE);
         }
     };
