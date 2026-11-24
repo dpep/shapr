@@ -880,6 +880,37 @@ pub(crate) fn emit(out: &mut impl Write, line: &str) -> io::Result<()> {
     writeln!(out, "{}", escape(line))
 }
 
+/// TEXT through `emit`, line by line.
+pub(crate) fn emit_text(out: &mut impl Write, text: &str) -> io::Result<()> {
+    text.lines().try_for_each(|line| emit(out, line))
+}
+
+/// MESSAGE on stderr as one `shapr: ` line, escaped. Every note, warning and
+/// error message goes through here.
+pub fn note(message: &str) {
+    eprintln!("shapr: {}", escape(message));
+}
+
+/// WRITE against stdout, then flushed. The only handle on stdout: what
+/// WRITE writes is shapr's own (`emit`, JSON, a completion script).
+pub(crate) fn to_stdout(
+    write: impl FnOnce(&mut io::StdoutLock<'static>) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    write(&mut out).and_then(|()| out.flush())
+}
+
+/// A clap message (help, version, a usage error) on clap's stream, each
+/// line escaped: argv quoted back may hold anything.
+pub(crate) fn clap(error: &clap::Error) {
+    let text = error.render().to_string();
+    if error.use_stderr() {
+        text.lines().for_each(|line| eprintln!("{}", escape(line)));
+    } else {
+        let _ = to_stdout(|out| emit_text(out, &text));
+    }
+}
+
 /// TEXT with each control character (C0, DEL, C1) escaped C-style, as git
 /// quotes paths: `\n`, `\t`, `\033`.
 pub fn escape(text: &str) -> std::borrow::Cow<'_, str> {
@@ -943,6 +974,49 @@ fn push_escaped(out: &mut String, c: char) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Text reaches stdout and stderr only through this module, which
+    /// escapes it (#123): a raw write elsewhere could print an untrusted path.
+    #[test]
+    fn every_output_write_goes_through_report() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let raw = [
+            "println!",
+            "eprintln!",
+            "print!",
+            "eprint!",
+            "io::stdout()",
+            "io::stderr()",
+            ".print()",
+        ];
+        let mut dirs = vec![root.join("src")];
+        let mut offenders = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let name = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                if name == "src/report.rs" {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                let code = text.split("#[cfg(test)]").next().unwrap();
+                for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
+                    if raw.iter().any(|r| line.contains(r)) {
+                        offenders.push(format!("{name}: {}", line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "write through report: {offenders:#?}");
+    }
 
     #[test]
     fn paths_quote_as_git_quotes_them() {

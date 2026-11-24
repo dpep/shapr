@@ -288,7 +288,7 @@ fn dispatch() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
-            let _ = error.print();
+            report::clap(&error);
             if !error.use_stderr() {
                 return ExitCode::SUCCESS;
             }
@@ -318,7 +318,10 @@ fn dispatch() -> ExitCode {
                 USAGE,
             );
         };
-        clap_complete::generate(shell, &mut Cli::command(), "shapr", &mut std::io::stdout());
+        let _ = report::to_stdout(|out| {
+            clap_complete::generate(shell, &mut Cli::command(), "shapr", out);
+            Ok(())
+        });
         return ExitCode::SUCCESS;
     }
 
@@ -494,7 +497,7 @@ fn dispatch() -> ExitCode {
         .as_deref()
         .and_then(|files| untracked_note(files, cli.dir.as_deref()))
     {
-        eprintln!("shapr: {}", report::escape(&note));
+        report::note(&note);
     }
     let mut report = report::build(&change, &labels, claims, meta);
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
@@ -512,11 +515,10 @@ fn dispatch() -> ExitCode {
     }
     crate::usage::counts(&report.summary, &["files", "hunks", "kinds", "verdict"]);
     if !cli.quiet {
-        let mut stdout = std::io::stdout().lock();
-        let written = report::render(&mut stdout, format, &report).and_then(|()| stdout.flush());
+        let written = report::to_stdout(|out| report::render(out, format, &report));
         // A closed pipe (`shapr … | head`) is the reader's choice, not an error.
         if let Err(error) = written.filter_broken_pipe() {
-            eprintln!("shapr: writing output: {error}");
+            report::note(&format!("writing output: {error}"));
             return exit(ERROR);
         }
     }
@@ -857,10 +859,9 @@ fn cache(format: Format, dir: Option<PathBuf>, clear: bool, quiet: bool) -> Exit
             Ok(text)
         }
     };
-    let mut stdout = std::io::stdout().lock();
-    let written = rendered.and_then(|r| writeln!(stdout, "{r}"));
+    let written = rendered.and_then(|r| report::to_stdout(|out| print(out, format, &r)));
     if let Err(error) = written.filter_broken_pipe() {
-        eprintln!("shapr: writing output: {error}");
+        report::note(&format!("writing output: {error}"));
         return exit(ERROR);
     }
     ExitCode::SUCCESS
@@ -912,13 +913,20 @@ fn usage(format: Format, reset: bool, quiet: bool) -> ExitCode {
             Ok(text)
         }
     };
-    let mut stdout = std::io::stdout().lock();
-    let written = rendered.and_then(|r| writeln!(stdout, "{r}"));
+    let written = rendered.and_then(|r| report::to_stdout(|out| print(out, format, &r)));
     if let Err(error) = written.filter_broken_pipe() {
-        eprintln!("shapr: writing output: {error}");
+        report::note(&format!("writing output: {error}"));
         return exit(ERROR);
     }
     ExitCode::SUCCESS
+}
+
+/// RENDERED to OUT: text escaped line by line, JSON as serde wrote it.
+fn print(out: &mut impl Write, format: Format, rendered: &str) -> std::io::Result<()> {
+    match format {
+        Format::Text => report::emit_text(out, rendered),
+        Format::Json | Format::Ndjson => writeln!(out, "{rendered}"),
+    }
 }
 
 /// Two significant figures are all a directory size has.
@@ -952,7 +960,7 @@ impl BrokenPipe for std::io::Result<()> {
 
 /// The message on stderr; a structured caller also gets it on stdout.
 pub(crate) fn fail(format: Format, message: &str, code: u8) -> ExitCode {
-    eprintln!("shapr: {}", report::escape(message));
+    report::note(message);
     emit_error(format, message, code);
     exit(code)
 }
@@ -976,7 +984,7 @@ pub(crate) fn emit_error(format: Format, message: &str, code: u8) {
         Format::Ndjson => serde_json::to_string(&error),
     };
     if let Ok(rendered) = rendered {
-        println!("{rendered}");
+        let _ = report::to_stdout(|out| print(out, format, &rendered));
     }
 }
 

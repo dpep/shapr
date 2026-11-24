@@ -150,7 +150,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
     let cli = match NormsCli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => {
-            let _ = error.print();
+            crate::report::clap(&error);
             if !error.use_stderr() {
                 return ExitCode::SUCCESS;
             }
@@ -198,12 +198,10 @@ pub fn run(args: Vec<String>) -> ExitCode {
     if cli.quiet {
         return ExitCode::SUCCESS;
     }
-    let mut stdout = std::io::stdout().lock();
-    let written =
-        render(&mut stdout, format, &report, &paths, cli.top).and_then(|()| stdout.flush());
+    let written = crate::report::to_stdout(|out| render(out, format, &report, &paths, cli.top));
     match written {
         Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => {
-            eprintln!("shapr: writing output: {e}");
+            crate::report::note(&format!("writing output: {e}"));
             crate::cli::exit(crate::cli::ERROR)
         }
         _ => ExitCode::SUCCESS,
