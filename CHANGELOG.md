@@ -36,4 +36,5 @@ First release.
 - Experimental: the `Naming/VariableName` norm, `snake_case` or `camelCase` local variables, with a rename when every mention of the local is in the hunk.
 - Experimental: the `Layout/SpaceAroundOperators` norm, whitespace on both sides of binary operators and assignments; aligned operators count as spaced.
 - Experimental: the `Layout/EmptyLineBetweenDefs` norm, one blank line between adjacent method definitions, two or more (`empty_lines`, as RuboCop's `NumberOfEmptyLines` counts them), or none.
+- Cost follows the change more than the repository: file contents come through one long-lived `git cat-file --batch`, a repository search greps once per name and parses each file it finds once, only files calling a dispatch word (`send`, `define_method`, ...) are parsed for computed names, and no per-hunk step walks the whole file.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
