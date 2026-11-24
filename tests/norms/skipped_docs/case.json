@@ -1,0 +1,14 @@
+{
+  "about": "documentation is not held to norms",
+  "path": "docs/example.rb",
+  "expect": {
+    "hunks": [
+      {
+        "skipped": "docs",
+        "direction": "none",
+        "flagged": false,
+        "norms": []
+      }
+    ]
+  }
+}

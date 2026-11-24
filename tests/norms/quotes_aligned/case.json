@@ -1,0 +1,37 @@
+{
+  "about": "new code follows its method's norm",
+  "expect": {
+    "hunks": [
+      {
+        "direction": "aligned",
+        "flagged": false,
+        "norms": [
+          {
+            "norm": "Style/StringLiterals",
+            "before": {
+              "single_quotes": 0,
+              "double_quotes": 0
+            },
+            "after": {
+              "single_quotes": 1,
+              "double_quotes": 0
+            },
+            "scope": "method",
+            "surrounding": {
+              "single_quotes": 3,
+              "double_quotes": 0
+            },
+            "inferred": "single_quotes",
+            "confidence": 0.8,
+            "configured": null,
+            "expected": "single_quotes",
+            "direction": "aligned",
+            "convergence": null,
+            "restyle": false,
+            "deviations": []
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -148,7 +148,7 @@ impl Git {
             .collect()
     }
 
-    fn toplevel(&self) -> Option<PathBuf> {
+    pub fn toplevel(&self) -> Option<PathBuf> {
         let out = run(self.command().args(["rev-parse", "--show-toplevel"])).ok()?;
         Some(PathBuf::from(String::from_utf8_lossy(&out).trim()))
     }

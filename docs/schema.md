@@ -322,6 +322,7 @@ can check `schema` before reading the rest.
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
 | `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `docs`, `generated`, `vendored` or `binary` file. |
 | `parts` | array | The hunk's parts in the [Parts](#parts) table's order, the residual (`logic`) last. Below. |
+| `style` | object or null | *Experimental.* How the hunk's new code sits against the style norms of the code around it. `null` for a file in a language with no norms (Ruby has them). See [Style](#style). |
 
 Each part:
 
@@ -535,6 +536,71 @@ Each `moves` entry:
 Confidence is `similarity × (1 − 1/nodes) ÷ candidates`, the weakest pair
 in the hunk: a match is weaker when it isn't exact, when the unit is small
 enough to match by chance, and when several units could be its other half.
+
+## Style
+
+*Experimental.* A norm is a style choice a project makes one way, such as
+RuboCop's `Style/StringLiterals` (`single_quotes` or `double_quotes`). shapr
+infers each norm from the code itself and judges only new code against it.
+Deleting code chooses no style, and neither does a string carried over
+unchanged or edited in place: an added string matched by a removed one with
+the same text and quotes, or failing that the same quotes, is kept, not chosen. Ruby's norm is `Style/StringLiterals`:
+quoted strings that could take either quote with the same value, as
+RuboCop counts them.
+
+A style is a scope's norm when its share, as `(n + 1) / (total + styles)`, is
+at least `--norm-threshold` (default 0.8): three of three backs a norm, two of
+two abstains. The scope is the narrowest unchanged code that backs one: the
+enclosing method, then class, then file, then, for a new file, its directory's
+other files. When none does and the hunk's scope moved wholesale from one
+style to another, that move is the norm (`renorming`). With no norm inferred,
+the style `.rubocop.yml` configures (the nearest one, with local
+`inherit_from`) is expected instead.
+
+The hunk's `style`:
+
+| field | type | meaning |
+|---|---|---|
+| `skipped` | string or null | Why the file isn't judged: `generated`, `vendored` or `docs` (by [category](#categories), plus `db/schema.rb` and `vendor`, `third_party` and `node_modules` directories), or `syntax_error`. |
+| `direction` | string | The strongest of its norms' `direction`; `none` when no norm saw new code. |
+| `flagged` | bool | Some norm is `flagged`. |
+| `norms` | array | One per norm that saw new code in the hunk. Below. |
+
+Each norm:
+
+| field | type | meaning |
+|---|---|---|
+| `norm` | string | The norm, by its RuboCop name. |
+| `before`, `after` | object | Per style, the observations on the hunk's `-` and `+` lines. |
+| `scope` | string or null | Where the norm was inferred: `method`, `class`, `file` or `directory`; `null` when none backs one. |
+| `surrounding` | object or null | Per style, the observations in that scope's unchanged code (or, when renorming, the scope's whole after side). |
+| `previous` | object or null | When renorming, per style, the scope's whole before side. |
+| `inferred` | string or null | The style the scope backs. |
+| `confidence` | number 0–1 or null | Its share, as above. |
+| `configured` | string or null | The style `.rubocop.yml` sets; `null` when it sets none or disables the cop. Reported beside `inferred` even when they differ. |
+| `expected` | string or null | `inferred`, else `configured`. |
+| `direction` | string | `aligned` (new code follows `expected`), `converging` (it does, and replaces code that didn't, or the scope renormed), `diverging` (some new code doesn't) or `abstain` (nothing expected). |
+| `convergence` | string or null | When `converging`: `normalizing` (toward the surrounding norm) or `renorming` (the scope moved to a new one). |
+| `restyle` | bool | The same strings on both sides, in different styles: a respelling, not new code. The planned `restyle` part kind will prove the same per hunk. |
+| `flagged` | bool | `restyle` and `diverging`: a change that respells code away from its norm. |
+| `deviations` | array | New code not in the `expected` style: `line`, `column`, `style`, `expected`, and `edit`, a unified diff that applies the expected style. |
+
+## `shapr norms`
+
+*Experimental.* `shapr norms FILE...` reports each file's norms with no
+diff, as a `meta` record, then per file a `file` record and its `norm`
+records, then a `summary`. Under `-j` they are one object: `meta`, `files`,
+`norms`, `summary`.
+
+`file`: `file`, `language` (`null` when no language has norms) and
+`skipped` (as in a hunk's `style`, or `unsupported`).
+
+`norm`: `file`, `norm`, `scope` (`file`), `counts` (per style, the whole
+file), `inferred`, `confidence`, `configured` and `expected` as above, and
+`deviations`, the lines not in the `expected` style.
+
+`summary`: `files`, `norms`, `inferred` (norms with a style inferred) and
+`deviations`.
 
 ## `summary` record
 

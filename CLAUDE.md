@@ -79,8 +79,17 @@ src/
   claims.rs         summary.claims: hints read from commit messages and --message, and
                     conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
+  norms/            style norms, self-contained: `style` on each hunk and `shapr norms FILE`
+    mod.rs          Observation, inference (rule of succession vs --norm-threshold), the skip
+                    rule, the Language trait
+    align.rs        a hunk against its surrounding norm (method, class, file, directory):
+                    direction, convergence, restyle, deviations
+    edit.rs         a deviation's fix as a unified diff
+    command.rs      `shapr norms FILE...`
+    ruby/           prism walk for quoted strings and scopes; .rubocop.yml with inherit_from
 tests/              end to end against throwaway git repos: cli.rs (input, output,
-                    size measures), one file per detector, rust_lang.rs (Rust end to end), github.rs (offline:
+                    size measures), one file per detector, rust_lang.rs (Rust end to end), norms.rs (fixtures as data
+                    under tests/norms/<case>/), github.rs (offline:
                     a canned API on 127.0.0.1 and a file:// remote)
 ```
 

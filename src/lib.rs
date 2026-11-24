@@ -11,6 +11,7 @@ pub mod frontend;
 pub mod git;
 pub mod github;
 pub mod log;
+pub mod norms;
 pub mod report;
 pub mod tree;
 

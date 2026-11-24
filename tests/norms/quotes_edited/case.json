@@ -1,0 +1,12 @@
+{
+  "about": "editing a string's text keeps its quotes, choosing no style",
+  "expect": {
+    "hunks": [
+      {
+        "direction": "none",
+        "flagged": false,
+        "norms": []
+      }
+    ]
+  }
+}

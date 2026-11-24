@@ -173,6 +173,8 @@ pub struct HunkRecord<'a> {
     #[serde(flatten)]
     lines: LineCounts,
     parts: Vec<PartRecord>,
+    /// Against the norms of the code around it; experimental.
+    pub style: Option<crate::norms::HunkStyle>,
     /// Of `review_lines`, those in test code.
     #[serde(skip)]
     test_review_lines: usize,
@@ -310,6 +312,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 verdict: hunk_verdict(file, whitespace_only, label),
                 lines,
                 parts,
+                style: None,
                 test_review_lines,
             });
         }
@@ -605,6 +608,9 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
                     String::new()
                 },
             )?;
+        }
+        for line in hunk.style.iter().flat_map(crate::norms::text) {
+            writeln!(out, "{:width$}  {line}", "")?;
         }
     }
     let s = &report.summary;

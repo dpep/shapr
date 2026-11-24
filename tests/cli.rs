@@ -599,6 +599,17 @@ fn every_output_field_is_documented() {
         &report["summary"]["categories"],
         &report["summary"]["verdicts"],
     ];
+    let quoted = "def a\n  x = 'a'\n  y = 'b'\n  z = 'c'\nend\n";
+    let (styled, _) = classify(
+        &[("b.rb", quoted)],
+        &[("b.rb", &quoted.replace("end", "  w = \"d\"\nend"))],
+    );
+    let style = &styled["hunks"][0]["style"];
+    let records = records.into_iter().chain([
+        style,
+        &style["norms"][0],
+        &style["norms"][0]["deviations"][0],
+    ]);
     for record in records {
         for key in record.as_object().unwrap().keys() {
             assert!(

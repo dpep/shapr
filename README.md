@@ -52,6 +52,7 @@ shapr https://github.com/acme/widgets/pull/12   # a GitHub pull request, as its 
 shapr acme/widgets#12        # the same; `#12` uses this repository's GitHub remote
 shapr acme/widgets@1a2b3c4   # a GitHub commit, against its first parent
 shapr --status               # the cache of GitHub repositories; --clear-cache empties it
+shapr norms lib/cart.rb      # a file's style norms, no diff needed
 shapr --completions zsh      # a completion script
 ```
 
@@ -76,6 +77,7 @@ Hunks in files shapr can't parse are `logic` with confidence 0; in a file of unk
 - per hunk: its `parts`, each with a `kind`, the lines it covers, a graded `confidence` with the `evidence` behind it, and for the `logic` part `facets` saying what kind of logic change it is (`condition`, `signature`, `error_handling`, `literal_only`, …); the hunk's `verdict` and `kind`; code and comment lines added and deleted, and `review_lines`, the code lines a reviewer still has to read (the last column of [Kinds](#kinds));
 - per file: its `category` (`code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), lines before the change, and the same line counts;
 - a summary: the verdict, hunk counts per verdict and category, `review_lines` with `test_review_lines` split out, counts of parts per kind and facet, `structure_share`, and Kamei's diffusion measures (files, directories, subsystems, entropy);
+- per hunk, experimental: `style`, how its new code sits against the style norms inferred from the code around it (Ruby's quote style for now), with the deviations and a fix for each; deleting code chooses no style;
 - `summary.claims`: what the commit messages and a `--message` description claim (conventional types, purpose words, reverts, issues), with their source; and, experimental, the categories they claim and where the code doesn't bear a claim out. Claims never change a label: shapr reads the code first.
 
 ## Exit codes

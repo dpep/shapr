@@ -1,0 +1,12 @@
+{
+  "about": "a string carried over unchanged into new code chooses no style",
+  "expect": {
+    "hunks": [
+      {
+        "direction": "none",
+        "flagged": false,
+        "norms": []
+      }
+    ]
+  }
+}

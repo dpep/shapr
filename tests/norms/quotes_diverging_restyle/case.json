@@ -1,0 +1,34 @@
+{
+  "about": "a restyle against the file's norm is flagged",
+  "expect": {
+    "hunks": [
+      {
+        "direction": "diverging",
+        "flagged": true,
+        "norms": [
+          {
+            "norm": "Style/StringLiterals",
+            "before": {
+              "single_quotes": 2,
+              "double_quotes": 0
+            },
+            "after": {
+              "single_quotes": 0,
+              "double_quotes": 2
+            },
+            "scope": "class",
+            "surrounding": {
+              "single_quotes": 4,
+              "double_quotes": 0
+            },
+            "inferred": "single_quotes",
+            "direction": "diverging",
+            "convergence": null,
+            "restyle": true,
+            "flagged": true
+          }
+        ]
+      }
+    ]
+  }
+}

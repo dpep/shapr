@@ -1,0 +1,22 @@
+{
+  "about": "a split method and file back no norm: abstain, no deviations",
+  "expect": {
+    "hunks": [
+      {
+        "direction": "abstain",
+        "norms": [
+          {
+            "norm": "Style/StringLiterals",
+            "scope": null,
+            "surrounding": null,
+            "inferred": null,
+            "confidence": null,
+            "expected": null,
+            "direction": "abstain",
+            "deviations": []
+          }
+        ]
+      }
+    ]
+  }
+}

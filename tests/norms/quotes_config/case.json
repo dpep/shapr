@@ -1,0 +1,27 @@
+{
+  "about": "with no inferred norm, .rubocop.yml's EnforcedStyle is expected",
+  "expect": {
+    "hunks": [
+      {
+        "direction": "diverging",
+        "norms": [
+          {
+            "norm": "Style/StringLiterals",
+            "scope": null,
+            "inferred": null,
+            "configured": "double_quotes",
+            "expected": "double_quotes",
+            "direction": "diverging",
+            "deviations": [
+              {
+                "line": 3,
+                "style": "single_quotes",
+                "expected": "double_quotes"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

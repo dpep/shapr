@@ -19,6 +19,7 @@ EXAMPLES
   shapr --message pr.md main..HEAD   also read claims from a PR description
   shapr acme/widgets#12      a GitHub pull request: the diff its Files tab shows
   shapr acme/widgets@1a2b3c4  a GitHub commit, against its (first) parent
+  shapr norms lib/cart.rb    a file's style norms, no diff needed (see shapr norms --help)
 
   With no RANGE, shapr reads a diff from stdin; like any filter, it waits while an
   inherited stdin stays open. An empty stdin is no input (64), so a failed
@@ -104,18 +105,28 @@ struct Cli {
     #[arg(long, conflicts_with = "range")]
     clear_cache: bool,
 
+    /// The share a style needs to be a norm of the code around a hunk, from
+    /// 0.5 (exclusive) to 1 (see hunk.style; experimental).
+    #[arg(long, value_name = "SHARE", default_value_t = crate::norms::DEFAULT_THRESHOLD, value_parser = crate::norms::command::threshold)]
+    norm_threshold: f64,
+
     /// Print a shell completion script (bash, zsh, fish, elvish,
     /// powershell); defaults to $SHELL.
     #[arg(long, value_name = "SHELL", num_args = 0..=1)]
     completions: Option<Option<Shell>>,
 }
 
-const ERROR: u8 = 2;
-const USAGE: u8 = 64;
+pub(crate) const ERROR: u8 = 2;
+pub(crate) const USAGE: u8 = 64;
 const NO_INPUT: &str =
     "no input: give a range (shapr main..HEAD) or pipe a diff (git diff | shapr)";
 
 pub fn run() -> ExitCode {
+    // A subcommand beside a free RANGE: `norms` is never read as a revision.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("norms") {
+        return crate::norms::command::run(args.into_iter().skip(1).collect());
+    }
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -231,12 +242,16 @@ pub fn run() -> ExitCode {
     }
     let change = change::assemble(files, &git);
     let labels = classify::classify(&change);
-    let report = report::build(
+    let mut report = report::build(
         &change,
         &labels,
         Claims::read(&messages),
         report::Meta::new(source),
     );
+    let styles = crate::norms::styles(&change, git.toplevel().as_deref(), cli.norm_threshold);
+    for (hunk, style) in report.hunks.iter_mut().zip(styles) {
+        hunk.style = style;
+    }
     if !cli.quiet {
         let mut stdout = std::io::stdout().lock();
         let written = report::render(&mut stdout, format, &report).and_then(|()| stdout.flush());
@@ -373,13 +388,13 @@ impl BrokenPipe for std::io::Result<()> {
 }
 
 /// The message on stderr; a structured caller also gets it on stdout.
-fn fail(format: Format, message: &str, code: u8) -> ExitCode {
+pub(crate) fn fail(format: Format, message: &str, code: u8) -> ExitCode {
     eprintln!("shapr: {message}");
     emit_error(format, message, code);
     ExitCode::from(code)
 }
 
-fn emit_error(format: Format, message: &str, code: u8) {
+pub(crate) fn emit_error(format: Format, message: &str, code: u8) {
     let error = serde_json::json!({
         "record": "error",
         "schema": report::SCHEMA,
@@ -400,7 +415,7 @@ fn emit_error(format: Format, message: &str, code: u8) {
 /// error reaches a JSON caller as JSON (and a `-q` caller as nothing). Every short flag but `-C` is a
 /// switch, so a cluster like `-qJ` reads letter by letter up to a `C`, whose
 /// value is the rest of the cluster or the next argument.
-fn requested_format() -> Format {
+pub(crate) fn requested_format() -> Format {
     let mut format = Format::Text;
     let mut args = std::env::args().skip(1).take_while(|a| a != "--");
     while let Some(arg) = args.next() {
@@ -444,8 +459,14 @@ mod tests {
         assert!(examples.len() >= 4);
         for example in examples {
             let command = example.split("  ").next().unwrap();
-            let args = command.split_whitespace();
-            assert!(Cli::try_parse_from(args).is_ok(), "{command}");
+            let args: Vec<&str> = command.split_whitespace().collect();
+            let parsed = match args.get(1) {
+                Some(&"norms") => {
+                    crate::norms::command::NormsCli::try_parse_from(&args[1..]).is_ok()
+                }
+                _ => Cli::try_parse_from(args).is_ok(),
+            };
+            assert!(parsed, "{command}");
         }
     }
 

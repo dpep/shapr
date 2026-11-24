@@ -1,0 +1,41 @@
+{
+  "about": "shapr norms reports a file's norms with no diff",
+  "command": "norms",
+  "path": "lib/a.rb",
+  "expect": {
+    "files": [
+      {
+        "record": "file",
+        "file": "lib/a.rb",
+        "language": "ruby",
+        "skipped": null
+      }
+    ],
+    "norms": [
+      {
+        "record": "norm",
+        "file": "lib/a.rb",
+        "norm": "Style/StringLiterals",
+        "scope": "file",
+        "counts": {
+          "single_quotes": 9,
+          "double_quotes": 1
+        },
+        "inferred": "single_quotes",
+        "confidence": 0.83,
+        "configured": null,
+        "expected": "single_quotes",
+        "deviations": [
+          10
+        ]
+      }
+    ],
+    "summary": {
+      "record": "summary",
+      "files": 1,
+      "norms": 1,
+      "inferred": 1,
+      "deviations": 1
+    }
+  }
+}
