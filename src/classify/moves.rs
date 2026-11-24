@@ -20,6 +20,7 @@
 //! unchanged (git may slide a removal across identical lines), except the
 //! unit's lines that changed in the move, which stay logic.
 
+use super::align::{Alignments, Side, lcs, namespace_name, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Labels, Part, rounded};
@@ -39,33 +40,30 @@ const FLOOR: usize = 3;
 /// shared, so the bodies are more alike than not.
 const NEAR: f64 = 0.5;
 
-pub(super) fn run(change: &Change, labels: &mut Labels) {
+pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels) {
     let mut units = Vec::new();
-    let mut kept: HashMap<(usize, Side), Vec<RangeInclusive<usize>>> = HashMap::new();
-    for (f, file) in change.files.iter().enumerate() {
-        let Ok(trees) = &file.trees else { continue };
-        if !trees.clean() || labels[f].iter().all(|l| l.unclaimed().is_empty()) {
+    // Files whose declarations take part: parsed cleanly, with lines left.
+    let mut aligned = vec![false; change.files.len()];
+    for (f, file) in alignments.files() {
+        if labels[f].iter().all(|l| l.unclaimed().is_empty()) {
             continue;
         }
-        let mut aligner = Aligner {
-            file: f,
-            trees,
-            units: &mut units,
-            kept: Vec::new(),
+        aligned[f] = true;
+        let Ok(trees) = &change.files[f].trees else {
+            continue;
         };
-        aligner.align(Tree::ROOT, Tree::ROOT);
-        let (before, after): (Vec<_>, Vec<_>) = aligner
-            .kept
-            .into_iter()
-            .partition(|(s, _)| *s == Side::Removed);
-        kept.insert(
-            (f, Side::Removed),
-            before.into_iter().map(|(_, r)| r).collect(),
-        );
-        kept.insert(
-            (f, Side::Added),
-            after.into_iter().map(|(_, r)| r).collect(),
-        );
+        let units_here = file.unmatched.iter().filter(|&&(side, node)| {
+            let tree = match side {
+                Side::Removed => &trees.before,
+                Side::Added => &trees.after,
+            };
+            is_unit(tree, node)
+        });
+        units.extend(units_here.map(|&(side, node)| Unit {
+            file: f,
+            side,
+            node,
+        }));
     }
     let pairs = pair(change, &units);
     let ids = hunk_ids(change);
@@ -83,9 +81,10 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
     for (f, (file, labels)) in change.files.iter().zip(labels.iter_mut()).enumerate() {
         let Ok(trees) = &file.trees else { continue };
         for (h, label) in labels.iter_mut().enumerate() {
-            if label.unclaimed().is_empty() || !kept.contains_key(&(f, Side::Removed)) {
+            if label.unclaimed().is_empty() || !aligned[f] {
                 continue;
             }
+            let file = alignments.file(f).expect("aligned files parsed cleanly");
             let sides = [
                 (Side::Removed, &trees.before, &label.changed.before),
                 (Side::Added, &trees.after, &label.changed.after),
@@ -102,7 +101,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                     .filter(|(_, r)| changed.iter().any(|&l| r.contains(&l) && tree.line(l).code))
                     .collect();
                 mine.extend(here.iter().filter_map(|(u, _)| by_unit.get(u).copied()));
-                let ranges = &kept[&(f, side)];
+                let ranges = file.kept(side);
                 let lines = changed.iter().copied().filter(|l| {
                     ranges.iter().any(|r| r.contains(l)) || here.iter().any(|(_, r)| r.contains(l))
                 });
@@ -190,12 +189,6 @@ fn moved_changes(entries: &[Entry], id: usize) -> (Claim, Claim) {
     (changed, first)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum Side {
-    Removed,
-    Added,
-}
-
 /// A declaration the alignment left out: removed from the before tree or
 /// added to the after tree.
 struct Unit {
@@ -233,161 +226,10 @@ impl Unit {
     }
 }
 
-/// How a child lines up with its counterpart on the other side.
-#[derive(PartialEq, Eq)]
-enum Key<'t> {
-    /// A namespace, by its name: its body is aligned in turn.
-    Namespace(u64),
-    /// Any other declaration, by its name: aligned with a different hash,
-    /// it was edited in place, not moved.
-    Declaration(Role, &'t str),
-    /// A node with no syntax of its own (a statement list): aligned in turn.
-    Transparent,
-    Code(u64),
-}
-
-struct Aligner<'a> {
-    file: usize,
-    trees: &'a Trees,
-    units: &'a mut Vec<Unit>,
-    /// Line ranges of nodes left unchanged, per side.
-    kept: Vec<(Side, RangeInclusive<usize>)>,
-}
-
-impl Aligner<'_> {
-    fn align(&mut self, before: NodeId, after: NodeId) {
-        let (tb, ta) = (&self.trees.before, &self.trees.after);
-        let kids = |tree: &Tree, id: NodeId| -> Vec<NodeId> { tree.code_children(id).collect() };
-        let (b, a) = (kids(tb, before), kids(ta, after));
-        let (kb, ka): (Vec<Key>, Vec<Key>) = (
-            b.iter().map(|&n| key(tb, n)).collect(),
-            a.iter().map(|&n| key(ta, n)).collect(),
-        );
-        let weight: Vec<usize> = b.iter().map(|&n| size(tb, n)).collect();
-        let matched = lcs(&kb, &ka, &weight);
-        let (mut in_b, mut in_a) = (vec![false; b.len()], vec![false; a.len()]);
-        for &(i, j) in &matched {
-            in_b[i] = true;
-            in_a[j] = true;
-            let (nb, na) = (b[i], a[j]);
-            if tb.node(nb).hash == ta.node(na).hash {
-                self.kept.push((Side::Removed, tb.lines(nb)));
-                self.kept.push((Side::Added, ta.lines(na)));
-            } else if matches!(kb[i], Key::Namespace(_) | Key::Transparent) {
-                self.align(nb, na);
-            }
-        }
-        for (i, &n) in b.iter().enumerate() {
-            if !in_b[i] && is_unit(tb, n) {
-                self.units.push(Unit {
-                    file: self.file,
-                    side: Side::Removed,
-                    node: n,
-                });
-            }
-        }
-        for (j, &n) in a.iter().enumerate() {
-            if !in_a[j] && is_unit(ta, n) {
-                self.units.push(Unit {
-                    file: self.file,
-                    side: Side::Added,
-                    node: n,
-                });
-            }
-        }
-    }
-}
-
-fn key(tree: &Tree, id: NodeId) -> Key<'_> {
-    let node = tree.node(id);
-    if matches!(
-        node.role,
-        Role::Definition(NameKind::Class | NameKind::Module)
-    ) && let Some(name) = namespace_name(tree, id, false)
-    {
-        return Key::Namespace(name);
-    }
-    if node.role.is_declaration()
-        && let Some(name) = node.name.as_deref()
-    {
-        return Key::Declaration(node.role, name);
-    }
-    if transparent(tree, id) {
-        return Key::Transparent;
-    }
-    Key::Code(node.hash)
-}
-
-/// A namespace's name, as its name child's hash (`A::B` tells it from
-/// `C::B`); one without a name stands by its first child (a Rust `impl`'s
-/// header). With `context`, any code before the name counts too: a Rust
-/// attribute (`#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`),
-/// though not an annotation (visibility). Alignment pairs namespaces by name,
-/// so one whose attributes were edited still aligns; owners compare with
-/// context.
-fn namespace_name(tree: &Tree, id: NodeId, context: bool) -> Option<u64> {
-    let code: Vec<NodeId> = tree.code_children(id).collect();
-    let Some(name) = tree.name_child(id) else {
-        return code.first().map(|&c| tree.node(c).hash);
-    };
-    let ids: Vec<u64> = code
-        .iter()
-        .take_while(|&&c| context && c != name)
-        .filter(|&&c| tree.node(c).role != Role::Annotation)
-        .chain([&name])
-        .map(|&c| tree.node(c).hash)
-        .collect();
-    match ids[..] {
-        [only] => Some(only),
-        _ => {
-            let mut h = std::hash::DefaultHasher::new();
-            std::hash::Hash::hash(&ids, &mut h);
-            Some(std::hash::Hasher::finish(&h))
-        }
-    }
-}
-
-/// Index pairs of the heaviest common subsequence, each element of `a`
-/// weighing `weight[i]`. Weighing children by size anchors a big namespace
-/// before a run of one-line statements that happens to be longer.
-fn lcs<T: PartialEq>(a: &[T], b: &[T], weight: &[usize]) -> Vec<(usize, usize)> {
-    let mut table = vec![vec![0usize; b.len() + 1]; a.len() + 1];
-    for i in (0..a.len()).rev() {
-        for j in (0..b.len()).rev() {
-            let take = if a[i] == b[j] {
-                weight[i] + table[i + 1][j + 1]
-            } else {
-                0
-            };
-            table[i][j] = take.max(table[i + 1][j]).max(table[i][j + 1]);
-        }
-    }
-    let (mut i, mut j, mut out) = (0, 0, Vec::new());
-    while i < a.len() && j < b.len() {
-        if a[i] == b[j] && table[i][j] == weight[i] + table[i + 1][j + 1] {
-            out.push((i, j));
-            i += 1;
-            j += 1;
-        } else if table[i + 1][j] >= table[i][j + 1] {
-            i += 1;
-        } else {
-            j += 1;
-        }
-    }
-    out
-}
-
 fn is_unit(tree: &Tree, node: NodeId) -> bool {
     tree.node(node).role.is_declaration()
         && size(tree, node) >= FLOOR
         && owner(tree, node).is_some()
-}
-
-/// Non-comment nodes in the subtree.
-fn size(tree: &Tree, node: NodeId) -> usize {
-    tree.descendants(node)
-        .filter(|&n| !tree.node(n).comment)
-        .count()
 }
 
 /// The namespaces enclosing `node`, outermost first, each as its name's
@@ -408,18 +250,6 @@ fn owner(tree: &Tree, node: NodeId) -> Option<Vec<u64>> {
     }
     chain.reverse();
     Some(chain)
-}
-
-/// A node that means nothing beyond its children: no role, and no syntax
-/// of its own outside them (a statement list, the file root). A role rules
-/// it out even when a child's span swallows its keywords, as an implicit
-/// `begin` does a `def`'s.
-fn transparent(tree: &Tree, id: NodeId) -> bool {
-    let node = tree.node(id);
-    if node.role != Role::Other || node.children.is_empty() {
-        return false;
-    }
-    tree.own_offsets(id).next().is_none()
 }
 
 /// What differs around a moved unit in its new place: the code it runs
@@ -864,7 +694,7 @@ fn changed_lines(
         a.iter().map(|(_, t)| t.as_slice()).collect(),
         b.iter().map(|(_, t)| t.as_slice()).collect(),
     );
-    let common = lcs(&ta, &tb, &vec![1; ta.len()]);
+    let common = lcs(ta.len(), tb.len(), |i, j| ta[i] == tb[j], |_| 1);
     let only = |side: &[(usize, Vec<u8>)], pick: fn(&(usize, usize)) -> usize| -> Vec<usize> {
         side.iter()
             .enumerate()

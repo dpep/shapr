@@ -1,7 +1,7 @@
 //! `format_only` and `comment_only`: the same code before and after, ignoring
 //! whitespace (and, for `comment_only`, comment text).
 
-use super::align::{Alignment, align};
+use super::align::{Alignments, Cover};
 use super::site::{self, Side, Significance};
 use super::{Claim, Confidence, Evidence, Kind, LINE_CAP, Labels, Method, Part};
 use crate::change::{Change, Trees};
@@ -9,7 +9,7 @@ use crate::tree::{NodeId, Span, Tree};
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 
-pub(super) fn run(change: &Change, labels: &mut Labels) {
+pub(super) fn run(change: &Change, _: &Alignments, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
         let Ok(trees) = &file.trees else { continue };
         for (site, label) in trees.sites.iter().zip(labels.iter_mut()) {
@@ -86,18 +86,17 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
 /// residual, or a part that isn't structure) a changed comment or blank line
 /// is read with the logic, so only reformatted code lines without a comment
 /// form a part.
-pub(super) fn rest(change: &Change, labels: &mut Labels) {
-    for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
-        let Ok(trees) = &file.trees else { continue };
-        if !trees.clean() {
+pub(super) fn rest(change: &Change, alignments: &Alignments, labels: &mut Labels) {
+    for (f, aligned) in alignments.files() {
+        let Ok(trees) = &change.files[f].trees else {
             continue;
-        }
-        for (site, label) in trees.sites.iter().zip(labels.iter_mut()) {
+        };
+        for (cover, label) in aligned.covers.iter().zip(labels[f].iter_mut()) {
             let free = label.unclaimed();
             if free.is_empty() {
                 continue;
             }
-            let logic = differing(trees, &align(trees, site), &label.changed, &free);
+            let logic = differing(trees, cover, &label.changed, &free);
             let code = |tree: &Tree, lines: &BTreeSet<usize>, comment: bool| -> BTreeSet<usize> {
                 let pick = |l: &&usize| tree.line(**l).code && (comment || !tree.line(**l).comment);
                 lines.iter().filter(pick).copied().collect()
@@ -155,7 +154,7 @@ fn reformat(kind: Kind, lines: Claim) -> Part {
 /// code the alignment couldn't match, a renamed node no part explains, or
 /// code it kept that also sits on such a line, or changed on one side only
 /// (a reformat closes on both sides).
-fn differing(trees: &Trees, alignment: &Alignment, changed: &Claim, free: &Claim) -> Claim {
+fn differing(trees: &Trees, alignment: &Cover, changed: &Claim, free: &Claim) -> Claim {
     let lines = |(b, a): &(Vec<Span>, Vec<Span>), within: &Claim| Claim {
         before: site::lines_in(&trees.before, &within.before, b),
         after: site::lines_in(&trees.after, &within.after, a),

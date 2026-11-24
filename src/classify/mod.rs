@@ -21,6 +21,7 @@ pub use moves::Context;
 
 use crate::change::Change;
 use crate::diff::Hunk;
+use align::Alignments;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
@@ -292,7 +293,7 @@ pub type Labels = Vec<Vec<Label>>;
 /// another. The residual is never cut out of the trees, so a check that new
 /// code would break fails and the lines stay logic. A pass may also leave a
 /// near miss on the residual.
-type Pass = fn(&Change, &mut Labels);
+type Pass = fn(&Change, &Alignments, &mut Labels);
 
 /// In order. A pass sees which lines earlier passes claimed and proposes
 /// parts for the rest; `format::rest` takes what is left.
@@ -306,8 +307,9 @@ const PASSES: &[Pass] = &[
 
 pub fn classify(change: &Change) -> Labels {
     let mut labels = defaults(change);
+    let alignments = Alignments::of(change);
     for pass in PASSES {
-        pass(change, &mut labels);
+        pass(change, &alignments, &mut labels);
     }
     for label in labels.iter_mut().flatten() {
         label.residual.lines = label.unclaimed();

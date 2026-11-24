@@ -9,7 +9,7 @@
 //! their confidence is graded down. An opaque name (in a macro's tokens) may
 //! be any of them.
 
-use super::align::{Alignment, Diff, align};
+use super::align::{Alignments, Cover, Diff};
 use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Labels, Part, site};
 use crate::change::{Change, Trees};
@@ -78,10 +78,10 @@ struct Pair {
     to: String,
 }
 
-struct Hunk {
+struct Hunk<'a> {
     file: usize,
     hunk: usize,
-    alignment: Alignment,
+    alignment: &'a Cover,
 }
 
 #[derive(Default)]
@@ -107,8 +107,8 @@ struct Verdict {
     score: f64,
 }
 
-pub(super) fn run(change: &Change, labels: &mut Labels) {
-    let hunks = aligned(change, labels);
+pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels) {
+    let hunks = aligned(alignments, labels);
     let trees = |f: usize| {
         change.files[f]
             .trees
@@ -228,18 +228,13 @@ pub(super) fn renamable(role: Role) -> bool {
 }
 
 /// Open hunks of cleanly parsed files whose covers align where names differ.
-fn aligned(change: &Change, labels: &Labels) -> Vec<Hunk> {
+fn aligned<'a>(alignments: &'a Alignments, labels: &Labels) -> Vec<Hunk<'a>> {
     let mut out = Vec::new();
-    for (file, (fc, labels)) in change.files.iter().zip(labels).enumerate() {
-        let Ok(trees) = &fc.trees else { continue };
-        if !trees.clean() {
-            continue;
-        }
-        for (hunk, (site, label)) in trees.sites.iter().zip(labels).enumerate() {
+    for (file, aligned) in alignments.files() {
+        for (hunk, (alignment, label)) in aligned.covers.iter().zip(&labels[file]).enumerate() {
             if label.unclaimed().is_empty() {
                 continue;
             }
-            let alignment = align(trees, site);
             if !alignment.diffs.is_empty() {
                 out.push(Hunk {
                     file,

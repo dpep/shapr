@@ -10,6 +10,7 @@
 //! must equal the chunk once its parameters are renamed to the call's
 //! arguments, and a hunk may change nothing else.
 
+use super::align::{Alignments, siblings};
 use super::hazard::{Op, blocks};
 use super::{Claim, Confidence, Kind, Label, Labels, Part, site};
 use crate::change::{Change, Trees};
@@ -22,7 +23,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 /// subclass to override, a behavior seam, than a tidying.
 const FLOOR: usize = 8;
 
-pub(super) fn run(change: &Change, labels: &mut Labels) {
+pub(super) fn run(change: &Change, _: &Alignments, labels: &mut Labels) {
     let mut first_id = 0;
     for (f, file) in change.files.iter().enumerate() {
         let base = first_id;
@@ -214,8 +215,11 @@ fn find(
     }
     let a_chunk = unique_def(chunks, &key(calls, a_call)).ok_or("caller not on the other side")?;
     let chunk_scope = chunks.node(a_chunk).parent.ok_or("no parent")?;
-    let changed = changed_siblings(calls, scope, &[a_call, b], chunks, chunk_scope, &[a_chunk])
-        .ok_or("the methods' container changed")?;
+    let changed = siblings(
+        (calls, scope, &[a_call, b]),
+        (chunks, chunk_scope, &[a_chunk]),
+    )
+    .ok_or("the methods' container changed")?;
     let (params, body) = method_body(calls, b).ok_or("unsupported parameters or body")?;
     let chunk = splice(calls, a_call, stmt, calls.node(body).kind, chunks, a_chunk)
         .ok_or("caller differs beyond the call")?;
@@ -459,80 +463,6 @@ fn unique_def(tree: &Tree, want: &Key<'_>) -> Option<NodeId> {
         .filter(|&id| key(tree, id) == *want);
     let first = found.next()?;
     found.next().is_none().then_some(first)
-}
-
-/// The siblings of A and B with no equal counterpart on the other side, as
-/// (call side, chunk side), aligned by longest common subsequence. `None`
-/// when the container itself differs, or too much of it to align.
-fn changed_siblings(
-    calls: &Tree,
-    scope: NodeId,
-    skip_calls: &[NodeId],
-    chunks: &Tree,
-    chunk_scope: NodeId,
-    skip_chunks: &[NodeId],
-) -> Option<(Vec<NodeId>, Vec<NodeId>)> {
-    if calls.node(scope).kind != chunks.node(chunk_scope).kind
-        || unmarked(own(calls, scope, None)) != unmarked(own(chunks, chunk_scope, None))
-    {
-        return None;
-    }
-    let side = |tree: &Tree, id: NodeId, skip: &[NodeId]| -> Vec<NodeId> {
-        code_children(tree, id)
-            .into_iter()
-            .filter(|c| !skip.contains(c))
-            .collect()
-    };
-    let mut left = side(calls, scope, skip_calls);
-    let mut right = side(chunks, chunk_scope, skip_chunks);
-    let equal = |l: &NodeId, r: &NodeId| calls.node(*l).hash == chunks.node(*r).hash;
-    // Most siblings are untouched: trim the equal ends before the quadratic part.
-    let head = left
-        .iter()
-        .zip(&right)
-        .take_while(|(l, r)| equal(l, r))
-        .count();
-    left.drain(..head);
-    right.drain(..head);
-    let tail = left
-        .iter()
-        .rev()
-        .zip(right.iter().rev())
-        .take_while(|(l, r)| equal(l, r))
-        .count();
-    left.truncate(left.len() - tail);
-    right.truncate(right.len() - tail);
-    let (n, m) = (left.len(), right.len());
-    if n.saturating_mul(m) > MAX_ALIGN {
-        return None;
-    }
-    let same = |i: usize, j: usize| equal(&left[i], &right[j]);
-    // lcs[i][j]: common subsequence length of left[i..] and right[j..].
-    let mut lcs = vec![vec![0usize; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            lcs[i][j] = if same(i, j) {
-                lcs[i + 1][j + 1] + 1
-            } else {
-                lcs[i + 1][j].max(lcs[i][j + 1])
-            };
-        }
-    }
-    let (mut changed_left, mut changed_right) = (Vec::new(), Vec::new());
-    let (mut i, mut j) = (0, 0);
-    while i < n || j < m {
-        if i < n && j < m && same(i, j) {
-            i += 1;
-            j += 1;
-        } else if j == m || (i < n && lcs[i + 1][j] >= lcs[i][j + 1]) {
-            changed_left.push(left[i]);
-            i += 1;
-        } else {
-            changed_right.push(right[j]);
-            j += 1;
-        }
-    }
-    Some((changed_left, changed_right))
 }
 
 /// The statement holding the call: the call itself, or a plain assignment of
@@ -984,9 +914,6 @@ fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
     }
     out
 }
-
-/// Largest sibling alignment table worth building; past it, give up.
-const MAX_ALIGN: usize = 1 << 20;
 
 fn unmarked(text: Vec<u8>) -> Vec<u8> {
     text.into_iter().filter(|&b| b != MARK).collect()
