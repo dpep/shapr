@@ -1,0 +1,15 @@
+{
+  "description": "a vendor directory below the top (a Rails app/models/vendor namespace) is the app's code, not vendored",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "file": "app/models/vendor/invoice.rb",
+        "category": "code",
+        "verdict": "behavior"
+      }
+    },
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}

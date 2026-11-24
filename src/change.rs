@@ -61,33 +61,21 @@ pub fn assemble(
     after: Option<&str>,
 ) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
-    let mut attributes = git.linguist(&paths, after);
-    // An attribute the change itself sets mustn't hide the change: where the
-    // change edits a .gitattributes, a file it doesn't add keeps whichever
-    // side's category is reviewed.
+    let attributes = git.linguist(&paths, after);
+    // Each file's attributes before the change, for its category there:
+    // where the change edits a .gitattributes, as they were at its start.
     let edits_attributes = diffs
         .iter()
         .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
         .flatten()
         .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
-    if edits_attributes {
-        let old: Vec<&str> = diffs.iter().filter_map(|d| d.old_path.as_deref()).collect();
-        let was = before
+    let old: Vec<&str> = diffs.iter().filter_map(|d| d.old_path.as_deref()).collect();
+    let was = match edits_attributes {
+        true => before
             .map(|rev| git.linguist(&old, Some(rev)))
-            .unwrap_or_default();
-        for diff in diffs.iter().filter(|d| !d.binary) {
-            let Some(old) = diff.old_path.as_deref() else {
-                continue;
-            };
-            let after = attributes.get(diff.path()).copied().unwrap_or_default();
-            let before = was.get(old).copied().unwrap_or_default();
-            if Category::of(old, false, before).counted()
-                && !Category::of(diff.path(), false, after).counted()
-            {
-                attributes.insert(diff.path().to_string(), before);
-            }
-        }
-    }
+            .unwrap_or_default(),
+        false => git.linguist(&old, after),
+    };
     let mut blobs = Blobs::new(git);
     let mut files = diffs
         .into_iter()
@@ -105,7 +93,7 @@ pub fn assemble(
             if diff.hunks.is_empty() {
                 return None;
             }
-            Some(file_change(diff, &mut blobs, &attributes))
+            Some(file_change(diff, &mut blobs, &attributes, &was))
         })
         .collect::<Vec<FileChange>>();
     let mut next = 0;
@@ -120,9 +108,19 @@ fn file_change(
     diff: FileDiff,
     blobs: &mut Blobs,
     attributes: &HashMap<String, Linguist>,
+    was: &HashMap<String, Linguist>,
 ) -> FileChange {
-    let linguist = attributes.get(diff.path()).copied().unwrap_or_default();
-    let category = Category::of(diff.path(), diff.binary, linguist);
+    let category = |path: &str, attributes: &HashMap<String, Linguist>| {
+        let linguist = attributes.get(path).copied().unwrap_or_default();
+        Category::of(path, diff.binary, linguist)
+    };
+    // A change can't hide its own edit: a file that counts toward the verdict
+    // on either side (moved into `vendor/`, marked generated) counts.
+    let after = category(diff.path(), attributes);
+    let category = match diff.old_path.as_deref().map(|old| category(old, was)) {
+        Some(before) if before.counted() && !after.counted() => before,
+        _ => after,
+    };
     let before = read(blobs, diff.old_blob.as_deref(), diff.old_path.as_deref());
     let lines_before = before.as_ref().ok().map(|b| line_count(b));
     let mut whitespace_only = vec![false; diff.hunks.len()];
@@ -194,8 +192,8 @@ pub enum Category {
     Manifest,
     /// Written by a tool: a lockfile, a minified asset, `linguist-generated`.
     Generated,
-    /// Third-party code: under `vendor/`, `third_party/` or `node_modules/`, or
-    /// `linguist-vendored`.
+    /// Third-party code: under a top-level `vendor/`, `third_party/` or
+    /// `node_modules/`, or `linguist-vendored`.
     Vendored,
     Binary,
     /// None of the above: source shapr doesn't parse, or anything else.
@@ -290,9 +288,11 @@ fn generated(name: &str) -> bool {
     LOCKFILES.contains(&name) || name.ends_with(".min.js") || name.ends_with(".min.css")
 }
 
-/// Under a third-party directory, as linguist reads them.
+/// Under a third-party directory at the repository's top. Deeper, the name
+/// is often the project's own namespace (a Rails `app/models/vendor/`).
 fn vendored(path: &str) -> bool {
-    (path.split('/').rev().skip(1)).any(|d| matches!(d, "vendor" | "third_party" | "node_modules"))
+    path.split_once('/')
+        .is_some_and(|(top, _)| matches!(top, "vendor" | "third_party" | "node_modules"))
 }
 
 /// Prose: under a docs directory, a prose extension, or a conventional
@@ -458,7 +458,8 @@ mod tests {
             ("Cargo.toml.orig", "unknown"),
             ("app.js", "unknown"),
             ("vendor/x.rb", "vendored"),
-            ("app/vendor/lib/y.js", "vendored"),
+            ("third_party/lib/y.js", "vendored"),
+            ("app/models/vendor/y.rb", "code"),
             ("lib/vendored.rb", "code"),
             ("Makefile", "unknown"),
         ] {

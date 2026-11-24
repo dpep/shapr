@@ -1,0 +1,15 @@
+{
+  "description": "code moved into vendor/ with an edit counts as the code it was, so the edit isn't hidden as vendored",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "file": "vendor/a.rb",
+        "category": "code",
+        "verdict": "behavior"
+      }
+    },
+    "summary": {
+      "verdict": "mixed"
+    }
+  }
+}

@@ -333,7 +333,7 @@ still parsed and classified. The first rule that matches wins:
 |---|---|
 | `binary` | git reports the file as binary. |
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
-| `vendored` | Under a `vendor`, `third_party` or `node_modules` directory, or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
+| `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
 | `docs` | `.gitattributes` marks it `linguist-documentation`; or it is under a `doc`, `docs` or `documentation` directory; or its extension is prose (`md`, `markdown`, `mdx`, `txt`, `rdoc`, `adoc`, `asciidoc`, `rst`, `org`, `textile`); or its name, extension aside, is `README`, `LICENSE`, `LICENCE`, `COPYING`, `CHANGELOG`, `CHANGES`, `HISTORY`, `NEWS`, `AUTHORS`, `CONTRIBUTORS` or `NOTICE` (any case). |
 | `test` | Under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `*_test.rs`, `*_test.go`, `*_test.py`, `test_*.rb`, `test_*.py`, `*.test.*`, `*.spec.*`, `tests.rs` or `test.rs`. |
 | `manifest` | A dependency manifest, by name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`. |
@@ -345,11 +345,12 @@ A linguist attribute wins over the name either way: `-linguist-generated`
 (or `=false`) unmarks a lockfile, and `-linguist-documentation` a `README`.
 Attributes are read as `git check-attr` sees them in the revision the
 change ends in (B of `A..B`, a GitHub change's head), or in the working
-tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change that edits a `.gitattributes` can't hide itself: a file
-it doesn't add whose category counts toward the verdict under the
-attributes it starts from (`code`, `test`, `config`, `manifest`) keeps that
-category, so marking a file `linguist-generated` in the change that edits it
-leaves the edit `code`.
+tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file it doesn't add whose
+category counts toward the verdict on its before side (`code`, `test`,
+`config`, `manifest`; its old path, under the attributes the change starts
+from where it edits a `.gitattributes`) keeps that category, so moving code
+into `vendor/`, or marking a file `linguist-generated` in the change that
+edits it, leaves the edit `code`.
 
 Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).
