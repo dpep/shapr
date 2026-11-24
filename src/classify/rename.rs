@@ -11,7 +11,7 @@
 
 use super::align::{Alignments, Cover, Diff};
 use super::hazard::{Op, blocks};
-use super::proof::{self, Assumption, Verified};
+use super::proof::{self, Assumption, Search, Verified};
 use super::site::{self, CodeLines};
 use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
@@ -390,7 +390,7 @@ fn judged<'v>(
     };
     match verdict {
         Ok(v) => Ok((pair, v)),
-        Err(why) => Err(format!("renames {} to {}, but {why}", pair.from, pair.to)),
+        Err(why) => Err(why.clone()),
     }
 }
 
@@ -417,8 +417,63 @@ fn stopped(trees: &Trees, diff: &Diff) -> Option<String> {
     spelled.then(|| format!("a macro may read {from} as written, which changes"))
 }
 
-/// Whether a rename holds across its whole scope, and how strongly.
+/// Whether a rename holds across its whole scope, and how strongly, or why
+/// it isn't one: a call whose new name is a method of its own calls another
+/// method.
 fn judge(
+    change: &Change,
+    pair: &Pair,
+    facts: &Facts,
+    all: &BTreeMap<Pair, Facts>,
+    outside: &dyn Outside,
+) -> Result<Verdict, String> {
+    if !facts.defined && pair.space.scope == Scope::Method && defined(change, pair, facts, outside)
+    {
+        return Err(format!("calls {} instead of {}", pair.to, pair.from));
+    }
+    holds(change, pair, facts, all, outside)
+        .map_err(|why| format!("renames {} to {}, but {why}", pair.from, pair.to))
+}
+
+/// Whether method `pair.to` has a definition, in the change's after side or
+/// in a file outside it.
+fn defined(change: &Change, pair: &Pair, facts: &Facts, outside: &dyn Outside) -> bool {
+    let defines = |tree: &Tree| {
+        tree.descendants(Tree::ROOT).any(|id| {
+            let n = tree.node(id);
+            n.role == Role::Definition(NameKind::Method) && n.name.as_deref() == Some(&pair.to)
+        })
+    };
+    let parsed = || change.files.iter().filter_map(|f| f.trees.as_ref().ok());
+    if parsed().any(|t| defines(&t.after)) {
+        return true;
+    }
+    let Some(&(home, _)) = facts.after_nodes.first() else {
+        return false;
+    };
+    let after = &parsed_after(change, home);
+    let suffixes = after.semantics.spelling.suffixes;
+    let word = pair.to.trim_end_matches(|c| suffixes.contains(&c));
+    let Search::Done { found, .. } = outside.uses(change.files[home].diff.path(), word) else {
+        return false;
+    };
+    found.iter().any(|file| {
+        crate::frontend::for_path(file)
+            .zip(outside.read(file))
+            .is_some_and(|(frontend, source)| defines(&frontend.parse(source)))
+    })
+}
+
+fn parsed_after(change: &Change, f: usize) -> &Tree {
+    &change.files[f]
+        .trees
+        .as_ref()
+        .expect("renamed in a parsed file")
+        .after
+}
+
+/// Whether a rename holds across its whole scope, and how strongly.
+fn holds(
     change: &Change,
     pair: &Pair,
     facts: &Facts,

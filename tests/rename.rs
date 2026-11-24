@@ -173,6 +173,20 @@ fn a_call_renamed_without_its_definition_is_logic() {
 }
 
 #[test]
+fn a_call_switched_to_another_existing_method_says_so() {
+    let methods = "def start; end\ndef begin_now; end\n";
+    let before = format!("{methods}def run\n  start\nend\n");
+    let after = format!("{methods}def run\n  begin_now\nend\n");
+    logic_because(&ruby(&before, &after), "calls begin_now instead of start");
+    // Defined in a file outside the change.
+    let report = classify(
+        &[("a.rb", "def run\n  start\nend\n"), ("b.rb", methods)],
+        &[("a.rb", "def run\n  begin_now\nend\n"), ("b.rb", methods)],
+    );
+    logic_because(&report, "calls begin_now instead of start");
+}
+
+#[test]
 fn a_method_rename_leaving_send_of_the_old_name_is_logic() {
     // `send(:greet)` would now raise NoMethodError.
     let before = format!("{GREETER}Greeter.new.send(:greet, \"x\")\n");
