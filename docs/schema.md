@@ -517,7 +517,7 @@ can check `schema` before reading the rest.
 | `version` | string | shapr's version. |
 | `command` | string | What produced the records that follow: `classify` (`shapr REV`, a range, paths, or a diff on stdin) or `norms` (`shapr norms`). Check it before reading `summary.verdict`, which a `norms` output doesn't have. |
 | `source` | object or null | *Experimental.* The GitHub pull request or commit analyzed (see [GitHub input](#github-input)); `null` for a local change or stdin. |
-| `input` | string or null | How the change was named (see [Input](#input)): `stdin`, `commit`, `range`, `merge_base_range`, `merge_base_worktree`, `worktree`, `github_pr` or `github_commit`; `null` for `norms`. |
+| `input` | string or null | How the change was named (see [Input](#input)): `stdin`, `commit`, `range`, `merge_base_range`, `merge_base_worktree`, `worktree`, `staged`, `github_pr` or `github_commit`; `null` for `norms`. |
 | `paths` | bool or null | Paths limited the diff (`shapr main..HEAD -- lib`); `null` for `norms`. |
 
 ## Input
@@ -532,6 +532,7 @@ Each way of naming a change is a git command, and `meta.input` names it:
 | `shapr --merge-base REF REV` | `git diff --merge-base REF REV`, that is `REF...REV` | `merge_base_range` |
 | `shapr --merge-base REF` | `git diff --merge-base REF`: from the merge base of REF and HEAD to the working tree, the branch's committed and uncommitted work | `merge_base_worktree` |
 | `shapr PATH...`, `shapr .` | `git diff HEAD -- PATH...`: uncommitted changes, staged and not | `worktree` |
+| `shapr --staged [REV]`, `--cached` | `git diff --cached [REV]`: the index against HEAD, or against REV; uses are searched in the index | `staged` |
 | no arguments | the unified diff on stdin | `stdin` |
 | a GitHub pull request or commit | see [GitHub input](#github-input) | `github_pr`, `github_commit` |
 

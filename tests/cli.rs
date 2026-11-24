@@ -1117,3 +1117,82 @@ fn the_text_kinds_count_only_hunks_inside_the_verdict() {
         "{text}"
     );
 }
+
+/// A class whose private method PRIVATE is called once, inside it.
+fn meter(private: &str) -> String {
+    format!(
+        "class Meter\n  def level\n    {private} + 1\n  end\n\n  private\n\n  def {private}\n    41\n  end\nend\n"
+    )
+}
+
+#[test]
+fn staged_is_the_index_against_head_or_a_revision() {
+    let dir = repo(&[
+        &[("meter.rb", &meter("sample")), ("lib/b.rb", "B = 1\n")],
+        &[("lib/b.rb", "B = 2\n")],
+    ]);
+    write(
+        dir.path(),
+        &[("meter.rb", &meter("probe")), ("lib/b.rb", "B = 3\n")],
+    );
+    git(dir.path(), &["add", "meter.rb", "lib/b.rb"]);
+    // Unstaged edits aren't shown: the index is the after side.
+    write(dir.path(), &[("lib/b.rb", "B = 4\n")]);
+    let same = |args: &[&str], diff: &[&str]| {
+        let mut all = vec!["-j"];
+        all.extend(args);
+        let out = shapr(dir.path(), &all);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        let ours = report(&out);
+        let piped = report(&shapr_stdin(dir.path(), &["-j"], &git(dir.path(), diff)));
+        // The same lines; a diff on stdin from REV can't search the index for uses.
+        let lines = |r: &Value| -> Vec<Value> {
+            hunks(r)
+                .iter()
+                .map(|h| serde_json::json!([h["file"], h["before"], h["after"]]))
+                .collect()
+        };
+        assert_eq!(lines(&ours), lines(&piped), "{args:?}");
+        assert_eq!(ours["meta"]["input"], "staged", "{args:?}");
+        ours
+    };
+    same(&["--staged"], &["diff", "--cached"]);
+    same(&["--cached"], &["diff", "--cached"]);
+    same(&["--staged", "HEAD~1"], &["diff", "--cached", "HEAD~1"]);
+    let limited = same(
+        &["--staged", "--", "lib"],
+        &["diff", "--cached", "--", "lib"],
+    );
+    assert_eq!(limited["meta"]["paths"], true);
+    let limited = same(&["--staged", "lib"], &["diff", "--cached", "--", "lib"]);
+    assert_eq!(limited["meta"]["paths"], true);
+
+    // Uses are searched in the index: an unstaged call doesn't count.
+    write(
+        dir.path(),
+        &[(
+            "report.rb",
+            "class Report\n  def show\n    Meter.new.sample\n  end\nend\n",
+        )],
+    );
+    let out = report(&shapr(dir.path(), &["-j", "--staged", "--", "meter.rb"]));
+    let parts: Vec<&Value> = hunks(&out)
+        .iter()
+        .flat_map(|h| h["parts"].as_array().unwrap())
+        .collect();
+    assert!(
+        parts
+            .iter()
+            .any(|p| p["kind"] == "rename" && p["structure"] == true),
+        "{out:#}"
+    );
+
+    for args in [
+        &["--staged", "HEAD~1..HEAD"][..],
+        &["--staged", "HEAD~1", "HEAD"],
+        &["--staged", "--merge-base", "main"],
+    ] {
+        let (_, code) = refused(dir.path(), args);
+        assert_eq!(code, 64, "{args:?}");
+    }
+}

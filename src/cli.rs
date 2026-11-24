@@ -18,6 +18,7 @@ EXAMPLES                          each is a git command: shapr X is git show/dif
   shapr main...                   a branch's commits, from where it left main
   shapr --merge-base main         everything on the branch, committed or not
   shapr .                         uncommitted changes (git diff HEAD -- .)
+  shapr --staged                  staged changes (git diff --cached); --cached is the same
   shapr main..HEAD -- lib         any form, limited to paths
   git diff --staged | shapr       a diff on stdin (needs `git diff` index lines)
   shapr -J main..HEAD             JSON lines: a meta record, each file and hunk, then a summary
@@ -71,7 +72,7 @@ EXIT CODES
     name = "shapr",
     version,
     about = "Classify the shape of a code change: format, comment, restyle, rename, move, extract, inline, or logic.",
-    override_usage = "shapr [OPTIONS] [REV [REV]] [[--] PATH...]\n       shapr [OPTIONS] --merge-base REF [REV] [[--] PATH...]\n       shapr norms [OPTIONS] [PATH]...",
+    override_usage = "shapr [OPTIONS] [REV [REV]] [[--] PATH...]\n       shapr [OPTIONS] --merge-base REF [REV] [[--] PATH...]\n       shapr [OPTIONS] --staged [REV] [[--] PATH...]\n       shapr norms [OPTIONS] [PATH]...",
     after_help = AFTER_HELP
 )]
 struct Cli {
@@ -94,6 +95,11 @@ struct Cli {
     /// (`REF...REV`).
     #[arg(long, value_name = "REF")]
     merge_base: Option<String>,
+
+    /// The staged changes: the index against HEAD, or against REV, like
+    /// `git diff --cached [REV]`.
+    #[arg(long, visible_alias = "cached", conflicts_with = "merge_base")]
+    staged: bool,
 
     /// Run as if shapr was started in DIR, like `git -C`. GIT_DIR,
     /// GIT_WORK_TREE and GIT_INDEX_FILE are ignored, so DIR's repository
@@ -131,12 +137,12 @@ struct Cli {
 
     /// Experimental. Show the GitHub cache: its path, the repositories in it,
     /// and their size; and the usage log's path and size.
-    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "clear_cache"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "staged", "clear_cache"])]
     status: bool,
 
     /// Summarize the usage log: runs by command, input form, flag, kind and
     /// verdict (see USAGE LOG below).
-    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "status", "clear_cache"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "staged", "status", "clear_cache"])]
     usage: bool,
 
     /// With --usage, empty the usage log first.
@@ -145,7 +151,7 @@ struct Cli {
 
     /// Experimental. Remove every cached GitHub repository, then show the
     /// cache.
-    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base"])]
+    #[arg(long, conflicts_with_all = ["args", "paths", "merge_base", "staged"])]
     clear_cache: bool,
 
     /// The share a style needs to be a norm of the code around a hunk, from
@@ -330,7 +336,9 @@ fn dispatch() -> ExitCode {
     let paths = local.is_some_and(|(_, paths)| !paths.is_empty());
     crate::usage::input(form, paths);
     let text = match &input {
-        Input::Local { range, paths, .. } => git.diff(range, paths),
+        Input::Local { form, range, paths } => {
+            git.diff(range, *form == report::Input::Staged, paths)
+        }
         Input::GitHub(target) => {
             let cache = match github::Cache::resolve(cli.cache_dir.clone()) {
                 Ok(cache) => cache,
@@ -339,7 +347,7 @@ fn dispatch() -> ExitCode {
             match github::fetch(target, &cache) {
                 Err(error) => return fail(format, &format!("{error:#}"), ERROR),
                 Ok(fetched) => {
-                    let text = fetched.git.diff(&fetched.range, &[]);
+                    let text = fetched.git.diff(&fetched.range, false, &[]);
                     remote = Some(fetched);
                     text
                 }
@@ -394,6 +402,7 @@ fn dispatch() -> ExitCode {
     // its own after side only by blob ids.
     let states = match (stdin, git.after_revision(range.as_deref())) {
         (_, Some(rev)) => vec![git::State::Revision(rev)],
+        (false, None) if form == report::Input::Staged => vec![git::State::Index],
         (false, None) => vec![git::State::Worktree],
         (true, None) => git.stdin_after(&files),
     };
@@ -491,6 +500,7 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
     if let [arg] = cli.args.as_slice()
         && !dashdash
         && cli.merge_base.is_none()
+        && !cli.staged
         && !cli
             .dir
             .as_deref()
@@ -514,7 +524,10 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
         false => git.split(&cli.args).map_err(error)?.map_err(usage)?,
     };
     paths.extend(cli.paths.iter().cloned());
-    let shape = shape(&revisions, cli.merge_base.as_deref(), !paths.is_empty()).map_err(usage)?;
+    let shape = match cli.staged {
+        true => staged(&revisions).map_err(usage)?,
+        false => shape(&revisions, cli.merge_base.as_deref(), !paths.is_empty()).map_err(usage)?,
+    };
     let (form, range) = match shape {
         None => return Ok(Input::Stdin),
         Some(Shape::Commit(rev)) => (
@@ -528,6 +541,7 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
             git.merge_base(&base, "HEAD").map_err(error)?,
         ),
         Some(Shape::Worktree) => (report::Input::Worktree, "HEAD".to_string()),
+        Some(Shape::Staged(rev)) => (report::Input::Staged, rev),
     };
     Ok(Input::Local { form, range, paths })
 }
@@ -544,6 +558,20 @@ enum Shape {
     MergeBaseWorktree(String),
     /// HEAD against the working tree.
     Worktree,
+    /// REV against the index: `git diff --cached REV`.
+    Staged(String),
+}
+
+/// The shape of REVISIONS under `--staged`: one revision at most, as
+/// `git diff --cached` takes.
+fn staged(revisions: &[String]) -> Result<Option<Shape>, String> {
+    match revisions {
+        [] => Ok(Some(Shape::Staged("HEAD".to_string()))),
+        [rev] if !is_range(rev) => Ok(Some(Shape::Staged(rev.clone()))),
+        _ => Err("--staged takes one revision at most, not a range: \
+             shapr --staged [REV] [-- PATH...]"
+            .to_string()),
+    }
 }
 
 /// The shape of REVISIONS under `--merge-base BASE`, with or without PATHS;

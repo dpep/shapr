@@ -52,6 +52,7 @@ shapr main..HEAD             # a range (git diff main..HEAD); `shapr main HEAD` 
 shapr main...                # a branch's commits, from where it left main (git diff main...)
 shapr --merge-base main      # everything on the branch, committed or not (git diff --merge-base main)
 shapr .                      # uncommitted changes, staged and not (git diff HEAD -- .)
+shapr --staged               # staged changes only (git diff --cached); --cached is the same
 shapr main..HEAD -- lib      # any form, limited to paths
 git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
 shapr -J main..HEAD          # NDJSON: a meta line, a line per file and hunk, then a summary
@@ -73,6 +74,7 @@ shapr --completions zsh      # a completion script
 | `shapr A...B`, `shapr main...` | `git diff A...B`: from the merge base | `range` |
 | `shapr --merge-base REF [REV]` | `git diff --merge-base REF [REV]`: without REV, the merge base of REF and HEAD against the working tree | `merge_base_worktree`, `merge_base_range` |
 | `shapr PATH...`, `shapr .` | `git diff HEAD -- PATH...`: uncommitted changes | `worktree` |
+| `shapr --staged [REV]`, `--cached` | `git diff --cached [REV]`: the index against HEAD, or REV | `staged` |
 | any form `[--] PATH...` | the same, limited to paths | `meta.paths: true` |
 | no arguments | the diff on stdin | `stdin` |
 

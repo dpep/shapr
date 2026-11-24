@@ -84,9 +84,10 @@ impl Git {
         cmd
     }
 
-    /// `git diff RANGE -- PATHS`, in a fixed format: prefixes, rename
-    /// detection and three lines of context whatever the user's config says.
-    pub fn diff(&self, range: &str, paths: &[String]) -> Result<String> {
+    /// `git diff [--cached] RANGE -- PATHS`, in a fixed format: prefixes,
+    /// rename detection and three lines of context whatever the user's
+    /// config says.
+    pub fn diff(&self, range: &str, cached: bool, paths: &[String]) -> Result<String> {
         self.verify_range(range)?;
         // Against all its parents a merge diffs as a combined diff, or nothing.
         if let Some(rev) = range.strip_suffix("^!")
@@ -105,9 +106,9 @@ impl Git {
                 "--dst-prefix=b/",
                 "-M",
                 "-U3",
-                range,
-                "--",
             ])
+            .args(cached.then_some("--cached"))
+            .args([range, "--"])
             .args(paths))?;
         Ok(String::from_utf8_lossy(&out).into_owned())
     }

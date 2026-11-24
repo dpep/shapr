@@ -149,6 +149,8 @@ pub enum Input {
     MergeBaseWorktree,
     /// `shapr PATH...`: `git diff HEAD -- PATH...`.
     Worktree,
+    /// `shapr --staged [REV]`: `git diff --cached [REV]`.
+    Staged,
     GithubPr,
     GithubCommit,
 }
