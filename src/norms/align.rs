@@ -14,7 +14,7 @@ use crate::diff::{Hunk, Lines};
 use crate::tree::Tree;
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
 /// Neighbor files a directory's evidence reads, at most.
@@ -173,7 +173,7 @@ pub fn styles(
 ) -> Vec<Option<HunkStyle>> {
     let mut out = Vec::new();
     let directory = Directory::new(change);
-    let deleted = deleted(change);
+    let deleted = Deleted::new(change);
     for file in &change.files {
         let hunks = &file.diff.hunks;
         match file_styles(file, snapshot, outside, &directory, &deleted, threshold) {
@@ -184,20 +184,50 @@ pub fn styles(
     out
 }
 
-/// Every line the change deletes, anywhere: without its indentation, and
-/// as it was.
-fn deleted(change: &Change) -> [HashSet<&[u8]>; 2] {
-    let mut out = [HashSet::new(), HashSet::new()];
-    for file in &change.files {
-        let Ok(trees) = &file.trees else { continue };
-        let source = &trees.before.source[..];
-        let index = LineIndex::new(source);
-        for line in file.diff.hunks.iter().flat_map(|h| &h.removed) {
-            out[0].insert(unindented(source, &index, *line, false));
-            out[1].insert(unindented(source, &index, *line, true));
+/// Every line the change deletes, anywhere, in order.
+#[derive(Default)]
+struct Deleted<'a> {
+    /// Per line: its file, its number, and its text without its indentation
+    /// and as it was.
+    lines: Vec<(usize, usize, [&'a [u8]; 2])>,
+    /// Per form of the text, where it sits in `lines`.
+    at: [HashMap<&'a [u8], Vec<usize>>; 2],
+}
+
+impl<'a> Deleted<'a> {
+    fn new(change: &'a Change) -> Self {
+        let mut out = Deleted::default();
+        for (f, file) in change.files.iter().enumerate() {
+            let Ok(trees) = &file.trees else { continue };
+            let source = &trees.before.source[..];
+            let index = LineIndex::new(source);
+            for &line in file.diff.hunks.iter().flat_map(|h| &h.removed) {
+                let text = [false, true].map(|keeps| unindented(source, &index, line, keeps));
+                for (form, t) in text.iter().enumerate() {
+                    out.at[form].entry(*t).or_default().push(out.lines.len());
+                }
+                out.lines.push((f, line, text));
+            }
         }
+        out
     }
-    out
+
+    /// `texts`, consecutive lines, were deleted as consecutive lines of one
+    /// file; compared as they were when `indents`.
+    fn holds(&self, texts: &[&[u8]], indents: bool) -> bool {
+        let form = indents as usize;
+        let Some(starts) = texts.first().and_then(|t| self.at[form].get(t)) else {
+            return false;
+        };
+        starts.iter().any(|&i| {
+            let (file, line, _) = self.lines[i];
+            (texts.iter().enumerate()).all(|(j, t)| {
+                self.lines
+                    .get(i + j)
+                    .is_some_and(|&(f, l, text)| f == file && l == line + j && text[form] == *t)
+            })
+        })
+    }
 }
 
 /// Line `line` of `source`, without its indentation unless it `keeps` it;
@@ -227,7 +257,7 @@ fn file_styles(
     snapshot: Option<&dyn Snapshot>,
     outside: &dyn Outside,
     directory: &Directory,
-    deleted: &[HashSet<&[u8]>; 2],
+    deleted: &Deleted,
     threshold: f64,
 ) -> Option<Vec<HunkStyle>> {
     let path = file.diff.path();
@@ -430,7 +460,7 @@ struct File<'a> {
     /// The repository beyond the change, for renames other files could see.
     outside: &'a dyn Outside,
     /// The lines the change deletes anywhere: unindented, and as they were.
-    deleted: &'a [HashSet<&'a [u8]>; 2],
+    deleted: &'a Deleted<'a>,
     source: &'a [u8],
     /// The after side, which a suggested edit must keep the same program.
     tree: &'a Tree,
@@ -622,17 +652,13 @@ impl File<'_> {
         }
     }
 
-    /// Every line of `lines` is one the change deleted somewhere, with the
-    /// same indentation when it `indents`.
+    /// The change deleted `lines`, as a run, somewhere: with the same
+    /// indentation when it `indents`.
     fn carried(&self, (first, last): (usize, usize), indents: bool) -> bool {
-        (first..=last).all(|l| {
-            self.deleted[indents as usize].contains(unindented(
-                self.source,
-                &self.index,
-                l,
-                indents,
-            ))
-        })
+        let texts: Vec<&[u8]> = (first..=last)
+            .map(|l| unindented(self.source, &self.index, l, indents))
+            .collect();
+        self.deleted.holds(&texts, indents)
     }
 
     /// A rename's old and new names appear in no other file of the

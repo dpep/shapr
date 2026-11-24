@@ -1,0 +1,23 @@
+{
+  "description": "a moved method is carried only as the run of lines it was: the extra blank line before it, though blank lines were deleted too, chooses a style",
+  "norm": "Layout/EmptyLineBetweenDefs",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "style": {
+          "norms": [
+            {
+              "direction": "diverging",
+              "deviations": [
+                {
+                  "line": 7,
+                  "style": "empty_lines"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
