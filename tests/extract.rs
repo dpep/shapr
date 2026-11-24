@@ -485,3 +485,49 @@ fn an_extract_sharing_a_hunk_with_an_edit_to_a_sibling_is_logic() {
     let (report, _) = classify(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
+
+#[test]
+fn a_chunk_using_instance_variables_needs_no_parameter() {
+    let before = "class Meter
+  def tick(step)
+    @count += step
+    @total = @count * 2 + step
+    @total
+  end
+end
+";
+    let after = "class Meter
+  def tick(step)
+    advance(step)
+    @total
+  end
+
+  def advance(step)
+    @count += step
+    @total = @count * 2 + step
+  end
+end
+";
+    let (report, _) = classify(before, after);
+    assert!(kinds(&report).iter().all(|k| *k == "extract"), "{report:#}");
+}
+
+#[test]
+fn a_new_method_with_keyword_parameters_is_not_an_extract() {
+    let before = "def show(item)
+  label = item.name.strip
+  puts label.center(20)
+end
+";
+    let after = "def show(item)
+  render(item: item)
+end
+
+def render(item:)
+  label = item.name.strip
+  puts label.center(20)
+end
+";
+    let (report, _) = classify(before, after);
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
+}

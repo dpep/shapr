@@ -547,9 +547,14 @@ fn method_body(tree: &Tree, def: NodeId) -> Option<(Vec<String>, NodeId)> {
     let is_params = |id: NodeId| {
         let kids = code_children(tree, id);
         !kids.is_empty()
-            && kids
-                .iter()
-                .all(|&k| tree.node(k).role == Role::Definition(NameKind::Parameter))
+            && kids.iter().all(|&k| {
+                matches!(
+                    tree.node(k).role,
+                    Role::Definition(
+                        NameKind::Parameter | NameKind::KeywordParameter | NameKind::BlockParameter
+                    )
+                )
+            })
     };
     let (params, body) = match children[..] {
         [body] if !is_params(body) => (Vec::new(), body),
@@ -559,7 +564,10 @@ fn method_body(tree: &Tree, def: NodeId) -> Option<(Vec<String>, NodeId)> {
                 let node = tree.node(p);
                 let name = node.name.as_deref()?;
                 // Defaults, splats and keywords all add text beside the name.
-                if !node.children.is_empty() || unmarked(own(tree, p, None)) != name.as_bytes() {
+                if node.role != Role::Definition(NameKind::Parameter)
+                    || !node.children.is_empty()
+                    || unmarked(own(tree, p, None)) != name.as_bytes()
+                {
                     return None;
                 }
                 names.push(name.to_string());
@@ -703,16 +711,16 @@ impl Flow {
 }
 
 /// The name of a local variable or parameter the node defines or reads.
-/// Sigiled names (`@ivar`, `$global`) live beyond the method, so a new
-/// method sees them unchanged.
+/// Fields and globals live beyond the method, so a new method sees them
+/// unchanged.
 fn local_name(node: &crate::tree::Node) -> Option<&str> {
+    use NameKind::*;
     let local = matches!(
         node.role,
-        Role::Reference(NameKind::Variable)
-            | Role::Definition(NameKind::Variable | NameKind::Parameter | NameKind::BlockParameter)
+        Role::Reference(Variable)
+            | Role::Definition(Variable | Parameter | KeywordParameter | BlockParameter)
     );
-    let name = node.name.as_deref().filter(|_| local)?;
-    (!name.starts_with(['@', '$'])).then_some(name)
+    node.name.as_deref().filter(|_| local)
 }
 
 /// A one-to-one renaming between B's locals and the chunk's.
