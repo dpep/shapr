@@ -397,9 +397,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .collect();
     writeln!(
         out,
-        "{}: {} hunks ({}); review {} lines{}; comments +{} -{}; structure share {:.2}",
+        "{}: {} hunk{} ({}); review {} lines{}; comments +{} -{}; structure share {:.2}",
         s.verdict.as_str(),
         s.hunks,
+        if s.hunks == 1 { "" } else { "s" },
         if kinds.is_empty() {
             "none".to_string()
         } else {

@@ -17,8 +17,8 @@ EXAMPLES
   shapr -q main..HEAD        no output; the exit code is the verdict
   shapr -C app main..HEAD    run in another repository, like git -C
 
-  Only Ruby is parsed so far; hunks in other files are `logic`, confidence 0.
-  To leave them out: git diff main -- '*.rb' | shapr
+  Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0.
+  To leave them out: git diff main -- '*.rb' '*.rs' | shapr
 
 EXIT CODES
   0   structure: every hunk changes structure, not behavior (or there are no hunks)
