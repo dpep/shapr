@@ -1124,6 +1124,8 @@ fn claim(
 fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
     let (tb, ta) = (from.tree(change), to.tree(change));
     let across = from.file != to.file;
+    let into_new_file =
+        across && change.files[to.file].diff.old_path.is_none() && !ta.semantics.file_scoped;
     // A visibility section applies to methods only.
     let method = tb.node(from.node).role == Role::Definition(NameKind::Method);
     [
@@ -1138,7 +1140,12 @@ fn check(change: &Change, from: &Unit, to: &Unit) -> Vec<Context> {
         ),
         (
             Context::LoadOrder,
-            dependencies(tb, from.node) != dependencies(ta, to.node),
+            // Into a file the change adds, where its old siblings now run is
+            // `surroundings`' window; here only the new file's own.
+            match into_new_file {
+                true => !dependencies(ta, to.node).is_empty(),
+                false => dependencies(tb, from.node) != dependencies(ta, to.node),
+            },
         ),
         (
             Context::Directives,
