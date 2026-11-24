@@ -12,19 +12,20 @@
 
 use super::align::{Alignments, siblings};
 use super::hazard::{Op, blocks};
+use super::proof::{self, Assumption, Verified};
 use super::site::CodeLines;
-use super::{Claim, Confidence, Kind, Label, Labels, Part};
+use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Chunks with fewer syntax nodes than this stay `logic`. Equality of a body
 /// this small says little, and a one-call method is more often a hook for a
 /// subclass to override, a behavior seam, than a tidying.
 const FLOOR: usize = 8;
 
-pub(super) fn run(change: &Change, _: &Alignments, labels: &mut Labels) {
+pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels: &mut Labels) {
     let mut first_id = 0;
     for (f, file) in change.files.iter().enumerate() {
         let base = first_id;
@@ -44,7 +45,10 @@ pub(super) fn run(change: &Change, _: &Alignments, labels: &mut Labels) {
                     continue;
                 }
                 match find(change, calls, chunks, b, dir) {
-                    Ok(found) => apply(trees, base, &found, &mut labels[f]),
+                    Ok(mut found) => {
+                        reach(change, outside, f, calls, b, &mut found);
+                        apply(trees, base, &found, &mut labels[f]);
+                    }
                     Err(why) => crate::verbose!(
                         "{}: `{}` not an {}: {why}",
                         file.diff.path(),
@@ -132,6 +136,8 @@ struct Found {
     /// Where the refactoring's hunks may change code, before and after.
     regions: [Region; 2],
     outcome: Result<Stats, Risk>,
+    /// Files outside the change that already use the method's name.
+    used_in: Vec<String>,
 }
 
 /// One side's view of the refactoring.
@@ -162,6 +168,10 @@ struct Stats {
     renamed: usize,
     params: usize,
     returns: bool,
+    /// What the refactoring relies on that the search couldn't settle.
+    assumptions: Vec<Assumption>,
+    /// Files searched for the method's name outside the change.
+    searched: Option<usize>,
 }
 
 impl Stats {
@@ -294,6 +304,8 @@ fn find(
             renamed: matched,
             params: params.len(),
             returns: assigned.is_some(),
+            assumptions: Vec::new(),
+            searched: None,
         })
     };
     let region = |tree: &Tree, scope: NodeId, holes: &[NodeId], touch: &[NodeId]| Region {
@@ -318,7 +330,50 @@ fn find(
             .to_string(),
         regions,
         outcome,
+        used_in: Vec::new(),
     })
+}
+
+/// Checks a proven candidate against the repository: a file outside the
+/// change that already uses B's name (a subclass's method of that name, a
+/// caller of the removed method) makes it a collision. Removing a public
+/// method of a library (an inline) leaves `public_api`.
+fn reach(
+    change: &Change,
+    outside: &dyn Outside,
+    file: usize,
+    calls: &Tree,
+    b: NodeId,
+    found: &mut Found,
+) {
+    let Ok(stats) = &mut found.outcome else {
+        return;
+    };
+    let covered: BTreeSet<&str> = change
+        .files
+        .iter()
+        .filter(|f| f.trees.is_ok())
+        .flat_map(|f| [f.diff.old_path.as_deref(), f.diff.new_path.as_deref()])
+        .flatten()
+        .collect();
+    let path = change.files[file].diff.path();
+    let suffixes = calls.semantics.spelling.suffixes;
+    let word = found.method.trim_end_matches(|c| suffixes.contains(&c));
+    let method = found.method.clone();
+    let uses = |tree: &Tree| super::rename::mentions_method(tree, &method);
+    match proof::verify(outside, path, word, &covered, &uses) {
+        Verified::Used(files) => {
+            found.used_in = files;
+            found.outcome = Err(Risk::Collision);
+            return;
+        }
+        Verified::Open(assumption) => stats.assumptions.push(assumption),
+        Verified::Clear { searched } => stats.searched = Some(searched),
+    }
+    if found.dir == Dir::Inline && outside.library(path) && proof::public(calls, b) {
+        stats.assumptions.push(Assumption::PublicApi);
+    }
+    stats.assumptions.sort_unstable();
 }
 
 /// Labels every hunk the refactoring touches, or none when another part
@@ -350,7 +405,7 @@ fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
     detail.insert("hunks".into(), json!(ids));
     match &found.outcome {
         Ok(stats) => {
-            let reason = match found.dir {
+            let mut reason = match found.dir {
                 Dir::Extract => format!(
                     "statements of `{}` moved into new method `{}`, replaced by a call",
                     found.caller, found.method
@@ -360,6 +415,11 @@ fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
                     found.method, found.caller
                 ),
             };
+            if stats.assumptions.contains(&Assumption::PublicApi) {
+                reason = format!("public API removed: {reason}");
+            } else if !stats.assumptions.is_empty() {
+                reason = format!("{reason}; uses outside the change weren't checked");
+            }
             let contested = touched.iter().any(|(h, lines)| {
                 let taken = labels[*h].changed.minus(&labels[*h].unclaimed());
                 !lines.intersect(&taken).is_empty()
@@ -376,9 +436,11 @@ fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
                 values.insert("params".into(), Value::from(stats.params));
                 values.insert("verbatim".into(), Value::from(stats.verbatim()));
                 values.insert("returns".into(), Value::from(stats.returns));
+                values.insert("searched".into(), json!(stats.searched));
                 let part = Part {
                     kind: found.dir.kind(),
                     context: Vec::new(),
+                    assumptions: stats.assumptions.clone(),
                     lines: lines.clone(),
                     // Structure, but where refactoring bugs cluster: still read.
                     review: lines.clone(),
@@ -401,6 +463,9 @@ fn apply(trees: &Trees, base: usize, found: &Found, labels: &mut [Label]) {
                 }
                 let residual = &mut label.residual;
                 residual.reason = format!("not an {near} of `{}`: {}", found.method, risk.reason());
+                if !found.used_in.is_empty() {
+                    residual.reason += &format!(" in {}", proof::listing(&found.used_in));
+                }
                 residual.detail = detail.clone();
             }
         }

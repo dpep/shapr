@@ -63,6 +63,8 @@ src/
                     messages, blob reads (worktree fallback), linguist attributes, remotes
   github.rs         GitHub input: PR/commit forms, REST metadata (token from env or gh), the cache of
                     bare partial clones the diff runs in (--status, --clear-cache)
+  outside.rs        the repository beyond the change at its after revision: `git grep -w` for uses
+                    (blobs prefetched in a partial clone, a file cap) and library layout, for proof
   diff.rs           unified diff parser: FileDiff, Hunk (narrowed to its changed region), Lines
   tree.rs           the language-neutral Tree and the TreeBuilder that normalizes it
                     (extents, comment placement, whitespace-insensitive hashes, per-line facts)
@@ -91,6 +93,8 @@ src/
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
     facets.rs       facets on the residual's lines (condition, signature, ...), from
                     Frontend::construct; runs after the passes and changes no part
+    proof.rs        Assumption (a part's unverified reliance), the Outside trait detectors check
+                    uses through, and the public-surface rule
   claims.rs         summary.claims: hints read from commit messages and --message, and
                     conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
@@ -110,9 +114,11 @@ tests/              end to end against throwaway git repos: cli.rs (input, outpu
 
 ### The language seam
 
-A frontend implements `Frontend` (`language`, `handles`, `parse`, and
+A frontend implements `Frontend` (`language`, `handles`, `parse`,
 `construct`: which nodes are a branch, comparison, literal, error construct,
-parameter list or test item, for facets) and reports
+parameter list or test item, for facets; `search_globs`: the files a name of
+the language can be used from; and `library`: whether a path is library code
+other packages depend on, from the repository's layout) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
 language reads as code), `error`. The builder computes everything the core
@@ -128,15 +134,19 @@ block end: extract risk `drop`), and `reserved` (method names the language
 calls without a visible call: rename refuses them, extract and inline call
 them a `collision`), and `spelling` (sigils, name suffixes, symbol and quote
 marks: how a name is spelled in source, for masking names and reading
-literals). `TreeBuilder::ignore(span)` marks a
+literals), and `private_by_default` (definitions are private unless marked
+`PUBLIC`: Rust; otherwise visibility comes from `Visibility` roles).
+`TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
 whitespace.
 
 `Node::flags` carries per-node facts that aren't a role: `SCOPE` (the node
 bounds the locals inside it: a method, class, module, impl or other namespace;
 `Tree::scope` reads it), `RECEIVER` (a `def self.x`, whose first child is the
-receiver), `ARGUMENTS` (a call's positional argument list) and `DIRECTIVE`
-(set by the builder for `directive`). The core never reads a node's `kind`
+receiver), `ARGUMENTS` (a call's positional argument list), `PUBLIC` (a
+definition visible outside its package where definitions are private by
+default: Rust's plain `pub`) and `DIRECTIVE` (set by the builder for
+`directive`). The core never reads a node's `kind`
 string or source text to learn what the language means.
 
 | Role | Ruby | Rust | For |
@@ -186,6 +196,10 @@ whole of both trees, residual included, so a part that new code would break
 is never claimed. Cross-hunk passes (move, extract, inline, rename
 consistency) see every file's trees and every hunk's `Site`: the cover on
 the before side is what the hunk removed, on the after side what it added.
+A pass whose operation reaches code outside the change (a method's callers,
+a new or removed method's name) checks it through `proof::Outside` before
+claiming: uses found make it logic, and what the search can't settle becomes
+the part's `assumptions`, so it isn't structure.
 Each kind gets its own module under `src/classify/`; kind-specific output
 goes in the part's `evidence.values` and `detail`, documented in
 docs/schema.md. report.rs knows no kind: it reads parts, the residual and the

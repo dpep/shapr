@@ -187,6 +187,128 @@ impl Git {
             .collect()
     }
 
+    /// Every file of REV with its blob id, or of the working tree's index
+    /// when `None`; paths from the top.
+    pub fn files(&self, rev: Option<&str>) -> Result<Vec<(String, String)>> {
+        let out = match rev {
+            Some(rev) => run(self
+                .command()
+                .args(["ls-tree", "-r", "-z", "--full-tree", rev]))?,
+            None => run(self
+                .command()
+                .args(["ls-files", "-z", "-s", "--full-name", "--", ":/"]))?,
+        };
+        // `<mode> <type> <id>\t<path>` or `<mode> <id> <stage>\t<path>`.
+        Ok(String::from_utf8_lossy(&out)
+            .split('\0')
+            .filter_map(|entry| entry.split_once('\t'))
+            .filter_map(|(meta, path)| {
+                let mut fields = meta.split(' ');
+                let id = match rev {
+                    Some(_) => fields.nth(1).filter(|&t| t == "blob").and(fields.next()),
+                    None => fields.nth(1),
+                };
+                Some((path.to_string(), id?.to_string()))
+            })
+            .collect())
+    }
+
+    /// Fetches the blobs IDS a partial clone lacks, in one request: `git
+    /// grep` would otherwise fetch each one as it reaches it.
+    pub fn prefetch(&self, ids: &[&str]) -> Result<()> {
+        let Some(remote) = self.promisor() else {
+            return Ok(());
+        };
+        let mut input = ids.join("\n").into_bytes();
+        input.push(b'\n');
+        let mut check = self.command();
+        check
+            .env("GIT_NO_LAZY_FETCH", "1")
+            .args(["cat-file", "--batch-check"]);
+        let out = run_with_input(&mut check, &input)?;
+        let missing: Vec<&str> = std::str::from_utf8(&out)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.strip_suffix(" missing"))
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        crate::verbose!("fetching {} blob(s) to search", missing.len());
+        let mut input = missing.join("\n").into_bytes();
+        input.push(b'\n');
+        let mut fetch = self.command();
+        fetch.args([
+            "-c",
+            "fetch.negotiationAlgorithm=noop",
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--no-write-fetch-head",
+            "--recurse-submodules=no",
+            "--filter=blob:none",
+            "--stdin",
+            &remote,
+        ]);
+        run_with_input(&mut fetch, &input).map(drop)
+    }
+
+    /// The remote a partial clone fetches missing objects from.
+    fn promisor(&self) -> Option<String> {
+        let out = run(self.command().args([
+            "config",
+            "--get-regexp",
+            r"^(extensions\.partialclone|remote\..*\.promisor)$",
+        ]))
+        .ok()?;
+        let out = String::from_utf8_lossy(&out);
+        out.lines().find_map(|line| {
+            let (key, value) = line.split_once(' ')?;
+            match key.strip_prefix("remote.") {
+                Some(rest) => {
+                    (value == "true").then(|| rest.strip_suffix(".promisor").map(str::to_string))?
+                }
+                None => Some(value.to_string()),
+            }
+        })
+    }
+
+    /// Files of REV (the working tree when `None`) matching PATHSPECS that
+    /// hold WORD as a whole word, as paths from the top. Never fetches: a
+    /// blob a partial clone lacks is an error.
+    pub fn grep(&self, rev: Option<&str>, word: &str, pathspecs: &[String]) -> Result<Vec<String>> {
+        let mut cmd = self.command();
+        cmd.env("GIT_NO_LAZY_FETCH", "1").args([
+            "grep",
+            "--no-color",
+            "-l",
+            "-I",
+            "-w",
+            "-F",
+            "--full-name",
+            "-e",
+            word,
+        ]);
+        cmd.args(rev).arg("--").args(pathspecs);
+        let out = cmd.output().context("could not run git")?;
+        // Exit 1 with nothing on stderr: no match.
+        if out.status.code() == Some(1) && out.stderr.is_empty() {
+            return Ok(Vec::new());
+        }
+        let out = check(out)?;
+        let prefix = rev.map(|r| format!("{r}:"));
+        let mut found: Vec<String> = String::from_utf8_lossy(&out)
+            .lines()
+            .map(|line| match &prefix {
+                Some(p) => line.strip_prefix(p.as_str()).unwrap_or(line),
+                None => line,
+            })
+            .map(str::to_string)
+            .collect();
+        found.sort();
+        Ok(found)
+    }
+
     /// Each path's linguist attributes, where .gitattributes sets or unsets
     /// them. Empty outside a repository.
     pub fn linguist(&self, paths: &[&str]) -> HashMap<String, Linguist> {

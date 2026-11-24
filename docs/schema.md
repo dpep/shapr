@@ -1,7 +1,8 @@
 # Output schema
 
 shapr's JSON is a public contract: field names and the values of closed
-vocabularies (`record`, `kind`, `verdict`, `category`, `evidence.comparison`)
+vocabularies (`record`, `kind`, `verdict`, `category`, `assumptions`,
+`evidence.comparison`)
 change only with a bump of `schema` in the `meta` record. New fields may be
 added without a bump; consumers must ignore fields they don't know. Fields
 marked *experimental* may change in any release before 1.0.
@@ -57,16 +58,18 @@ nothing proven is one `logic` part.
 |---|---|---|
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic. |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
-| `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
-| `move` | yes, unless its `detail.context` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
-| `extract` | yes | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
-| `inline` | yes | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
+| `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
+| `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
+| `extract` | yes, unless it has `assumptions` | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
+| `inline` | yes, unless it has `assumptions` | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
 | `logic` | no | The residual: anything else. A line shapr can't prove structural is `logic`. |
 
 Each part is proven against the whole of both trees, residual included, so
 new code in the residual can break a part's proof (a rename whose new name
 new code also defines): the part is then not claimed and its lines stay
 `logic`.
+
+A part is structure only when it is proven: see [Proof status](#proof-status).
 
 A hunk's `kind` is a one-word rollup of its parts: `logic` unless every
 part is structure, else its most substantial part kind in the table's order
@@ -113,6 +116,47 @@ bodies, symbols, numbers) match byte for byte, whitespace included. So
 `do…end` versus `{…}`, a change of quote style, a trailing comma in Ruby, or
 any reordering is `logic`.
 
+## Proof status
+
+A part counts as structure only when nothing it relies on is left
+unchecked: its `assumptions` are empty. An operation that reaches code
+outside the change (a renamed method's callers, the name an extract adds or
+an inline removes) is checked against the repository at the after revision
+(the range's end, the fetched head of a GitHub change, or the working tree
+when the change ends there): shapr searches its files for the old name as a
+whole word (`git grep -w`), then parses each file found and applies the same
+rule as to the files in the change (a use, a dynamic reference, a plain
+literal such as `:old`), so the word in a comment or a sentence doesn't
+count; a file it can't parse cleanly (a template) counts. A file outside the
+change that still uses the name makes the operation `logic`, and the
+residual's `reason` names the file.
+What the search can't settle stays on the part:
+
+| assumption | meaning |
+|---|---|
+| `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository, a failed search), so code outside the change may still use the name. |
+| `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
+| `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false`, outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. |
+| `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
+
+A part with assumptions is reported with `structure: false` and its lines
+to read: every code line for a `rename`, `extract` or `inline`, each moved
+definition's first code line for a `move`. Its `reason` says why (`public
+API rename: ...`). There is no separate verdict for assumed structure: such
+a hunk is `behavior` or `mixed`.
+
+The search reads the files a language's code can reach a name from (Ruby:
+`.rb`, `.rake`, `.gemspec`, `.ru`, ERB, Haml, Slim and builder templates,
+`Gemfile`, `Rakefile`; Rust: `.rs`), tracked files only. A use is matched
+by name, not resolved: a common name used for something else (another
+class's method or instance variable of the same name, `Rack::Test::Methods`
+for a constant `Methods`) blocks the operation. A method's name is searched
+without its `?`, `!` or `=`. It can't see a name built at
+runtime (`send("get_" + n)`) in a file outside the change, code in other
+languages (YAML, JavaScript), or other repositories beyond `public_api`. In
+a partial clone (the GitHub cache) the language's blobs at the after
+revision are fetched in one request first.
+
 ## Renames
 
 A hunk's two sides are aligned node for node: two nodes align when their
@@ -151,6 +195,8 @@ every name that differs passes these checks:
 - Every definition of the new name in its scope after the change is a
   renamed one: new code defining it too (a second `def new` in another
   class, a new `let new`) would share the name with the renamed code.
+- For a method, constant or field, no file outside the change holds the
+  old name at the after revision ([Proof status](#proof-status)).
 
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
 class or module; a `field` in its file when it is a Ruby instance or class
@@ -173,7 +219,7 @@ parsed file of the change.
 |---|---|---|
 | `renamed` | int | Sum of the part's renames' `occurrences`. |
 | `uses` | int | Uses of the old names shapr saw in their scopes before the change. More than `renamed` when another hunk deleted some. |
-| `unseen_uses` | bool | Some name can be used in code shapr doesn't see (fields, methods, constants: other files, subclasses, templates). |
+| `searched` | int or null | Files the repository search read for uses of the old names outside the change (see [Proof status](#proof-status)); `null` when no name can be used outside its scope (locals), or no search ran. |
 
 `confidence` is the weakest rename's score. A local's is `renamed / uses`.
 Where uses can be unseen, the unseen ones are smoothed in as one unknown
@@ -329,14 +375,15 @@ Each part:
 | field | type | meaning |
 |---|---|---|
 | `kind` | string | See [Parts](#parts). |
-| `structure` | bool | Changes structure without changing behavior: false for `logic` and for a `move` into new surroundings. |
+| `structure` | bool | Changes structure without changing behavior, proven: false for `logic`, for a `move` into new surroundings, and for a part with `assumptions`. |
 | `lines` | object | The changed lines the part explains: `before`, the `-` lines, and `after`, the `+` lines, each an array of line runs. |
 | `confidence` | number 0–1 | How strongly the evidence supports the part. See [Confidence](#confidence). |
 | `reason` | string | One short human-readable sentence. Not a contract: don't match on it. A residual's names the structural kind it resembles and why it isn't one, when a pass came close. |
 | `evidence` | object | What the part rests on. Always has `comparison`; other keys depend on the kind. See [Evidence](#evidence). |
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
-| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `move` into new surroundings: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. |
+| `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
+| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, and a `move` that is structure: 0. A `rename` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. `extract` and `inline`: all of them; they are structure but still need reading. |
 
 ## Evidence
 
@@ -366,6 +413,7 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 | `params` | int | The method's parameters. |
 | `verbatim` | number 0–1 | Share of the chunk's nodes that match the method's body without renaming a parameter. |
 | `returns` | bool | The call's result is assigned: a value flows back to the caller. |
+| `searched` | int or null | Files the repository search read for the method's name outside the change; `null` when no search ran. |
 
 Confidence is `size × (1 + verbatim) / 2`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
 
@@ -374,9 +422,8 @@ A hunk that matches this shape but would change behavior stays `logic`, and its 
 | key | type | meaning |
 |---|---|---|
 | `near` | string | `"extract"` or `"inline"`. |
-| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. Also when the caller reads its frame anywhere (`binding`, `$1`): the chunk's locals and matches leave it, or arrive. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`, a plain literal such as `:name`, as a `method_missing` compares): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
+| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. Also when the caller reads its frame anywhere (`binding`, `$1`): the chunk's locals and matches leave it, or arrive. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`, a plain literal such as `:name`, as a `method_missing` compares): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call; or a file outside the change holds the name at the after revision (a subclass's method of that name, a caller of the removed method), which the `reason` names. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
 
-shapr sees only the files in the diff: a subclass override or a caller elsewhere of the new or removed method is invisible to it.
 
 ## Facets
 
@@ -513,7 +560,7 @@ part.
 |---|---|---|
 | `min_similarity` | number 0–1 | The lowest similarity among the hunk's pairs: Dice coefficient over the two units' subtrees. 1 when every body is unchanged. |
 | `nodes` | int | Syntax nodes in the smallest unit moved. |
-| `candidates` | int | The most units, among the hunk's pairs, that matched equally well; 1 when every match is unique. |
+| `candidates` | int | The most units, among the hunk's pairs, that matched equally well; 1 when every match is unique. Above 1, the part assumes `ambiguous_match`. |
 
 `detail` for `move`:
 
@@ -641,6 +688,7 @@ file), `inferred`, `confidence`, `configured` and `expected` as above, and
 | `categories` | object | Hunk count per [category](#categories), every category present. Generated and vendored hunks count in `hunks` and `kinds`, and in no size measure below. |
 | `kinds` | object | Part count per kind, every kind present: `logic` counts residuals. A hunk that is one part counts once. |
 | `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
+| `assumptions` | object | Part count per assumption (see [Proof status](#proof-status)), every assumption present; a part with two counts under both. |
 | `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
@@ -648,7 +696,7 @@ file), `inferred`, `confidence`, `configured` and `expected` as above, and
 | `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated or vendored. 0 for one file. |
 | `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated or vendored. |
 | `test_review_lines` | int | Of `review_lines`, those in test code: every one in a `test` file, and a residual's carrying the `test` facet elsewhere. Reviewers weigh test changes apart from code changes. |
-| `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
+| `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings, parts with assumptions) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts of hunks whose verdict is `structure` or `mixed`, over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
 

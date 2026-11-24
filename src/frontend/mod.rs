@@ -5,6 +5,7 @@
 mod ruby;
 mod rust;
 
+use crate::norms::Snapshot;
 use crate::tree::{NodeId, Tree};
 
 pub use ruby::Ruby;
@@ -28,6 +29,14 @@ pub trait Frontend: Sync {
     /// What `id`, in a tree this frontend parsed, means to a reviewer
     /// sorting logic changes (see `classify::facets`).
     fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct>;
+
+    /// Files whose code can reach this language's names, each `*.ext` or a
+    /// file name: where uses of a renamed or removed name are searched.
+    fn search_globs(&self) -> &'static [&'static str];
+
+    /// Whether the file at `path` is library code another package can depend
+    /// on, judged from the repository's layout at the after revision.
+    fn library(&self, path: &str, files: &dyn Snapshot) -> bool;
 }
 
 /// A language construct that tells one kind of logic change from another.

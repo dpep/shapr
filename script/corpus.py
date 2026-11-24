@@ -155,7 +155,7 @@ def parts(h):
     """A hunk's parts in one shape across schemas: kind, structure, code, lines, facets, detail.
 
     `kind` is `move_with_changes` for a move into new surroundings, the kind the
-    hunk-level schema gave it. `code` is the part's changed code lines: exact for
+    hunk-level schema gave it, and `<kind>_unproven` for a part with assumptions. `code` is the part's changed code lines: exact for
     logic, extract and inline (their `review_lines` is every code line); the
     rest of the hunk's code lines are shared among its other parts by changed
     lines. A hunk-level record is one part covering its before/after runs.
@@ -166,9 +166,15 @@ def parts(h):
                  "changed": h["added"] + h["deleted"], "lines": lines, "facets": h["facets"], "detail": h["detail"]}]
     out = []
     for p in h["parts"]:
-        kind = "move_with_changes" if p["kind"] == "move" and not p["structure"] else p["kind"]
+        unproven = bool(p.get("assumptions"))
+        if unproven:
+            kind = f"{p['kind']}_unproven"
+        elif p["kind"] == "move" and not p["structure"]:
+            kind = "move_with_changes"
+        else:
+            kind = p["kind"]
         lines = runs(h["old_file"], "-", p["lines"]["before"]) + runs(h["file"], "+", p["lines"]["after"])
-        exact = p["kind"] in ("logic", "extract", "inline")
+        exact = p["kind"] in ("logic", "extract", "inline") or (unproven and p["kind"] == "rename")
         out.append({"kind": kind, "structure": p["structure"], "code": p["review_lines"] if exact else None,
                     "changed": len(lines), "lines": lines, "facets": p["facets"], "detail": p["detail"]})
     rest = code_lines(h) - sum(p["code"] for p in out if p["code"] is not None)

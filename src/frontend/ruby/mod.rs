@@ -5,6 +5,7 @@ mod reserved;
 mod roles;
 
 use super::{Construct, Frontend};
+use crate::norms::Snapshot;
 use crate::tree::{NodeId, Role, Semantics, Span, Spelling, Tree, TreeBuilder};
 use ruby_prism::{Location, Node, Visit};
 
@@ -87,6 +88,36 @@ impl Frontend for Ruby {
             builder.error(span(&error.location()));
         }
         builder.finish()
+    }
+
+    /// Templates call helpers and models by name too.
+    fn search_globs(&self) -> &'static [&'static str] {
+        &[
+            "*.rb",
+            "*.rake",
+            "*.gemspec",
+            "*.ru",
+            "*.erb",
+            "*.haml",
+            "*.slim",
+            "*.builder",
+            "*.jbuilder",
+            "Gemfile",
+            "Rakefile",
+        ]
+    }
+
+    /// A gem's code: under `lib/` beside a `*.gemspec`.
+    fn library(&self, path: &str, files: &dyn Snapshot) -> bool {
+        let segments: Vec<&str> = path.split('/').collect();
+        (0..segments.len().saturating_sub(1))
+            .filter(|&i| segments[i] == "lib")
+            .any(|i| {
+                files
+                    .list(&segments[..i].join("/"))
+                    .iter()
+                    .any(|f| f.ends_with(".gemspec"))
+            })
     }
 
     fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {

@@ -464,8 +464,15 @@ fn a_duplicate_candidate_lowers_confidence() {
     let confidence = |r: &Value, file: &str| -> f64 {
         hunks(r)
             .iter()
-            .filter(|h| h["file"] == file && h["kind"] == "move")
-            .map(|h| lead(h)["confidence"].as_f64().unwrap())
+            .filter(|h| {
+                h["file"] == file
+                    && h["parts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|p| p["kind"] == "move")
+            })
+            .map(|h| move_part(h)["confidence"].as_f64().unwrap())
             .fold(f64::INFINITY, f64::min)
     };
     // The copy added to `Other` is new code, and the move it might have been
@@ -475,11 +482,12 @@ fn a_duplicate_candidate_lowers_confidence() {
         .find(|h| h["file"] == "other.rb")
         .unwrap();
     assert_eq!(added["kind"], "logic", "{ambiguous:#}");
+    // Which copy moved is a guess: not proven (tests/proof.rs).
     let moved = hunks(&ambiguous)
         .iter()
-        .find(|h| h["file"] == "shape.rb" && h["kind"] == "move")
+        .find(|h| h["file"] == "shape.rb")
         .unwrap();
-    assert_eq!(lead(moved)["evidence"]["candidates"], 2);
+    assert_eq!(move_part(moved)["evidence"]["candidates"], 2);
     assert!(confidence(&ambiguous, "shape.rb") < confidence(&unique, "shape.rb"));
 }
 

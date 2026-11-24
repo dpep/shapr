@@ -11,7 +11,8 @@
 mod roles;
 
 use super::{Construct, Frontend};
-use crate::tree::{NodeId, Semantics, Span, Spelling, Tree, TreeBuilder};
+use crate::norms::Snapshot;
+use crate::tree::{Flags, NodeId, Semantics, Span, Spelling, Tree, TreeBuilder};
 use roles::{Mode, Plan};
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -107,6 +108,7 @@ impl Frontend for Rust {
         builder.semantics(Semantics {
             file_scoped: true,
             scoped_drop: true,
+            private_by_default: true,
             reserved: RESERVED,
             spelling: Spelling {
                 quotes: &['"', '\''],
@@ -129,6 +131,48 @@ impl Frontend for Rust {
             None => builder.error(0..source.len()),
         }
         builder.finish()
+    }
+
+    fn search_globs(&self) -> &'static [&'static str] {
+        &["*.rs"]
+    }
+
+    /// A library crate's source: the nearest `Cargo.toml` above it has a
+    /// `[lib]` target or a `src/lib.rs`, isn't `publish = false`, and the file
+    /// isn't one of its binaries, tests, examples, benches or build script.
+    /// A private module's `pub` items count, as they may be re-exported.
+    fn library(&self, path: &str, files: &dyn Snapshot) -> bool {
+        let mut dir = crate::norms::snapshot::parent(path);
+        loop {
+            let manifest = crate::norms::join(dir, "Cargo.toml");
+            if files.list(dir).contains(&manifest) {
+                let Some(toml) = files.read(&manifest) else {
+                    return false;
+                };
+                let toml = String::from_utf8_lossy(&toml);
+                let line = |want: &str| {
+                    toml.lines()
+                        .any(|l| l.split_whitespace().collect::<String>() == want)
+                };
+                let lib = line("[lib]")
+                    || files
+                        .list(&crate::norms::join(dir, "src"))
+                        .contains(&crate::norms::join(dir, "src/lib.rs"));
+                let own = path
+                    .strip_prefix(dir)
+                    .unwrap_or(path)
+                    .trim_start_matches('/');
+                let target = !["src/bin/", "tests/", "examples/", "benches/"]
+                    .iter()
+                    .any(|p| own.starts_with(p))
+                    && !matches!(own, "src/main.rs" | "build.rs");
+                return lib && target && !line("publish=false");
+            }
+            if dir.is_empty() {
+                return false;
+            }
+            dir = crate::norms::snapshot::parent(dir);
+        }
     }
 
     fn construct(&self, tree: &Tree, id: NodeId) -> Option<Construct> {
@@ -245,6 +289,26 @@ struct Walker<'a> {
 }
 
 impl<'a> Walker<'a> {
+    /// Marked plain `pub` (not `pub(crate)` or `pub(super)`), or an item of a
+    /// public trait or a variant of a public enum, which take its visibility.
+    fn public(&self, n: &Node<'_>) -> bool {
+        let mut cursor = n.walk();
+        let own = n
+            .children(&mut cursor)
+            .find(|c| c.kind() == "visibility_modifier");
+        if let Some(own) = own {
+            return self.text(&own) == "pub";
+        }
+        let container = n
+            .parent()
+            .and_then(|list| Some((list.kind(), list.parent()?)));
+        match container {
+            Some(("declaration_list", item)) if item.kind() == "trait_item" => self.public(&item),
+            Some(("enum_variant_list", item)) if item.kind() == "enum_item" => self.public(&item),
+            _ => false,
+        }
+    }
+
     fn text(&self, n: &Node<'_>) -> &'a str {
         std::str::from_utf8(&self.src[span(n)]).unwrap_or_default()
     }
@@ -350,6 +414,9 @@ impl<'a> Walker<'a> {
         };
         self.b
             .open(kind(n), start..end, name.map(str::as_bytes), role);
+        if role.defines().is_some() && self.public(n) {
+            self.b.flag(Flags::PUBLIC);
+        }
         for attr in attrs {
             self.emit(*attr, Mode::Expr, &[]);
         }
@@ -695,7 +762,6 @@ mod tests {
 
     #[test]
     fn items_bound_locals_and_closures_do_not() {
-        use crate::tree::Flags;
         let tree =
             parse("mod m { #[derive(Clone)] struct S; impl S { fn a() { let f = |x| x; } } }");
         let scopes: Vec<&str> = tree
@@ -711,8 +777,24 @@ mod tests {
     }
 
     #[test]
+    fn plain_pub_items_and_their_public_traits_and_enums_are_marked() {
+        let tree = parse(
+            "pub fn a() {} pub(crate) fn b() {} fn c() {} \
+             pub trait T { fn d(); } trait U { fn e(); } \
+             pub enum E { F } pub struct S { pub g: u8, h: u8 } \
+             impl S { pub fn i() {} fn j() {} }",
+        );
+        let public: Vec<&str> = tree
+            .nodes
+            .iter()
+            .filter(|n| n.flags.contains(Flags::PUBLIC))
+            .filter_map(|n| n.name.as_deref())
+            .collect();
+        assert_eq!(public, ["a", "T", "d", "E", "F", "S", "g", "i"]);
+    }
+
+    #[test]
     fn argument_lists_are_marked() {
-        use crate::tree::Flags;
         let tree = parse("fn a(x: u8) { f(x); self.g(); }");
         let lists = tree
             .nodes

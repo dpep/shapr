@@ -111,7 +111,8 @@ fn a_local_variable_renamed_in_a_def_is_a_rename() {
     );
     assert_eq!(lead(hunk)["evidence"]["renamed"], 3);
     assert_eq!(lead(hunk)["evidence"]["uses"], 3);
-    assert_eq!(lead(hunk)["evidence"]["unseen_uses"], false);
+    // A local can't be used outside its scope: nothing to search.
+    assert_eq!(lead(hunk)["evidence"]["searched"], serde_json::Value::Null);
     assert_eq!(hunk["review_lines"], 0);
     assert_eq!(report["summary"]["verdict"], "structure");
 }
@@ -198,8 +199,10 @@ fn a_method_rename_with_every_call_site_is_a_graded_rename() {
         lead(hunk)["detail"]["renames"],
         serde_json::json!([{"from": "greet", "to": "salute", "scope": "method", "occurrences": 3}])
     );
-    assert_eq!(lead(hunk)["evidence"]["unseen_uses"], true);
-    // Callers outside the diff can't be seen: (3 + 1) / (3 + 2).
+    // The repository was searched for callers outside the diff: the file itself.
+    assert_eq!(lead(hunk)["evidence"]["searched"], 1);
+    assert_eq!(lead(hunk)["assumptions"], serde_json::json!([]));
+    // Callers grep can't see (a computed name) still may exist: (3 + 1) / (3 + 2).
     assert_eq!(confidence(hunk), 0.8);
 }
 
@@ -298,7 +301,7 @@ fn an_instance_variable_must_be_renamed_in_every_method() {
     );
     let report = one(&before, &before.replace("@heat", "@temp"));
     assert_eq!(kinds(&report), ["rename", "rename"]);
-    assert_eq!(lead(&report["hunks"][0])["evidence"]["unseen_uses"], true);
+    assert_eq!(lead(&report["hunks"][0])["evidence"]["searched"], 1);
     logic_because(
         &one(&before, &before.replacen("@heat", "@temp", 1)),
         "@heat is still used",

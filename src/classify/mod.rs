@@ -7,6 +7,7 @@
 //! claims lines with [`Label::claim`], and each kind lives in its own module.
 
 pub mod facets;
+pub mod proof;
 pub mod site;
 
 mod align;
@@ -18,6 +19,7 @@ mod rename;
 
 pub use facets::Facet;
 pub use moves::Context;
+pub use proof::{Assumption, Outside};
 
 use crate::change::Change;
 use crate::diff::Hunk;
@@ -154,6 +156,8 @@ pub struct Part {
     /// What differs around the part's code in its new place (a move into
     /// another class): its lines are explained, but its meaning can change.
     pub context: Vec<Context>,
+    /// What the part relies on that shapr hasn't verified, sorted.
+    pub assumptions: Vec<Assumption>,
     pub lines: Claim,
     /// Of the hunk's changed lines, those a reviewer still reads for this
     /// part; only lines that carry code count.
@@ -166,9 +170,10 @@ pub struct Part {
 }
 
 impl Part {
-    /// Changes structure without changing behavior.
+    /// Changes structure without changing behavior: proven, with nothing
+    /// around it that changes its meaning and nothing assumed.
     pub fn structure(&self) -> bool {
-        self.context.is_empty()
+        self.context.is_empty() && self.assumptions.is_empty()
     }
 }
 
@@ -277,7 +282,7 @@ pub type Labels = Vec<Vec<Label>>;
 /// another. The residual is never cut out of the trees, so a check that new
 /// code would break fails and the lines stay logic. A pass may also leave a
 /// near miss on the residual.
-type Pass = fn(&Change, &Alignments, &mut Labels);
+type Pass = fn(&Change, &Alignments, &dyn Outside, &mut Labels);
 
 /// In order. A pass sees which lines earlier passes claimed and proposes
 /// parts for the rest; `format::rest` takes what is left.
@@ -289,11 +294,13 @@ const PASSES: &[Pass] = &[
     format::rest,
 ];
 
-pub fn classify(change: &Change) -> Labels {
+/// Labels every hunk; `outside` is the repository beyond the change, where
+/// a part's uses outside it are verified.
+pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     let mut labels = defaults(change);
     let alignments = Alignments::of(change);
     for pass in PASSES {
-        pass(change, &alignments, &mut labels);
+        pass(change, &alignments, outside, &mut labels);
     }
     for label in labels.iter_mut().flatten() {
         label.residual.lines = label.unclaimed();
@@ -355,6 +362,7 @@ mod tests {
         Part {
             kind,
             context: Vec::new(),
+            assumptions: Vec::new(),
             lines: Claim {
                 before: before.iter().copied().collect(),
                 after: after.iter().copied().collect(),

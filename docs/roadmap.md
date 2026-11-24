@@ -31,15 +31,13 @@ In order. A step starts when its gate is met.
 
 | # | Step | Why | Gate to start | Unblocks |
 |---|---|---|---|---|
-| 1 | **Proof status.** Each part lists its unchecked assumptions (`unseen_uses`, `ambiguous_match`); the verdict and `review_lines` count only assumption-free parts as structure | A rename with callers outside the diff counts as proven structure today; confidence is computed and then ignored by every aggregate | `lane/schema` and `lane/align` landed | An honest verdict; routing between shapr and the classifier (#37) |
+| 1 | **Proof status** (`lane/proof`). Each part lists its unchecked assumptions (`unseen_uses`, `search_capped`, `public_api`, `ambiguous_match`); the verdict and `review_lines` count only assumption-free parts as structure; uses outside the diff are searched with `git grep` (#47, #51) | A rename with callers outside the diff counts as proven structure today; confidence is computed and then ignored by every aggregate | `lane/schema` and `lane/align` landed | An honest verdict; routing between shapr and the classifier (#37) |
 | 2 | **Per-run classification.** Classify the whole hunk first, then its maximal runs of changed lines | Labels stop depending on diff context; measured on the corpus: more lines proven, no false structure (#36) | Step 1, so hunk output changes once | Branch-wide labels worth reading |
 | 3 | **Schema 2 candidate.** One bump covering the schema lane and steps 1 and 2; `script/corpus.py diff` explained row by row | A consumer should meet one schema, not three | Steps 1 and 2 | Steps 4 and 5 |
 | 4 | **Fixtures as data.** `before`, `after` and expected labels as files, with a shared test harness; seeded with the 200 hand-labeled hunks | Every correction becomes a regression test; lanes stop colliding in the same test files; the learning loop needs this format | Step 3 | The classifier's eval set; the TUI; a coding agent working the failing set |
 | 5 | **A thin grokr slice**, in its own repo: run shapr on the maintainer's own PRs, apply one pack rule (never mix; a size gate on behavior lines, tests apart), log each finding with accept, edit or dismiss, and record the head commit when a PR is first seen | The schema has no consumer; this tests whether shapr's facts change a review | Step 3 | Schema freeze; every tool under Later |
 | 6 | **`restyle` kind**: the same tree apart from lexical tokens | The only catalog kind above noise (3.5% of logic hunks); it shares its syntax-variant table with norms | `lane/align` landed; a corpus count of candidate hunks | Verifiable format-only PRs; norms beyond quotes |
 | 7 | **Hunt, regression sweep, 0.x release** with the schema marked unstable | Publishing pins expectations; do it after a consumer has read the JSON | Step 5 in use for two weeks with no schema change wanted | Outside users |
-
-`git grep` for uses outside the diff (part of step 1's original scope) waits for a count: how many corpus parts carry `unseen_uses`.
 
 ## Later, each behind a gate
 

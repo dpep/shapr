@@ -1,6 +1,8 @@
 //! The command line: flags, input selection, exit codes.
 
 use crate::claims::{Claims, Message, Source};
+use crate::classify::proof::{Nowhere, Outside};
+use crate::outside::Repository;
 use crate::report::{self, Format};
 use crate::{change, classify, diff, git, github};
 use clap::{CommandFactory, Parser};
@@ -241,15 +243,11 @@ pub fn run() -> ExitCode {
         git = remote.git;
     }
     let change = change::assemble(files, &git);
-    let labels = classify::classify(&change);
-    let mut report = report::build(
-        &change,
-        &labels,
-        Claims::read(&messages),
-        report::Meta::new(source),
-    );
-    // Config and neighbors as of the change's after side.
-    let revision = (git.after_revision(cli.range.as_deref()))
+    // The repository as of the change's after side: config and neighbors
+    // for norms, uses and library layout for proof.
+    let after = git.after_revision(cli.range.as_deref());
+    let revision = after
+        .clone()
         .map(|rev| crate::norms::Revision::new(&git, rev));
     let worktree = git.toplevel().map(crate::norms::Worktree);
     let snapshot: Option<&dyn crate::norms::Snapshot> = match (&revision, &worktree) {
@@ -257,6 +255,18 @@ pub fn run() -> ExitCode {
         (None, Some(worktree)) => Some(worktree),
         (None, None) => None,
     };
+    let repository = snapshot.map(|s| Repository::new(&git, after, s));
+    let outside: &dyn Outside = match &repository {
+        Some(repository) => repository,
+        None => &Nowhere,
+    };
+    let labels = classify::classify(&change, outside);
+    let mut report = report::build(
+        &change,
+        &labels,
+        Claims::read(&messages),
+        report::Meta::new(source),
+    );
     let styles = crate::norms::styles(&change, snapshot, cli.norm_threshold);
     for (hunk, style) in report.hunks.iter_mut().zip(styles) {
         hunk.style = style;

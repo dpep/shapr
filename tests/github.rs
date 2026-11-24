@@ -636,6 +636,52 @@ fn gitattributes_come_from_the_head_commit() {
 }
 
 #[test]
+fn a_rename_is_verified_in_the_cached_clone() {
+    let f = Fixture::new();
+    let meter = |name: &str| {
+        format!(
+            "class Meter\n  def read\n    {name} + 1\n  end\n\n  def {name}\n    41\n  end\nend\n"
+        )
+    };
+    git(&f.work, &["checkout", "-q", "-b", "rename", "main"]);
+    commit(
+        &f.work,
+        &[
+            ("lib/meter.rb", &meter("sample")),
+            (
+                "lib/report.rb",
+                "class Report\n  def show\n    Meter.new.sample\n  end\nend\n",
+            ),
+        ],
+        "Add the meter",
+    );
+    let head = commit(
+        &f.work,
+        &[("lib/meter.rb", &meter("probe"))],
+        "Rename sample",
+    );
+    git(
+        &f.work,
+        &["push", "-q", f.remote.to_str().unwrap(), "rename"],
+    );
+    f.commit(&head, &head);
+    // Outside any repository, the cache's partial clone is all there is: the
+    // caller's blob was never fetched for the diff.
+    let out = f.shapr_in(f.tmp.path(), &["-j", &format!("acme/widgets@{head}")], &[]);
+    let r = report(&out);
+    let residual = &r["hunks"][0]["parts"][0];
+    assert_eq!(residual["kind"], "logic", "{r:#} {}", stderr(&out));
+    assert!(
+        residual["reason"]
+            .as_str()
+            .unwrap()
+            .contains("lib/report.rb")
+    );
+    let local = report(&f.shapr(&["-j", &format!("{head}^..{head}")]));
+    assert_eq!(labels(&r), labels(&local));
+}
+
+#[test]
 fn a_second_run_reuses_the_cache_and_clear_cache_empties_it() {
     let f = Fixture::new();
     let first = report(&f.shapr(&["-j", "acme/widgets#12"]));

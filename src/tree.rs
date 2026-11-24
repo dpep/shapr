@@ -180,6 +180,10 @@ impl Flags {
     /// A comment the language reads as code ([`TreeBuilder::directive`]);
     /// set by the builder.
     pub const DIRECTIVE: Flags = Flags(1 << 3);
+    /// A definition visible outside its crate or package, in a language whose
+    /// definitions are private unless marked ([`Semantics::private_by_default`]):
+    /// Rust's `pub`, and a `pub` trait's items or `pub` enum's variants.
+    pub const PUBLIC: Flags = Flags(1 << 4);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
@@ -212,6 +216,11 @@ pub struct Semantics {
     /// one reaches callers beyond the change.
     pub reserved: &'static [&'static str],
     pub spelling: Spelling,
+    /// A definition is private unless the frontend marks it
+    /// [`Flags::PUBLIC`] (Rust). Otherwise visibility comes from
+    /// [`Role::Visibility`] statements, and a definition is public by default
+    /// (Ruby).
+    pub private_by_default: bool,
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A

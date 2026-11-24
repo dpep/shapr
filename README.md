@@ -16,11 +16,13 @@ Each hunk is a list of parts. A part is one proven change of these kinds, with t
 |---|---|---|---|
 | `format_only` | structure | `def area(x)` becomes `def area( x )` | 0 |
 | `comment_only` | structure | `/// Area in m2.` becomes `/// Area in square metres.` | 0 |
-| `rename` | structure | parameter `x` becomes `side`, with every use | 0 |
+| `rename` | structure; behavior when it renames a library's public API | parameter `x` becomes `side`, with every use | 0; all code lines when not proven |
 | `move` | structure; behavior when it lands among different code (another class, past a `private`) | two methods of a class swap places | 0; the definition's first line when it lands among different code |
 | `extract` | structure | statements become a new method, replaced by a call to it | all code lines |
 | `inline` | structure | the reverse of `extract` | all code lines |
 | `logic` | behavior | anything else, such as `x * 2` becoming `x * 3`, or the edited lines of a moved method | all code lines |
+
+A part is structure only when it is proven: a rename's old name is searched for across the repository (`git grep`), and one still used outside the change is `logic`; a part that relies on something shapr can't check (a library's public API, an ambiguous move) lists it in `assumptions` and isn't structure.
 
 A hunk's `kind` is a one-word rollup: `logic` unless every part is structure, else its most substantial part kind in this table's order. Extracts and inlines are structure but still count toward review: refactoring bugs cluster there.
 

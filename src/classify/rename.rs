@@ -11,8 +11,9 @@
 
 use super::align::{Alignments, Cover, Diff};
 use super::hazard::{Op, blocks};
+use super::proof::{self, Assumption, Verified};
 use super::site::{self, CodeLines};
-use super::{Claim, Confidence, Kind, Labels, Part};
+use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::tree::{Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
@@ -98,6 +99,8 @@ struct Facts {
     after_gates: BTreeSet<NodeId>,
     /// The renamed nodes on the after side, by file.
     after_nodes: BTreeSet<(usize, NodeId)>,
+    /// The renamed definitions on the before side, by file.
+    definitions: Vec<(usize, NodeId)>,
 }
 
 type Verdicts<'f> = BTreeMap<&'f Pair, Result<Verdict, String>>;
@@ -106,9 +109,18 @@ struct Verdict {
     renamed: usize,
     uses: usize,
     score: f64,
+    /// What the rename relies on that the search couldn't settle.
+    assumptions: BTreeSet<Assumption>,
+    /// Files searched for uses outside the change; `None` for a local.
+    searched: Option<usize>,
 }
 
-pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels) {
+pub(super) fn run(
+    change: &Change,
+    alignments: &Alignments,
+    outside: &dyn Outside,
+    labels: &mut Labels,
+) {
     let hunks = aligned(alignments, labels);
     let trees = |f: usize| {
         change.files[f]
@@ -135,7 +147,10 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
             entry.reserved = entry.reserved.take().or(reserved);
             let role = t.before.node(diff.before).role;
             entry.renamed += usize::from(!is_name_node(&t.before, diff.before));
-            entry.defined |= role.defines().is_some();
+            if role.defines().is_some() {
+                entry.defined = true;
+                entry.definitions.push((hunk.file, diff.before));
+            }
             if role == Role::Definition(NameKind::Method) {
                 entry.hazards.extend(own_hazards(&t.before, diff.before));
             }
@@ -146,7 +161,7 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
     }
     let verdicts: Verdicts = facts
         .iter()
-        .map(|(pair, f)| (pair, judge(change, pair, f, &facts)))
+        .map(|(pair, f)| (pair, judge(change, pair, f, &facts, outside)))
         .collect();
 
     for hunk in &hunks {
@@ -193,7 +208,11 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
         let score = pairs.values().map(|v| v.score).fold(1.0, f64::min);
         let renamed: usize = pairs.values().map(|v| v.renamed).sum();
         let uses: usize = pairs.values().map(|v| v.uses).sum();
-        let unseen = pairs.keys().any(|p| p.space.scope.unseen());
+        let assumptions: BTreeSet<Assumption> = pairs
+            .values()
+            .flat_map(|v| v.assumptions.iter().copied())
+            .collect();
+        let searched = pairs.values().filter_map(|v| v.searched).max();
         let renames: Vec<Value> = pairs
             .iter()
             .map(|(p, v)| {
@@ -209,14 +228,31 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
         let values = &mut evidence.values;
         values.insert("renamed".into(), renamed.into());
         values.insert("uses".into(), uses.into());
-        values.insert("unseen_uses".into(), unseen.into());
+        values.insert("searched".into(), searched.into());
+        let reason = if assumptions.contains(&Assumption::PublicApi) {
+            "public API rename: callers outside this repository can break"
+        } else if assumptions.is_empty() {
+            "only identifiers change, consistently in their scope"
+        } else {
+            "only identifiers change, but uses outside the change weren't checked"
+        };
+        // Not proven: every line is read.
+        let review = if assumptions.is_empty() {
+            Claim::default()
+        } else {
+            Claim {
+                before: code.0.touched(&claimed.before, |_| true),
+                after: code.1.touched(&claimed.after, |_| true),
+            }
+        };
         label.claim(Part {
             kind: Kind::Rename,
             context: Vec::new(),
+            assumptions: assumptions.into_iter().collect(),
             lines: claimed,
-            review: Claim::default(),
+            review,
             confidence: Confidence::new(score),
-            reason: "only identifiers change, consistently in their scope".into(),
+            reason: reason.into(),
             evidence,
             detail: Map::from_iter([("renames".to_string(), Value::Array(renames))]),
         });
@@ -325,6 +361,7 @@ fn judge(
     pair: &Pair,
     facts: &Facts,
     all: &BTreeMap<Pair, Facts>,
+    outside: &dyn Outside,
 ) -> Result<Verdict, String> {
     let (from, to) = (&pair.from, &pair.to);
     for other in all.keys().filter(|o| o.space == pair.space && *o != pair) {
@@ -387,6 +424,7 @@ fn judge(
     if defined_anew {
         return Err(format!("{to} is also defined by new code"));
     }
+    let (assumptions, searched) = reach(change, pair, facts, outside)?;
     let uses: usize = before
         .iter()
         .map(|&(_, t, root)| uses(t, root, scope, from))
@@ -404,7 +442,82 @@ fn judge(
         renamed,
         uses,
         score,
+        assumptions,
+        searched,
     })
+}
+
+/// For a name code outside the change can reach: fails when a file outside
+/// the change still uses the old name at the after revision; otherwise what
+/// stays assumed (a search that couldn't run, a library's public surface)
+/// and how many files were searched.
+fn reach(
+    change: &Change,
+    pair: &Pair,
+    facts: &Facts,
+    outside: &dyn Outside,
+) -> Result<(BTreeSet<Assumption>, Option<usize>), String> {
+    let mut assumptions = BTreeSet::new();
+    let scope = pair.space.scope;
+    let Some(&(home, _)) = facts.definitions.first() else {
+        return Ok((assumptions, None));
+    };
+    if !scope.unseen() {
+        return Ok((assumptions, None));
+    }
+    let file = |f: usize| &change.files[f];
+    let before = |f: usize| {
+        &file(f)
+            .trees
+            .as_ref()
+            .expect("renamed in a parsed file")
+            .before
+    };
+    let paths = |f: usize| {
+        let diff = &file(f).diff;
+        [diff.old_path.as_deref(), diff.new_path.as_deref()]
+            .into_iter()
+            .flatten()
+    };
+    // Files whose trees the scope already covered.
+    let covered: BTreeSet<&str> = match pair.space.file {
+        Some(f) => paths(f).collect(),
+        None => (0..change.files.len())
+            .filter(|&f| file(f).trees.is_ok())
+            .flat_map(paths)
+            .collect(),
+    };
+    // A method's callers may spell it without its suffix (`x.name = 1`).
+    let suffixes = before(home).semantics.spelling.suffixes;
+    let word = match scope {
+        Scope::Method => pair.from.trim_end_matches(|c| suffixes.contains(&c)),
+        _ => pair.from.as_str(),
+    };
+    let mut searched = None;
+    let still_uses = |tree: &Tree| conflicts(tree, Tree::ROOT, scope, &pair.from);
+    match proof::verify(outside, file(home).diff.path(), word, &covered, &still_uses) {
+        Verified::Used(files) => {
+            return Err(format!(
+                "{} is still used in {}",
+                pair.from,
+                proof::listing(&files)
+            ));
+        }
+        Verified::Open(assumption) => {
+            assumptions.insert(assumption);
+        }
+        Verified::Clear { searched: n } => searched = Some(n),
+    }
+    // A field (`@x`) is never another package's to call.
+    let public = scope != Scope::Field
+        && facts
+            .definitions
+            .iter()
+            .any(|&(f, id)| outside.library(file(f).diff.path()) && proof::public(before(f), id));
+    if public {
+        assumptions.insert(Assumption::PublicApi);
+    }
+    Ok((assumptions, searched))
 }
 
 /// Subtrees of one side, each with its file.
@@ -481,6 +594,12 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
             role => found == name && Scope::of(role) == Some(scope),
         }
     })
+}
+
+/// Whether `tree` uses method `name` anywhere: a definition, call or
+/// reference, a dynamic name that could spell it, or a plain literal.
+pub(super) fn mentions_method(tree: &Tree, name: &str) -> bool {
+    conflicts(tree, Tree::ROOT, Scope::Method, name)
 }
 
 /// A plain literal spelling `name` (`:name`, `"name"`, `name:`): DSLs such

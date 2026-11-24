@@ -4,7 +4,7 @@
 use crate::change::{Category, Change, FileChange};
 use crate::claims::{Claims, CodeFacts, Finding};
 use crate::classify::{
-    self, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
+    self, Assumption, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
 use crate::diff::{Hunk, Lines};
 use serde::Serialize;
@@ -190,6 +190,7 @@ pub struct PartRecord {
     evidence: EvidenceRecord,
     detail: Map<String, Value>,
     facets: Vec<Facet>,
+    assumptions: Vec<Assumption>,
     review_lines: usize,
     /// Changed lines it covers, for `structure_share`.
     #[serde(skip)]
@@ -256,6 +257,7 @@ pub struct Summary {
     categories: BTreeMap<&'static str, usize>,
     kinds: BTreeMap<&'static str, usize>,
     move_contexts: BTreeMap<&'static str, usize>,
+    assumptions: BTreeMap<&'static str, usize>,
     facets: BTreeMap<&'static str, usize>,
     files: usize,
     directories: usize,
@@ -390,6 +392,7 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             evidence: EvidenceRecord::of(&p.evidence),
             detail: p.detail.clone(),
             facets: Vec::new(),
+            assumptions: p.assumptions.clone(),
             review_lines: code(&p.review),
             changed: changed(&p.lines),
             context: p.context.clone(),
@@ -406,6 +409,7 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             evidence: EvidenceRecord::of(&r.evidence),
             detail: r.detail.clone(),
             facets: r.facets.clone(),
+            assumptions: Vec::new(),
             review_lines: code(&r.lines),
             changed: changed(&r.lines),
             context: Vec::new(),
@@ -423,6 +427,8 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         Context::ALL.iter().map(|c| (c.as_str(), 0)).collect();
     let mut facets: BTreeMap<&'static str, usize> =
         Facet::ALL.iter().map(|f| (f.as_str(), 0)).collect();
+    let mut assumptions: BTreeMap<&'static str, usize> =
+        Assumption::ALL.iter().map(|a| (a.as_str(), 0)).collect();
     let mut verdicts: BTreeMap<&'static str, usize> =
         Verdict::ALL.iter().map(|v| (v.as_str(), 0)).collect();
     let mut lines = LineCounts::default();
@@ -444,6 +450,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
             for facet in &part.facets {
                 *facets.entry(facet.as_str()).or_default() += 1;
+            }
+            for assumption in &part.assumptions {
+                *assumptions.entry(assumption.as_str()).or_default() += 1;
             }
             if !counted {
                 continue;
@@ -497,6 +506,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         categories,
         kinds,
         move_contexts,
+        assumptions,
         facets,
         files: files.len(),
         directories: dirs.len(),

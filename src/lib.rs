@@ -12,6 +12,7 @@ pub mod git;
 pub mod github;
 pub mod log;
 pub mod norms;
+pub mod outside;
 pub mod report;
 pub mod tree;
 

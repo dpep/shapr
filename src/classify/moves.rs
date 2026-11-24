@@ -23,7 +23,7 @@
 use super::align::{Alignments, Side, lcs, namespace_name, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
-use super::{Claim, Confidence, Kind, Labels, Part, rounded, site};
+use super::{Assumption, Claim, Confidence, Kind, Labels, Outside, Part, rounded, site};
 use crate::change::{Change, Trees};
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
@@ -40,7 +40,7 @@ const FLOOR: usize = 3;
 /// shared, so the bodies are more alike than not.
 const NEAR: f64 = 0.5;
 
-pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels) {
+pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, labels: &mut Labels) {
     let mut units = Vec::new();
     // Files whose declarations take part: parsed cleanly, with lines left.
     let mut aligned = vec![false; change.files.len()];
@@ -143,17 +143,29 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
                 "candidates".into(),
                 json!(mine.iter().map(|p| p.candidates).max()),
             );
+            // Several units matched as well: which one moved is a guess.
+            let assumptions: Vec<Assumption> = mine
+                .iter()
+                .any(|p| p.candidates > 1)
+                .then_some(Assumption::AmbiguousMatch)
+                .into_iter()
+                .collect();
+            if !assumptions.is_empty() {
+                let joint = if context.is_empty() { ", but" } else { ";" };
+                reason = format!("{reason}{joint} several declarations match it equally well");
+            }
             let entries: Vec<Entry> = mine
                 .iter()
                 .map(|p| entry(change, &units, &ids, p))
                 .collect();
-            let (changed, first) = moved_changes(&entries, ids[f] + h);
+            let (changed, first) = moved_changes(&entries, ids[f] + h, !assumptions.is_empty());
             let names: Vec<&str> = context.iter().map(|c| c.as_str()).collect();
             let lines = explained.minus(&changed);
             let part = Part {
                 kind: Kind::Move,
                 review: first.intersect(&lines),
                 lines,
+                assumptions,
                 confidence,
                 reason,
                 evidence,
@@ -170,12 +182,12 @@ pub(super) fn run(change: &Change, alignments: &Alignments, labels: &mut Labels)
 
 /// The lines inside the hunk's moved units that changed in the move
 /// (before-side lines of the units it removed, after-side lines of the units
-/// it added), and the first line of each unit moved into a new context,
-/// where that context shows.
-fn moved_changes(entries: &[Entry], id: usize) -> (Claim, Claim) {
+/// it added), and the first line of each unit moved into a new context, or
+/// of every unit when the part isn't proven, where a reviewer checks it.
+fn moved_changes(entries: &[Entry], id: usize, unproven: bool) -> (Claim, Claim) {
     let (mut changed, mut first) = (Claim::default(), Claim::default());
     for entry in entries {
-        let start = |line: Option<usize>| line.filter(|_| !entry.context.is_empty());
+        let start = |line: Option<usize>| line.filter(|_| unproven || !entry.context.is_empty());
         if entry.from_hunk == Some(id) {
             changed.before.extend(&entry.changed_before);
             first.before.extend(start(entry.from_line));
@@ -465,7 +477,7 @@ fn positional(tree: &Tree, node: NodeId, across: bool) -> bool {
 
 /// The section a declaration sits in: the last bare visibility statement
 /// (`private` with no arguments) before it among its siblings.
-fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
+pub(super) fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
     let parent = tree.node(tree.node(node).parent?);
     parent
         .children

@@ -57,6 +57,12 @@ class Parts(unittest.TestCase):
         # logic's code lines are its review_lines; the rest of the hunk's are the move's
         self.assertEqual((logic["code"], moved["code"]), (1, 2))
 
+    def test_a_part_with_assumptions_is_unproven_and_a_rename_reviews_every_line(self):
+        ren = part("rename", [run(1, 1)], [run(1, 1)], 2, structure=False)
+        ren["assumptions"] = ["public_api"]
+        [p] = corpus.parts(new_hunk([ren], run(1, 1), run(1, 1), code=2))
+        self.assertEqual((p["kind"], p["structure"], p["code"]), ("rename_unproven", False, 2))
+
     def test_unreviewed_code_is_shared_by_changed_lines(self):
         h = new_hunk([part("format_only", [run(1, 1)], [run(1, 1)], 0), part("rename", [run(4, 1)], [], 0)],
                      run(1, 4), run(1, 4), code=6)
