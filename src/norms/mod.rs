@@ -74,6 +74,9 @@ pub struct Analysis {
 pub struct NormDef {
     pub id: &'static str,
     pub styles: &'static [&'static str],
+    /// Its suggested edits rename identifiers, so they change the program
+    /// by design: they are held to parsing cleanly, not to the same tree.
+    pub renames: bool,
 }
 
 /// The per-language seam: which files, which norms, how to observe them,

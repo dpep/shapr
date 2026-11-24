@@ -10,6 +10,7 @@ use super::{
 };
 use crate::change::{Change, FileChange};
 use crate::diff::{Hunk, Lines};
+use crate::tree::Tree;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -214,6 +215,7 @@ fn file_styles(
     let file = File {
         path,
         source: &trees.after.source,
+        tree: &trees.after,
         before: &before,
         after: &after,
         touched,
@@ -308,6 +310,8 @@ fn chain(analysis: &Analysis, (first, last): (usize, usize)) -> Vec<(ScopeKind, 
 struct File<'a> {
     path: &'a str,
     source: &'a [u8],
+    /// The after side, which a suggested edit must keep the same program.
+    tree: &'a Tree,
     before: &'a Analysis,
     after: &'a Analysis,
     /// Per after-side observation: some hunk changed it.
@@ -377,6 +381,9 @@ impl File<'_> {
                     edit: (o.fix.iter())
                         .find(|(style, _)| style == expected)
                         .filter(|(_, replaces)| self.inside(hunk, replaces))
+                        .filter(|(_, replaces)| {
+                            edit::keeps(self.path, self.tree, replaces, def.renames)
+                        })
                         .and_then(|(_, replaces)| edit::unified(self.path, self.source, replaces)),
                 })
                 .collect(),

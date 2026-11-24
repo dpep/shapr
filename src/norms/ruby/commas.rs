@@ -40,8 +40,8 @@ pub fn see_hash(w: &mut Walker, node: &Node) {
     list(w, HASH, open.start_offset(), &items, close.start_offset());
 }
 
-/// A bracketed call's arguments, `f(...)` or `Set[...]`, a block argument
-/// (`&blk`) last.
+/// A bracketed call's arguments, `f(...)` or `Set[...]`. One ending in a
+/// block argument (`&blk`) chooses nothing: a comma can't follow it.
 pub fn see_arguments(w: &mut Walker, node: &Node) {
     let Some(call) = node.as_call_node() else {
         return;
@@ -60,10 +60,12 @@ pub fn see_arguments(w: &mut Walker, node: &Node) {
             None => items.push(arg),
         }
     }
-    items.extend(
-        call.block()
-            .filter(|b| b.as_block_argument_node().is_some()),
-    );
+    if call
+        .block()
+        .is_some_and(|b| b.as_block_argument_node().is_some())
+    {
+        return;
+    }
     let (open, close) = (opening.start_offset(), closing.start_offset());
     list(w, ARGUMENTS, open, &items, close);
 }
@@ -158,7 +160,7 @@ mod tests {
     #[test]
     fn parenthesized_arguments_count() {
         let src = "f(\n  1,\n  &blk\n)\ng(\n  a: 1,\n  b: 2,\n)\nh 1,\n  2\nk(\n  a: 1, b: 2,\n)\nS[\n  :x,\n]\n";
-        assert_eq!(styles(src, ARGUMENTS), "no_comma@3 comma@7 comma@15");
+        assert_eq!(styles(src, ARGUMENTS), "comma@7 comma@15");
         assert_eq!(styles(src, HASH), "");
     }
 }

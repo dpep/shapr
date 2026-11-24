@@ -1,0 +1,7 @@
+{
+  "description": "trailing whitespace inside a multi-line regexp or quoted symbol is its value, not style",
+  "norm": "Layout/TrailingWhitespace",
+  "expect": {
+    "hunks": [{"style": {"norms": {"$every": {"deviations": []}}}}]
+  }
+}

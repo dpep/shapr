@@ -1,0 +1,7 @@
+{
+  "description": "a block-pass argument can't take a trailing comma, so a call ending in one chooses no comma style",
+  "norm": "Style/TrailingCommaInArguments",
+  "expect": {
+    "hunks": [{"style": {"norms": []}}]
+  }
+}

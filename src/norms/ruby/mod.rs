@@ -28,58 +28,72 @@ static NORMS: &[NormDef] = &[
     NormDef {
         id: strings::NORM,
         styles: strings::STYLES,
+        renames: false,
     },
     NormDef {
         id: braces::NORM,
         styles: braces::STYLES,
+        renames: false,
     },
     NormDef {
         id: commas::ARRAY,
         styles: commas::STYLES,
+        renames: false,
     },
     NormDef {
         id: commas::HASH,
         styles: commas::STYLES,
+        renames: false,
     },
     NormDef {
         id: commas::ARGUMENTS,
         styles: commas::STYLES,
+        renames: false,
     },
     NormDef {
         id: hash_syntax::NORM,
         styles: hash_syntax::STYLES,
+        renames: false,
     },
     NormDef {
         id: indentation::NORM,
         styles: indentation::STYLES,
+        renames: false,
     },
     NormDef {
         id: whitespace::NORM,
         styles: whitespace::STYLES,
+        renames: false,
     },
     NormDef {
         id: final_newline::NORM,
         styles: final_newline::STYLES,
+        renames: false,
     },
     NormDef {
         id: width::NORM,
         styles: width::STYLES,
+        renames: false,
     },
     NormDef {
         id: naming::METHOD,
         styles: naming::STYLES,
+        renames: true,
     },
     NormDef {
         id: naming::VARIABLE,
         styles: naming::STYLES,
+        renames: true,
     },
     NormDef {
         id: operators::NORM,
         styles: operators::STYLES,
+        renames: false,
     },
     NormDef {
         id: def_spacing::NORM,
         styles: def_spacing::STYLES,
+        renames: false,
     },
 ];
 

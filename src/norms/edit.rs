@@ -1,6 +1,31 @@
 //! A suggested edit as a unified diff against the file it was found in.
 
 use super::{LineIndex, Replace};
+use crate::tree::Tree;
+
+/// Whether applying REPLACES to TREE's source (the file at PATH) leaves a
+/// program its parser reads cleanly and, unless the edit RENAMES, the same
+/// program: equal in canonical form, so only whitespace, comments and
+/// respellings restyle proves the same differ. An edit that fails it is
+/// never offered.
+pub fn keeps(path: &str, tree: &Tree, replaces: &[Replace], renames: bool) -> bool {
+    let Some(frontend) = crate::frontend::for_path(path) else {
+        return false;
+    };
+    let mut sorted = replaces.to_vec();
+    sorted.sort_by_key(|r| r.span.start);
+    let mut edited = Vec::with_capacity(tree.source.len());
+    let mut at = 0;
+    for r in &sorted {
+        edited.extend_from_slice(&tree.source[at..r.span.start]);
+        edited.extend_from_slice(r.text.as_bytes());
+        at = r.span.end;
+    }
+    edited.extend_from_slice(&tree.source[at..]);
+    let after = frontend.parse(edited);
+    after.errors.is_empty()
+        && (renames || after.node(Tree::ROOT).canon == tree.node(Tree::ROOT).canon)
+}
 
 /// How a unified diff marks a last line with no line break.
 const NO_NEWLINE: &str = "\\ No newline at end of file\n";
@@ -54,6 +79,28 @@ pub fn unified(path: &str, source: &[u8], replaces: &[Replace]) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontend::{Frontend, Ruby};
+
+    #[test]
+    fn an_edit_is_kept_only_when_the_program_stays_the_same() {
+        let keeps = |source: &str, from: &str, to: &str, renames: bool| {
+            let tree = Ruby.parse(source.as_bytes().to_vec());
+            let at = source.find(from).unwrap();
+            let replace = Replace {
+                span: at..at + from.len(),
+                text: to.into(),
+            };
+            super::keeps("a.rb", &tree, &[replace], renames)
+        };
+        assert!(keeps("go(\n  \"x\"\n)\n", "\"x\"", "'x'", false));
+        assert!(keeps("a = 1  \n", "1  ", "1", false));
+        assert!(!keeps("go(\n  1,\n  &b\n)\n", "&b", "&b,", false));
+        assert!(!keeps("x = /a  \nb/\n", "a  ", "a", false));
+        assert!(!keeps("x = :\"a  \nb\"\n", "a  ", "a", false));
+        assert!(!keeps("def fooBar; end\n", "fooBar", "foo_bar", false));
+        assert!(keeps("def fooBar; end\n", "fooBar", "foo_bar", true));
+        assert!(!keeps("def fooBar; end\n", "fooBar", "1x", true));
+    }
 
     #[test]
     fn a_replacement_is_shown_as_its_whole_lines() {

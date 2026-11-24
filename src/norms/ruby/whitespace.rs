@@ -7,12 +7,17 @@ use ruby_prism::Node;
 pub const NORM: &str = "Layout/TrailingWhitespace";
 pub const STYLES: &[&str] = &["no_trailing_whitespace", "trailing_whitespace"];
 
-/// String and heredoc contents: whitespace there is data, not style.
+/// String, heredoc, regexp and symbol contents: whitespace there is data,
+/// not style.
 pub fn see(w: &mut Walker, node: &Node) {
     let content = if let Some(string) = node.as_string_node() {
         string.content_loc()
     } else if let Some(xstring) = node.as_x_string_node() {
         xstring.content_loc()
+    } else if let Some(regexp) = node.as_regular_expression_node() {
+        regexp.content_loc()
+    } else if let Some(value) = node.as_symbol_node().and_then(|s| s.value_loc()) {
+        value
     } else {
         return;
     };
