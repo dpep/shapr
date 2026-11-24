@@ -555,3 +555,37 @@ fn help_and_usage_name_every_kind_and_both_commands() {
     assert!(!stderr.contains("shapr --ndjson"), "{stderr}");
     assert!(stderr.contains("shapr norms"), "{stderr}");
 }
+
+#[test]
+fn a_merge_against_its_second_parent_starts_from_that_parent() {
+    let code = "class A\n  def total\n    1\n  end\nend\n";
+    let dir = repo(&[&[("lib/a.rb", code), ("lib/u.rb", "x = 1\n")]]);
+    git(dir.path(), &["checkout", "-q", "-b", "feat"]);
+    commit(dir.path(), &[("lib/u.rb", "x = 2\n")], "feat");
+    git(dir.path(), &["checkout", "-q", "main"]);
+    // The first parent marks the file generated while editing it.
+    let edited = code.replace("1\n", "2\n");
+    let marked = [
+        (".gitattributes", "lib/a.rb linguist-generated\n"),
+        ("lib/a.rb", edited.as_str()),
+    ];
+    commit(dir.path(), &marked, "main");
+    git(dir.path(), &["merge", "-q", "feat", "--no-edit"]);
+    let report = report(&shapr(dir.path(), &["-j", "HEAD^-2"]));
+    let hunk = hunks(&report)
+        .iter()
+        .find(|h| h["file"] == "lib/a.rb")
+        .unwrap();
+    assert_eq!(hunk["category"], "code", "{report:#}");
+    assert_eq!(report["summary"]["verdict"], "behavior");
+}
+
+#[test]
+fn a_root_commit_against_its_parents_diffs_against_the_working_tree() {
+    let dir = repo(&[&[("a.rb", METHOD)], &[("b.rb", "x = 1\n")]]);
+    // git diffs a parentless R^! as R against the working tree.
+    write(dir.path(), &[("a.rb", &METHOD.replace("greet", "welcome"))]);
+    let caret = report(&shapr(dir.path(), &["-j", "HEAD~1^!"]));
+    let plain = report(&shapr(dir.path(), &["-j", "HEAD~1"]));
+    assert_eq!(caret["hunks"], plain["hunks"]);
+}

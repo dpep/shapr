@@ -99,8 +99,12 @@ impl Git {
     pub fn messages(&self, range: &str) -> Result<Vec<(String, String)>> {
         let commits = match range.split_once("...") {
             Some((from, to)) => format!("{from}..{to}"),
-            None if range.contains("..") || parent_range(range).is_some() => range.to_string(),
-            None => format!("{range}..HEAD"),
+            None => match self.parent_diff(range) {
+                Some((rev, None)) => format!("{rev}..HEAD"),
+                Some(_) => range.to_string(),
+                None if range.contains("..") => range.to_string(),
+                None => format!("{range}..HEAD"),
+            },
         };
         let out = run(self.command().args([
             "log",
@@ -114,6 +118,23 @@ impl Git {
             .filter_map(|entry| entry.trim_start().split_once('\0'))
             .map(|(id, message)| (id.to_string(), message.trim_end().to_string()))
             .collect())
+    }
+
+    /// What `R^!` or `R^-N`, git's shorthand for R against a parent, diffs:
+    /// from `R^N` to R, or from R to the working tree for a commit with no
+    /// parent, as git does.
+    fn parent_diff<'r>(&self, range: &'r str) -> Option<(String, Option<&'r str>)> {
+        let (rev, n) = match range.strip_suffix("^!") {
+            Some(rev) if self.parents(rev).ok()? == 0 => return Some((rev.to_string(), None)),
+            // A merge is refused in `diff`.
+            Some(rev) => (rev, ""),
+            None => {
+                let (rev, n) = range.rsplit_once("^-")?;
+                n.bytes().all(|b| b.is_ascii_digit()).then_some((rev, n))?
+            }
+        };
+        let n = if n.is_empty() { "1" } else { n };
+        Some((format!("{rev}^{n}"), Some(rev)))
     }
 
     /// How many parents commit REV has.
@@ -182,14 +203,15 @@ impl Git {
 
     /// The revision whose files the change ends in: B of `A..B` or `A...B`
     /// (HEAD when B is empty), a fetched GitHub change's head; `None` when
-    /// it ends in the working tree (one revision, or a diff on stdin).
+    /// it ends in the working tree (one revision, a parentless `R^!`, or a
+    /// diff on stdin).
     pub fn after_revision(&self, range: Option<&str>) -> Option<String> {
         if let Some(bare) = &self.bare {
             return Some(bare.attributes_from.clone());
         }
         let range = range?;
-        if let Some(rev) = parent_range(range) {
-            return Some(rev.to_string());
+        if let Some((_, after)) = self.parent_diff(range) {
+            return after.map(str::to_string);
         }
         let (_, to) = range.split_once("...").or_else(|| range.split_once(".."))?;
         Some(if to.is_empty() { "HEAD" } else { to }.to_string())
@@ -253,12 +275,13 @@ impl Git {
     }
 
     /// The revision a change starts from: A of `A..B` (HEAD when A is
-    /// empty), the merge base of `A...B`, R of a single revision or `R^!`;
+    /// empty), the merge base of `A...B`, R of a single revision, R's parent
+    /// of `R^!` or `R^-N`;
     /// `None` for a diff on stdin.
     pub fn before_revision(&self, range: Option<&str>) -> Option<String> {
         let range = range?;
-        if let Some(rev) = parent_range(range) {
-            return Some(format!("{rev}^"));
+        if let Some((before, _)) = self.parent_diff(range) {
+            return Some(before);
         }
         if let Some((from, to)) = range.split_once("...") {
             let side = |r: &str| if r.is_empty() { "HEAD" } else { r }.to_string();
@@ -562,15 +585,6 @@ const LINGUIST: [&str; 3] = [
     "linguist-vendored",
     "linguist-documentation",
 ];
-
-/// R of `R^!` or `R^-` (`R^-N`): git's shorthand for R against a parent.
-fn parent_range(range: &str) -> Option<&str> {
-    if let Some(rev) = range.strip_suffix("^!") {
-        return Some(rev);
-    }
-    let (rev, n) = range.rsplit_once("^-")?;
-    n.bytes().all(|b| b.is_ascii_digit()).then_some(rev)
-}
 
 /// Whether ID, a possibly abbreviated blob id from a diff (all zeros for no
 /// file), is PATH's blob in FILES.
