@@ -21,7 +21,7 @@ tests/fixtures/<area>/<case>/
 ```
 
 - `<area>` groups cases by what they exercise (`norms`, `soundness`, `repository`,
-  `parts`, `corpus`). A `case.json` anywhere else under `tests/` fails the
+  `parts`, `corpus`, `zoo`: author-labelled commits from two toy repos). A `case.json` anywhere else under `tests/` fails the
   run, so a case can't sit where the runner doesn't look.
 - `<case>` is a short descriptive name for a hand-written case. A case
   written by a tool is named by the first 12 hex digits of its [content
