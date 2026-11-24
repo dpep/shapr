@@ -132,14 +132,17 @@ pub(super) fn run(
             mine.sort_unstable();
             mine.dedup();
             let mine: Vec<&Pair> = mine.iter().map(|&p| &pairs[p]).collect();
-            let exact = mine.iter().all(|p| p.similarity == 1.0);
+            let changed_bodies = mine.iter().filter(|p| p.similarity < 1.0).count();
             let mut context: Vec<Context> = mine.iter().flat_map(|p| p.context.clone()).collect();
             context.sort_unstable();
             context.dedup();
-            let mut reason: String = if exact {
-                "declarations moved unchanged".into()
-            } else {
-                "declarations moved, and their bodies changed".into()
+            let mut reason: String = match changed_bodies {
+                0 => "declarations moved unchanged".into(),
+                n if n == mine.len() => "declarations moved, and their bodies changed".into(),
+                n => format!(
+                    "declarations moved, {n} of {} with a changed body",
+                    mine.len()
+                ),
             };
             if !context.is_empty() {
                 let why: Vec<&str> = context.iter().map(|c| c.reason()).collect();
