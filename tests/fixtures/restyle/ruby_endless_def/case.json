@@ -13,8 +13,8 @@
           "$some": {
             "detail": {
               "variants": [
-                "Style/DefWithParentheses",
-                "Style/EndlessMethod"
+                "Style/EndlessMethod",
+                "Style/SingleLineMethods"
               ]
             },
             "kind": "restyle",

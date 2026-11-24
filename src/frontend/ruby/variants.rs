@@ -32,6 +32,8 @@ pub const ONE_LINE_CONDITIONAL: &str = "Style/OneLineConditional";
 pub const WHILE_UNTIL_MODIFIER: &str = "Style/WhileUntilModifier";
 pub const DEF_PARENTHESES: &str = "Style/DefWithParentheses";
 pub const ENDLESS_METHOD: &str = "Style/EndlessMethod";
+pub const EMPTY_METHOD: &str = "Style/EmptyMethod";
+pub const SINGLE_LINE_METHODS: &str = "Style/SingleLineMethods";
 pub const SEMICOLON: &str = "Style/Semicolon";
 
 /// The enclosing prism node, as (kind, start offset).
@@ -208,9 +210,14 @@ pub(super) fn respell(
         return Some((WHILE_UNTIL_MODIFIER, Canonical::Syntax(form)));
     }
     if let Some(n) = node.as_def_node() {
-        let variant = match n.equal_loc() {
-            Some(_) => ENDLESS_METHOD,
-            None => DEF_PARENTHESES,
+        let variant = if n.equal_loc().is_some() {
+            ENDLESS_METHOD
+        } else if n.lparen_loc().is_some() && n.parameters().is_none() {
+            DEF_PARENTHESES
+        } else if n.body().is_none() {
+            EMPTY_METHOD
+        } else {
+            SINGLE_LINE_METHODS
         };
         return Some((variant, Canonical::Syntax(n.name().as_slice().to_vec())));
     }

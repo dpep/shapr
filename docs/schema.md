@@ -202,7 +202,7 @@ spellings:
 | `Style/BlockDelimiters` | `{ … }`, `do … end` attached to the same call | `puts foo(a) { }` vs `puts foo(a) do end` |
 | `Style/AndOr` | `and`, `&&`; `or`, `\|\|` where the parse is the same | `ok = a and b` vs `ok = a && b` |
 | `Style/IfUnlessModifier`, `Style/OneLineConditional`, `Style/WhileUntilModifier` | `x if c`, `if c then x end`, `if c; x; end`, `c ? a : b`; `x while c`, `while c do x end` | `begin x end while c` (do-while); `if !c` vs `unless c`; `c ? true : false` vs `c` |
-| `Style/DefWithParentheses`, `Style/EndlessMethod` | `def f()`, `def f`; `def f = x`, `def f; x; end` | |
+| `Style/DefWithParentheses`, `Style/EndlessMethod`, `Style/EmptyMethod`, `Style/SingleLineMethods` | `def f()`, `def f`; `def f = x`, `def f; x; end`, and either over several lines | |
 | `Style/Semicolon` | `a; b`, `a` and `b` on two lines | |
 
 Rust (tree-sitter), named by the rustfmt option or lint:
