@@ -1,0 +1,144 @@
+{
+  "description": "a directory's evidence is its state before the change: files the change adds don't count, and a file it edits counts as it was",
+  "norm": "Style/StringLiterals",
+  "expect": {
+    "hunks": [
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "inferred": "double_quotes",
+              "evidence": [
+                {
+                  "scope": "class",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "double_quotes": 10,
+                    "single_quotes": 0
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "inferred": "double_quotes",
+              "evidence": [
+                {
+                  "scope": "class",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "double_quotes": 10,
+                    "single_quotes": 0
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "inferred": "double_quotes",
+              "evidence": [
+                {
+                  "scope": "class",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "double_quotes": 10,
+                    "single_quotes": 0
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "style": {
+          "norms": [
+            {
+              "norm": "Style/StringLiterals",
+              "direction": "diverging",
+              "inferred": "double_quotes",
+              "evidence": [
+                {
+                  "scope": "class",
+                  "counts": {
+                    "double_quotes": 2,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "file",
+                  "counts": {
+                    "double_quotes": 0,
+                    "single_quotes": 0
+                  }
+                },
+                {
+                  "scope": "directory",
+                  "counts": {
+                    "double_quotes": 8,
+                    "single_quotes": 0
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -771,8 +771,10 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 
 The evidence is the unchanged code around the hunk, per scope from the
 nearest: the enclosing method, class and file, each counting only what lies
-outside the nearer scopes, then the directory's other files (up to 20 of the
-language). The scopes are pooled from the outside in: the outermost scope
+outside the nearer scopes, then the directory's other files (the first 20 of
+the language by path) as they were before the change: a file the change adds
+doesn't count and one it edits counts as it was, so a change never backs the
+norm it is judged by. A moved file is judged by its new directory. The scopes are pooled from the outside in: the outermost scope
 holding any observations starts from the rule of succession, `(n + 1) /
 (total + styles)`, and each nearer one shrinks its own share toward that,
 `(k + w × p) / (n + w)`, where `p` is the share so far and `w` the weight it
@@ -794,7 +796,7 @@ section globs matched against the file as editorconfig.org specifies).
 Where both set the same norm, `.rubocop.yml` wins: it is the Ruby-specific
 file. The table above says which settings configure each norm.
 
-Config and a file's neighbors are read as of the change's after side:
+Config, and the directory's files the change didn't touch, are read as of the change's after side:
 from the revision a range ends in (`B` of `A..B`; a GitHub change's head),
 or from the index or the working tree when the change ends there (one
 revision, or a diff on stdin as [Proof status](#proof-status) reads it; the

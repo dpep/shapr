@@ -166,7 +166,7 @@ pub fn styles(
     threshold: f64,
 ) -> Vec<Option<HunkStyle>> {
     let mut out = Vec::new();
-    let directory = Directory::default();
+    let directory = Directory::new(change);
     for file in &change.files {
         let hunks = &file.diff.hunks;
         match file_styles(file, snapshot, &directory, threshold) {
@@ -220,6 +220,7 @@ fn file_styles(
         .collect();
     let file = File {
         path,
+        old_path: file.diff.old_path.as_deref(),
         source: &trees.after.source,
         tree: &trees.after,
         before: &before,
@@ -257,28 +258,72 @@ fn file_styles(
 /// A directory's files of one language, each with its observations.
 type Neighbors = Vec<(String, Vec<Observation>)>;
 
-/// Each directory's files, read once per run however many changed files
-/// sit in it.
-#[derive(Default)]
-struct Directory(RefCell<HashMap<(&'static str, String), Rc<Neighbors>>>);
+/// Each directory's files as they were before the change, read once per run
+/// however many changed files sit in it: the change's own new code never
+/// backs the norm it is judged by.
+struct Directory<'a> {
+    read: RefCell<HashMap<(&'static str, String), Rc<Neighbors>>>,
+    /// The paths the change's files have after it.
+    after: Vec<&'a str>,
+    /// The change's files that existed before it, by their old path, with
+    /// their content then (`None` when it wasn't read).
+    before: HashMap<&'a str, Option<&'a [u8]>>,
+}
 
-impl Directory {
-    /// The first files of `path`'s directory, enough for `NEIGHBORS` besides
-    /// `path` itself.
+impl<'a> Directory<'a> {
+    fn new(change: &'a Change) -> Self {
+        let mut before = HashMap::new();
+        let mut after = Vec::new();
+        for file in &change.files {
+            after.extend(file.diff.new_path.as_deref());
+            if let Some(old) = file.diff.old_path.as_deref() {
+                let source = file.trees.as_ref().ok().map(|t| &t.before.source[..]);
+                before.insert(old, source);
+            }
+        }
+        Directory {
+            read: RefCell::default(),
+            after,
+            before,
+        }
+    }
+
+    /// The first files of `path`'s directory before the change, enough for
+    /// `NEIGHBORS` besides the file itself.
     fn read(&self, language: &dyn Language, snapshot: &dyn Snapshot, path: &str) -> Rc<Neighbors> {
         let dir = parent(path).to_string();
         let key = (language.name(), dir.clone());
-        if let Some(found) = self.0.borrow().get(&key) {
+        if let Some(found) = self.read.borrow().get(&key) {
             return found.clone();
         }
-        let files: Vec<String> = snapshot
+        // The snapshot is the after side: take out what the change put there
+        // and put back what it moved or deleted away.
+        let mut files: Vec<String> = snapshot
             .list(&dir)
             .into_iter()
+            .filter(|p| !self.after.contains(&p.as_str()))
+            .chain(
+                (self.before.keys())
+                    .filter(|p| parent(p) == dir)
+                    .map(|p| p.to_string()),
+            )
             .filter(|p| language.handles(p))
-            .take(NEIGHBORS + 1)
             .collect();
+        files.sort();
+        files.dedup();
+        files.truncate(NEIGHBORS + 1);
         crate::verbose!("{dir}/: reading {} file(s) for its norms", files.len());
-        let sources = snapshot.read_all(&files);
+        let unchanged: Vec<String> = (files.iter())
+            .filter(|p| !self.before.contains_key(p.as_str()))
+            .cloned()
+            .collect();
+        let mut read_back = snapshot.read_all(&unchanged).into_iter();
+        let sources: Vec<Option<Vec<u8>>> = (files.iter())
+            .map(|p| match self.before.get(p.as_str()) {
+                Some(source) => source.map(<[u8]>::to_vec),
+                None => read_back.next().flatten(),
+            })
+            .collect();
         let read: Neighbors = files
             .into_iter()
             .zip(sources)
@@ -287,7 +332,7 @@ impl Directory {
             .map(|(a, p)| (p, a.observations))
             .collect();
         let read = Rc::new(read);
-        self.0.borrow_mut().insert(key, read.clone());
+        self.read.borrow_mut().insert(key, read.clone());
         read
     }
 }
@@ -335,6 +380,8 @@ fn chain(analysis: &Analysis, (first, last): (usize, usize)) -> Vec<(ScopeKind, 
 
 struct File<'a> {
     path: &'a str,
+    /// Where the file was before the change, which isn't its own neighbor.
+    old_path: Option<&'a str>,
     source: &'a [u8],
     /// The after side, which a suggested edit must keep the same program.
     tree: &'a Tree,
@@ -491,7 +538,7 @@ impl File<'_> {
         }
         if let Some(neighbors) = &self.neighbors {
             let observations = (neighbors.iter())
-                .filter(|(p, _)| p != self.path)
+                .filter(|(p, _)| p != self.path && Some(p.as_str()) != self.old_path)
                 .take(NEIGHBORS)
                 .flat_map(|(_, observations)| observations)
                 .filter(|o| o.norm == def.id);
