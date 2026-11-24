@@ -552,6 +552,7 @@ Ruby's norms, named by the RuboCop cop whose setting configures them:
 |---|---|---|
 | `Style/StringLiterals` | `single_quotes`, `double_quotes` | each quoted string that could take either quote with the same value, as RuboCop counts them |
 | `Layout/SpaceInsideHashLiteralBraces` | `space`, `no_space` | each non-empty hash literal with spaces inside both braces or neither; a brace beside a line break chooses nothing (RuboCop's `compact` reads as `space`) |
+| `Style/TrailingCommaInArrayLiteral`, `Style/TrailingCommaInHashLiteral` | `comma`, `no_comma` | each multiline `[]` or `{}` literal with every item on its own line, after the bracket's line, and the closing bracket on a line of its own (where RuboCop's `comma`, `consistent_comma` and `diff_comma` all read as `comma`); a heredoc body before the bracket chooses nothing |
 
 A style is a scope's norm when its share, as `(n + 1) / (total + styles)`, is
 at least `--norm-threshold` (default 0.8): three of three backs a norm, two of

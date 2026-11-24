@@ -2,6 +2,7 @@
 //! norm is a module with `NORM`, `STYLES` and a `see` the walk calls per node.
 
 mod braces;
+mod commas;
 mod config;
 mod strings;
 
@@ -21,10 +22,23 @@ static NORMS: &[NormDef] = &[
         id: braces::NORM,
         styles: braces::STYLES,
     },
+    NormDef {
+        id: commas::ARRAY,
+        styles: commas::STYLES,
+    },
+    NormDef {
+        id: commas::HASH,
+        styles: commas::STYLES,
+    },
 ];
 
 /// Per-node observers.
-static OBSERVERS: &[fn(&mut Walker, &Node)] = &[strings::see, braces::see];
+static OBSERVERS: &[fn(&mut Walker, &Node)] = &[
+    strings::see,
+    braces::see,
+    commas::see_array,
+    commas::see_hash,
+];
 
 /// A norm's RuboCop setting, and the styles its values map to: a value
 /// not listed sets no style.
@@ -53,6 +67,25 @@ static SETTINGS: &[Setting] = &[
             ("compact", "space"),
         ],
     },
+    Setting {
+        norm: commas::ARRAY,
+        key: "EnforcedStyleForMultiline",
+        values: COMMA_VALUES,
+    },
+    Setting {
+        norm: commas::HASH,
+        key: "EnforcedStyleForMultiline",
+        values: COMMA_VALUES,
+    },
+];
+
+/// Every comma style wants one where commas are observed: each item on its
+/// own line.
+const COMMA_VALUES: &[(&str, &str)] = &[
+    ("comma", "comma"),
+    ("consistent_comma", "comma"),
+    ("diff_comma", "comma"),
+    ("no_comma", "no_comma"),
 ];
 
 impl Language for Ruby {
