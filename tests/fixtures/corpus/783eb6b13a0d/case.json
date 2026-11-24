@@ -1,0 +1,44 @@
+{
+  "description": "flipper: rescue widened",
+  "source": {
+    "repo": "https://github.com/flippercloud/flipper",
+    "commit": "d3d766d7dfd23d2b9aed0d321245cf7626c317db",
+    "file": "lib/flipper/api/v1/actions/expression_gate.rb",
+    "before": {
+      "start": 21,
+      "count": 1
+    },
+    "after": {
+      "start": 21,
+      "count": 1
+    },
+    "lines": {
+      "start": 13,
+      "count": 12
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "rescue widened",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "error_handling"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "description": "trekr: early continue on new condition",
+  "source": {
+    "repo": "https://github.com/dpep/trekr",
+    "commit": "79c54c68e2999ef6420ec0527a87c68ffd91b842",
+    "file": "src/cli/built.rs",
+    "before": {
+      "start": 210,
+      "count": 0
+    },
+    "after": {
+      "start": 212,
+      "count": 3
+    },
+    "lines": {
+      "start": 203,
+      "count": 16
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "early continue on new condition",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "condition"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

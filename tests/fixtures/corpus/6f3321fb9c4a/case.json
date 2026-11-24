@@ -1,0 +1,42 @@
+{
+  "description": "flipper: rules set replaced by rule nil",
+  "source": {
+    "repo": "https://github.com/flippercloud/flipper",
+    "commit": "fa4ba5924ff6b294939d29c0cdde068d297d283c",
+    "file": "lib/flipper/adapters/rollout.rb",
+    "before": {
+      "start": 56,
+      "count": 1
+    },
+    "after": {
+      "start": 56,
+      "count": 1
+    },
+    "lines": {
+      "start": 50,
+      "count": 8
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "rules set replaced by rule nil",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

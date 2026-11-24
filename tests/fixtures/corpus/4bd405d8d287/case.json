@@ -1,0 +1,42 @@
+{
+  "description": "graphql: bug fix: symbol to constant",
+  "source": {
+    "repo": "https://github.com/rmosolgo/graphql-ruby",
+    "commit": "62b2c77f1de47dddbe9c4e7011a80b41c490a760",
+    "file": "lib/graphql/analysis/visitor.rb",
+    "before": {
+      "start": 28,
+      "count": 1
+    },
+    "after": {
+      "start": 28,
+      "count": 1
+    },
+    "lines": {
+      "start": 28,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "bug fix: symbol to constant",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

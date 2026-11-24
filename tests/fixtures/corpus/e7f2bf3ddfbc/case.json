@@ -1,0 +1,44 @@
+{
+  "description": "trekr: call adapts to changed return type (as_str dropped)",
+  "source": {
+    "repo": "https://github.com/dpep/trekr",
+    "commit": "5907fd3b307d5e89ef345636efab73b83467a80e",
+    "file": "src/extract/mod.rs",
+    "before": {
+      "start": 7010,
+      "count": 1
+    },
+    "after": {
+      "start": 7012,
+      "count": 1
+    },
+    "lines": {
+      "start": 7000,
+      "count": 15
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "call adapts to changed return type (as_str dropped)",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "condition"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

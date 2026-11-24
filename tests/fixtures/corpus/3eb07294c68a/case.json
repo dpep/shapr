@@ -1,0 +1,44 @@
+{
+  "description": "graphql: default connection extension resolved",
+  "source": {
+    "repo": "https://github.com/rmosolgo/graphql-ruby",
+    "commit": "f58d55f2eec0ec1e575a8a592a8e773a4b34e1bb",
+    "file": "lib/graphql/schema/field.rb",
+    "before": {
+      "start": 350,
+      "count": 1
+    },
+    "after": {
+      "start": 355,
+      "count": 1
+    },
+    "lines": {
+      "start": 350,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "default connection extension resolved",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "condition"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

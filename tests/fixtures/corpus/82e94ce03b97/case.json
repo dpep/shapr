@@ -1,0 +1,44 @@
+{
+  "description": "faraday: double to single quotes in assertion",
+  "source": {
+    "repo": "https://github.com/lostisland/faraday",
+    "commit": "d18cc04be5c179b1b22b9dd1004030dd43b0ca58",
+    "file": "test/connection_test.rb",
+    "before": {
+      "start": 633,
+      "count": 1
+    },
+    "after": {
+      "start": 650,
+      "count": 1
+    },
+    "lines": {
+      "start": 633,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "style",
+    "note": "double to single quotes in assertion",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "test",
+        "literal_only"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

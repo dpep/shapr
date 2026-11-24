@@ -1,0 +1,41 @@
+{
+  "description": "rq: explaining-constant: literal 3000 replaced by BUSY_WAIT (catalog #19)",
+  "source": {
+    "repo": "https://github.com/dpep/rq",
+    "commit": "ddfe44795284228a42edd0cac1a33f5f4bcf2f64",
+    "file": "src/store/mod.rs",
+    "before": {
+      "start": 292,
+      "count": 1
+    },
+    "after": {
+      "start": 297,
+      "count": 1
+    },
+    "lines": {
+      "start": 292,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "other",
+    "note": "explaining-constant: literal 3000 replaced by BUSY_WAIT (catalog #19)",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

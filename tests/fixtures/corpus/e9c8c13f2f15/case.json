@@ -1,0 +1,41 @@
+{
+  "description": "faraday: brace block to do...end",
+  "source": {
+    "repo": "https://github.com/lostisland/faraday",
+    "commit": "f46a17573da666eaaeeefb518b0c270d4fe8327b",
+    "file": "lib/faraday/connection.rb",
+    "before": {
+      "start": 369,
+      "count": 5
+    },
+    "after": {
+      "start": 369,
+      "count": 5
+    },
+    "lines": {
+      "start": 369,
+      "count": 5
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "style",
+    "note": "brace block to do...end",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

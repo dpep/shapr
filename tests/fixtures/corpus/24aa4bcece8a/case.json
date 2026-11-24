@@ -1,0 +1,42 @@
+{
+  "description": "graphql: different call",
+  "source": {
+    "repo": "https://github.com/rmosolgo/graphql-ruby",
+    "commit": "e2eff74a913e30f0803f272fc0a89a06718c0ab2",
+    "file": "lib/graphql/execution/next/runner.rb",
+    "before": {
+      "start": 187,
+      "count": 1
+    },
+    "after": {
+      "start": 187,
+      "count": 1
+    },
+    "lines": {
+      "start": 187,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "different call",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

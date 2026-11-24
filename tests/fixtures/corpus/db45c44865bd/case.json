@@ -1,0 +1,44 @@
+{
+  "description": "rq: match narrowed",
+  "source": {
+    "repo": "https://github.com/dpep/rq",
+    "commit": "97fd742ba39e38baa1b511f5f481e12df45701b7",
+    "file": "src/cli/mod.rs",
+    "before": {
+      "start": 743,
+      "count": 1
+    },
+    "after": {
+      "start": 743,
+      "count": 1
+    },
+    "lines": {
+      "start": 733,
+      "count": 16
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "match narrowed",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "condition"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

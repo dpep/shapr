@@ -1,0 +1,42 @@
+{
+  "description": "faraday: kwargs forwarded",
+  "source": {
+    "repo": "https://github.com/lostisland/faraday",
+    "commit": "1551c32371b42acd22c3d8c87bcbd19872624d5a",
+    "file": "lib/faraday/rack_builder.rb",
+    "before": {
+      "start": 56,
+      "count": 1
+    },
+    "after": {
+      "start": 57,
+      "count": 1
+    },
+    "lines": {
+      "start": 56,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "kwargs forwarded",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

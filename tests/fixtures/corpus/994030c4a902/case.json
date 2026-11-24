@@ -1,0 +1,42 @@
+{
+  "description": "faraday: merge replaced by deep_merge",
+  "source": {
+    "repo": "https://github.com/lostisland/faraday",
+    "commit": "746ab737b5d5bf3bcd28f377044f7bec03f8286d",
+    "file": "lib/faraday/connection.rb",
+    "before": {
+      "start": 67,
+      "count": 1
+    },
+    "after": {
+      "start": 67,
+      "count": 1
+    },
+    "lines": {
+      "start": 67,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "merge replaced by deep_merge",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

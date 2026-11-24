@@ -1,0 +1,41 @@
+{
+  "description": "rq: visibility narrowed pub to pub(crate)",
+  "source": {
+    "repo": "https://github.com/dpep/rq",
+    "commit": "40b2a7b615de94a3ff6bfa33ba891b6676d38f6c",
+    "file": "src/search/score.rs",
+    "before": {
+      "start": 61,
+      "count": 1
+    },
+    "after": {
+      "start": 61,
+      "count": 1
+    },
+    "lines": {
+      "start": 61,
+      "count": 9
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "other",
+    "note": "visibility narrowed pub to pub(crate)",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

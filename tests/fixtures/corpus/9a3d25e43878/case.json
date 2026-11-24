@@ -1,0 +1,45 @@
+{
+  "description": "rq: assertion form changed with exit code type",
+  "source": {
+    "repo": "https://github.com/dpep/rq",
+    "commit": "ef82782fdaeacec26fc6a2e43bd1bd23867ad499",
+    "file": "tests/checkouts.rs",
+    "before": {
+      "start": 352,
+      "count": 1
+    },
+    "after": {
+      "start": 318,
+      "count": 1
+    },
+    "lines": {
+      "start": 352,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "test_only",
+    "note": "assertion form changed with exit code type",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "test",
+        "signature"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

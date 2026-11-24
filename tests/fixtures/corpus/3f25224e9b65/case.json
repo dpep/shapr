@@ -1,0 +1,44 @@
+{
+  "description": "rq: candidate limit raised",
+  "source": {
+    "repo": "https://github.com/dpep/rq",
+    "commit": "b4c1cd2b87e852cf3373fdf3cbdbef889b5ab122",
+    "file": "src/search/mod.rs",
+    "before": {
+      "start": 18,
+      "count": 2
+    },
+    "after": {
+      "start": 18,
+      "count": 5
+    },
+    "lines": {
+      "start": 18,
+      "count": 2
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "candidate limit raised",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "literal_only"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "description": "faraday: param renamed and a different formatter method called",
+  "source": {
+    "repo": "https://github.com/lostisland/faraday",
+    "commit": "c02a104469bf6209ece5f8b28e1b5a5c21771251",
+    "file": "lib/faraday/response/logger.rb",
+    "before": {
+      "start": 30,
+      "count": 2
+    },
+    "after": {
+      "start": 30,
+      "count": 2
+    },
+    "lines": {
+      "start": 12,
+      "count": 22
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "param renamed and a different formatter method called",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "signature",
+        "condition"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

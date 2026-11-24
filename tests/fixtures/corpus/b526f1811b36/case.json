@@ -1,0 +1,44 @@
+{
+  "description": "flipper: test calls build instead of wrap",
+  "source": {
+    "repo": "https://github.com/flippercloud/flipper",
+    "commit": "03e4268e355f8d3910ab4fec23c03afff7769380",
+    "file": "spec/flipper/rules/object_spec.rb",
+    "before": {
+      "start": 7,
+      "count": 1
+    },
+    "after": {
+      "start": 7,
+      "count": 1
+    },
+    "lines": {
+      "start": 7,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "test_only",
+    "note": "test calls build instead of wrap",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "test"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "description": "graphql: ivar read replaced by argument",
+  "source": {
+    "repo": "https://github.com/rmosolgo/graphql-ruby",
+    "commit": "402e396106e297fcc78c882c2a81a7c2674fbd93",
+    "file": "lib/graphql/dataloader/async_dataloader.rb",
+    "before": {
+      "start": 298,
+      "count": 1
+    },
+    "after": {
+      "start": 298,
+      "count": 1
+    },
+    "lines": {
+      "start": 296,
+      "count": 25
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "behavior",
+    "note": "ivar read replaced by argument",
+    "tool": {
+      "kind": "logic",
+      "facets": [],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}

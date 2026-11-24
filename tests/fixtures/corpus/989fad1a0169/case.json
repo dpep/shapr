@@ -1,0 +1,44 @@
+{
+  "description": "faraday: and to &&",
+  "source": {
+    "repo": "https://github.com/lostisland/faraday",
+    "commit": "fd7dbc709b0321a091e20eea0ce5d7c58f7945b4",
+    "file": "test/helper.rb",
+    "before": {
+      "start": 39,
+      "count": 1
+    },
+    "after": {
+      "start": 39,
+      "count": 1
+    },
+    "lines": {
+      "start": 39,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "style",
+    "note": "and to &&",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "test",
+        "condition"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior"
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "description": "flipper: test ivar and gate renamed",
+  "source": {
+    "repo": "https://github.com/flippercloud/flipper",
+    "commit": "538b6367468a82fd9927f371ff53dfe88f11cf33",
+    "file": "lib/flipper/test/shared_adapter_test.rb",
+    "before": {
+      "start": 10,
+      "count": 1
+    },
+    "after": {
+      "start": 10,
+      "count": 1
+    },
+    "lines": {
+      "start": 10,
+      "count": 1
+    },
+    "license": "MIT"
+  },
+  "label": {
+    "labeller": "llm",
+    "by": "claude",
+    "date": "2026-11-23",
+    "category": "test_only",
+    "note": "test ivar and gate renamed",
+    "tool": {
+      "kind": "logic",
+      "facets": [
+        "test"
+      ],
+      "near": null
+    }
+  },
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    ]
+  }
+}
