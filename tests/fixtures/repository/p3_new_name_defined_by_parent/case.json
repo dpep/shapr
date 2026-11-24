@@ -1,0 +1,7 @@
+{
+  "description": "a method renamed onto a name an unchanged file defines (a parent's method it now overrides) is not a rename",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

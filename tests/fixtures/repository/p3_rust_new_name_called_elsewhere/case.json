@@ -1,0 +1,7 @@
+{
+  "description": "a Rust method renamed onto a name an unchanged file calls captures that call (an inherent method wins over a trait's), so it is not a rename",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

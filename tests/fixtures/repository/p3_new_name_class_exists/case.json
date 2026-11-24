@@ -1,0 +1,7 @@
+{
+  "description": "a class renamed onto a class an unchanged file defines reopens it, so it is not a rename",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

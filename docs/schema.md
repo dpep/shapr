@@ -143,13 +143,13 @@ unchecked: its `assumptions` are empty. An operation that reaches code
 outside the change (a renamed method's callers, the name an extract adds or
 an inline removes) is checked against the repository at the after revision
 (the range's end, the fetched head of a GitHub change, or the working tree
-when the change ends there; for a diff on stdin, see below): shapr searches its files for the old name as a
-whole word (`git grep -w`), then parses each file found and applies the same
+when the change ends there; for a diff on stdin, see below): shapr searches its files for the old name (and a
+rename's new name) as a whole word (`git grep -w`), then parses each file found and applies the same
 rule as to the files in the change (a use, a dynamic reference, a plain
 literal such as `:old`), so the word in a comment or a sentence doesn't
 count; a file it can't parse cleanly (a template) counts. A file outside the
-change that still uses the name makes the operation `logic`, and the
-residual's `reason` names the file.
+change that still uses the name (for a rename's new name, that mentions it
+at all) makes the operation `logic`, and the residual's `reason` names the file.
 What the search can't settle stays on the part:
 
 | assumption | meaning |
@@ -329,7 +329,12 @@ every name that differs passes these checks:
   renamed one: new code defining it too (a second `def new` in another
   class, a new `let new`) would share the name with the renamed code.
 - For a method, constant or field, no file outside the change holds the
-  old name at the after revision ([Proof status](#proof-status)).
+  old name or the new name at the after revision ([Proof status](#proof-status)):
+  an unchanged file mentioning the new name (a parent's method it would now
+  override, a subclass's instance variable, a call to another method of
+  that name, a class it would reopen) binds to the renamed code. Common
+  names (`len`, `save`, `last`) are often held elsewhere, so their renames
+  stay `logic`.
 
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
 class or module; a `field` in its file when it is a Ruby instance or class
@@ -352,7 +357,7 @@ parsed file of the change.
 |---|---|---|
 | `renamed` | int | Sum of the part's renames' `occurrences`. |
 | `uses` | int | Uses of the old names shapr saw in their scopes before the change. More than `renamed` when another hunk deleted some. |
-| `searched` | int or null | Files the repository search read for uses of the old names outside the change (see [Proof status](#proof-status)); `null` when no name can be used outside its scope (locals), or no search ran. |
+| `searched` | int or null | Files the repository search read for uses of the old and new names outside the change (see [Proof status](#proof-status)); `null` when no name can be used outside its scope (locals), or no search ran. |
 
 `confidence` is the weakest rename's score. A local's is `renamed / uses`.
 Where uses can be unseen, the unseen ones are smoothed in as one unknown

@@ -572,7 +572,8 @@ fn holds(
 }
 
 /// For a name code outside the change can reach: fails when a file outside
-/// the change still uses the old name at the after revision; otherwise what
+/// the change still uses the old name at the after revision, or already
+/// mentions the new one; otherwise what
 /// stays assumed (a search that couldn't run, a library's public surface)
 /// and how many files were searched.
 fn reach(
@@ -613,24 +614,26 @@ fn reach(
     };
     // A method's callers may spell it without its suffix (`x.name = 1`).
     let suffixes = before(home).semantics.spelling.suffixes;
-    let word = match scope {
-        Scope::Method => pair.from.trim_end_matches(|c| suffixes.contains(&c)),
-        _ => pair.from.as_str(),
+    let word = |name: &'_ str| match scope {
+        Scope::Method => name.trim_end_matches(|c| suffixes.contains(&c)).to_string(),
+        _ => name.to_string(),
     };
-    let mut searched = None;
-    let still_uses = |tree: &Tree| conflicts(tree, Tree::ROOT, scope, &pair.from);
-    match proof::verify(outside, file(home).diff.path(), word, &covered, &still_uses) {
-        Verified::Used(files) => {
-            return Err(format!(
-                "{} is still used in {}",
-                pair.from,
-                proof::listing(&files)
-            ));
+    let mut searched: Option<usize> = None;
+    // The new name is held to the old one's rule: an unchanged file mentioning
+    // it (a parent's def, a subclass's ivar, a call) would now bind to the
+    // renamed code, or already bound elsewhere.
+    for (name, found) in [(&pair.from, "is still used"), (&pair.to, "is already used")] {
+        let mentions = |tree: &Tree| conflicts(tree, Tree::ROOT, scope, name);
+        let path = file(home).diff.path();
+        match proof::verify(outside, path, &word(name), &covered, &mentions) {
+            Verified::Used(files) => {
+                return Err(format!("{name} {found} in {}", proof::listing(&files)));
+            }
+            Verified::Open(assumption) => {
+                assumptions.insert(assumption);
+            }
+            Verified::Clear { searched: n } => searched = Some(searched.unwrap_or(0).max(n)),
         }
-        Verified::Open(assumption) => {
-            assumptions.insert(assumption);
-        }
-        Verified::Clear { searched: n } => searched = Some(n),
     }
     // A field (`@x`) is never another package's to call.
     let public = scope != Scope::Field

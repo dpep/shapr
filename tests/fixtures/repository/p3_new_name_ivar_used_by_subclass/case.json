@@ -1,0 +1,7 @@
+{
+  "description": "an instance variable renamed onto one an unchanged subclass's file uses is not a rename: both now share it",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}
