@@ -17,7 +17,8 @@ pub fn verbose() -> bool {
 macro_rules! verbose {
     ($($arg:tt)*) => {
         if $crate::log::verbose() {
-            eprintln!("shapr: {}", format_args!($($arg)*));
+            // Paths and PR titles are untrusted: escape control characters.
+            eprintln!("shapr: {}", $crate::report::escape(&format!($($arg)*)));
         }
     };
 }

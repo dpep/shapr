@@ -333,7 +333,16 @@ fn render(
             }
             line(&report.summary)
         }
-        Format::Text => text(out, report, paths, top),
+        Format::Text => {
+            // Every line goes through report::emit, which escapes control
+            // characters from file names (as classify's text output does).
+            let mut buffer = Vec::new();
+            text(&mut buffer, report, paths, top)?;
+            for line in String::from_utf8_lossy(&buffer).lines() {
+                crate::report::emit(out, line)?;
+            }
+            Ok(())
+        }
     }
 }
 

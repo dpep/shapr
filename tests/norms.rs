@@ -669,3 +669,13 @@ fn a_config_file_past_the_size_cap_is_named_not_read() {
         assert_eq!(norm(&report, id)["configured"], Value::Null, "{id}");
     }
 }
+
+#[test]
+fn norms_text_escapes_control_characters_in_names() {
+    let name = "lib/a\u{1b}[31m.rb";
+    let body: String = (0..12).map(|i| format!("v{i} = 'a'\n")).collect::<String>() + "w = \"d\"\n";
+    let dir = repo(&[&[(name, body.as_str())]]);
+    let text = String::from_utf8(shapr(dir.path(), &["norms", "lib"]).stdout).unwrap();
+    assert!(!text.contains('\u{1b}'), "raw escape in: {text:?}");
+    assert!(text.contains(r"\033"), "{text}");
+}

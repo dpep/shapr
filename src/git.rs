@@ -1231,8 +1231,6 @@ mod tests {
     /// Every git shapr runs is built by `command()`. Test code may spawn its own.
     #[test]
     fn every_git_starts_from_command() {
-        // The norms lane moves its `ls-files` onto `command()`.
-        let pending = ["src/norms/codebase.rs"];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut dirs = vec![root.join("src")];
         let mut offenders = Vec::new();
@@ -1251,9 +1249,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned();
                 let allowed = usize::from(name == "src/git.rs");
-                if code.matches("Command::new(\"git\")").count() > allowed
-                    && !pending.contains(&name.as_str())
-                {
+                if code.matches("Command::new(\"git\")").count() > allowed {
                     offenders.push(name);
                 }
             }
