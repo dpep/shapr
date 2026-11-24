@@ -1,0 +1,17 @@
+{
+  "description": "an item macro and a fn swapped inside an impl, the fn the aligned element that moved: the macro may expand by order, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

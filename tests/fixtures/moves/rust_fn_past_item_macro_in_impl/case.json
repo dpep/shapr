@@ -1,0 +1,17 @@
+{
+  "description": "a fn moved past an item macro inside an impl: the macro may expand by order, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": {
+        "$not": "structure"
+      }
+    }
+  }
+}

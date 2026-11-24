@@ -1238,6 +1238,7 @@ impl<'t> Needs<'t> {
         let other_method = tree.node(other).role == Role::Definition(NameKind::Method);
         ((self.runs_now || semantics.definitions_run) && !inert(tree, other))
             || (hook(theirs) && !self.runs_now)
+            || expands(tree, other)
             || (hook(self.declared) && other_method)
             || self.declared.is_some_and(|d| {
                 theirs == Some(d) || mentions(tree, other).iter().any(|m| spells(m, d))
@@ -1265,6 +1266,16 @@ fn inert(tree: &Tree, node: NodeId) -> bool {
         Role::Visibility(_) => n.children.iter().all(|&c| tree.node(c).comment),
         role => role.is_declaration(),
     }
+}
+
+/// A macro invocation, or an item an attribute macro rewrites: it may
+/// expand to anything, depending on what is beside it.
+fn expands(tree: &Tree, node: NodeId) -> bool {
+    let n = tree.node(node);
+    matches!(
+        n.role,
+        Role::Reference(NameKind::Macro) | Role::Hazard(Hazard::Macro)
+    ) || n.flags.contains(Flags::SPELLS)
 }
 
 /// The macro a sibling defines (`macro_rules!`): an invocation resolves to
