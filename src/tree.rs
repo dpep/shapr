@@ -176,6 +176,8 @@ pub struct Tree {
     /// Spans the parser reported as syntax errors.
     pub errors: Vec<Span>,
     pub semantics: Semantics,
+    /// Separators the language ignores, sorted: hashed like whitespace.
+    ignored: Vec<Span>,
     line_starts: Vec<usize>,
     lines: Vec<LineFacts>,
 }
@@ -296,6 +298,7 @@ pub struct TreeBuilder {
     comments: Vec<(Span, bool)>,
     errors: Vec<Span>,
     semantics: Semantics,
+    ignored: Vec<Span>,
 }
 
 impl TreeBuilder {
@@ -310,6 +313,7 @@ impl TreeBuilder {
             comments: Vec::new(),
             errors: Vec::new(),
             semantics: Semantics::default(),
+            ignored: Vec::new(),
         };
         builder.push("root", 0..len, None, Role::Other, false);
         builder.stack.push(Tree::ROOT);
@@ -350,6 +354,13 @@ impl TreeBuilder {
 
     pub fn error(&mut self, span: Span) {
         self.errors.push(span);
+    }
+
+    /// A separator whose presence never changes the parse, such as Rust's
+    /// trailing comma before a closing bracket: hashed like whitespace, so
+    /// adding or dropping one is a format change.
+    pub fn ignore(&mut self, span: Span) {
+        self.ignored.push(span);
     }
 
     pub fn semantics(&mut self, semantics: Semantics) {
@@ -405,6 +416,10 @@ impl TreeBuilder {
             nodes: self.nodes,
             errors: self.errors,
             semantics: self.semantics,
+            ignored: {
+                self.ignored.sort_by_key(|s| s.start);
+                self.ignored
+            },
         };
         for i in (0..tree.nodes.len()).rev() {
             tree.nodes[i].hash = hash(&tree, i, self.leaf[i]);
@@ -467,7 +482,7 @@ fn hash(tree: &Tree, i: usize, leaf: bool) -> u64 {
     let mut cursor = own.start;
     for &child in &node.children {
         let c = &tree.nodes[child.0 as usize];
-        hash_text(&tree.source, cursor..c.extent.start.min(own.end), &mut h);
+        hash_text(tree, cursor..c.extent.start.min(own.end), &mut h);
         cursor = cursor.max(c.extent.end);
         if !c.comment {
             // Marks where a child sits, so text cannot slide across it.
@@ -475,13 +490,21 @@ fn hash(tree: &Tree, i: usize, leaf: bool) -> u64 {
             c.hash.hash(&mut h);
         }
     }
-    hash_text(&tree.source, cursor..own.end, &mut h);
+    hash_text(tree, cursor..own.end, &mut h);
     h.finish()
 }
 
-fn hash_text(source: &[u8], span: Span, h: &mut DefaultHasher) {
-    if span.start < span.end {
-        for &b in source[span].iter().filter(|b| !b.is_ascii_whitespace()) {
+fn hash_text(tree: &Tree, span: Span, h: &mut DefaultHasher) {
+    if span.start >= span.end {
+        return;
+    }
+    let ignored = |at: usize| {
+        let i = tree.ignored.partition_point(|s| s.end <= at);
+        tree.ignored.get(i).is_some_and(|s| s.contains(&at))
+    };
+    for at in span {
+        let b = tree.source[at];
+        if !b.is_ascii_whitespace() && !ignored(at) {
             h.write_u8(b);
         }
     }
@@ -564,6 +587,22 @@ mod tests {
     #[test]
     fn own_text_moves_the_hash() {
         assert_ne!(call(&build("a + z", None)), call(&build("a - z", None)));
+    }
+
+    #[test]
+    fn ignored_separators_hash_like_whitespace() {
+        let tree = |s: &str, ignore: Option<usize>| {
+            let mut b = TreeBuilder::new(s.as_bytes().to_vec());
+            b.open("call", 0..s.len(), None, Role::Other);
+            b.leaf("ident", 2..3, Some(b"a"), Role::Other);
+            if let Some(at) = ignore {
+                b.ignore(at..at + 1);
+            }
+            b.close();
+            b.finish()
+        };
+        assert_eq!(call(&tree("f(a,)", Some(3))), call(&tree("f(a )", None)));
+        assert_ne!(call(&tree("f(a,)", None)), call(&tree("f(a )", None)));
     }
 
     #[test]

@@ -74,6 +74,22 @@ fn kind(n: &Node<'_>) -> &'static str {
         .unwrap_or("unknown")
 }
 
+/// Whether a comma before `rest` (its later siblings) is a trailing one,
+/// which never changes the parse: one before a closing bracket, or ending a
+/// match arm. A one-element tuple's comma makes it a tuple, so it counts.
+fn trailing(parent: &Node<'_>, rest: &[(Option<&str>, Node<'_>)]) -> bool {
+    let next = rest.iter().map(|(_, c)| c).find(|c| !is_comment(c));
+    let closes = match next {
+        Some(c) => !c.is_named() && matches!(c.kind(), ")" | "]" | "}" | ">" | "|"),
+        None => parent.kind() == "match_arm",
+    };
+    let tuple = matches!(
+        parent.kind(),
+        "tuple_expression" | "tuple_pattern" | "tuple_type"
+    );
+    closes && !(tuple && parent.named_child_count() == 1)
+}
+
 fn is_comment(n: &Node<'_>) -> bool {
     matches!(n.kind(), "line_comment" | "block_comment")
 }
@@ -116,7 +132,7 @@ impl<'a> Walker<'a> {
             .enumerate()
             .map(|(i, c)| (n.field_name_for_child(i as u32), c))
             .collect();
-        for (field, child) in kids {
+        for (i, &(field, child)) in kids.iter().enumerate() {
             if is_comment(&child) {
                 self.b.comment(span(&child));
                 continue;
@@ -132,6 +148,8 @@ impl<'a> Walker<'a> {
             if !child.is_named() && !child.is_error() {
                 if chosen == Plan::Emit(Mode::Tokens) {
                     self.token(child);
+                } else if child.kind() == "," && trailing(&n, &kids[i + 1..]) {
+                    self.b.ignore(span(&child));
                 }
                 continue;
             }

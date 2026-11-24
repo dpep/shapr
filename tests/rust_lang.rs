@@ -356,3 +356,27 @@ fn a_function_moved_between_same_named_cfg_modules_is_logic() {
     let report = change(&before, &after);
     assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report:#}");
 }
+
+#[test]
+fn a_reflow_adding_trailing_commas_is_format_only() {
+    let report = change(
+        "fn a() {\n    call(first_argument, second_argument, third_argument);\n    let v = [1, 2];\n    match v.len() { 0 => 1, _ => 2 }\n}\n",
+        "fn a() {\n    call(\n        first_argument,\n        second_argument,\n        third_argument,\n    );\n    let v = [1, 2,];\n    match v.len() {\n        0 => 1,\n        _ => 2,\n    }\n}\n",
+    );
+    assert_kinds(&report, &["format_only"]);
+}
+
+#[test]
+fn a_comma_making_a_one_element_tuple_is_logic() {
+    assert_kinds(
+        &change("fn a() -> u8 { (1) }\n", "fn a() -> (u8,) { (1,) }\n"),
+        &["logic"],
+    );
+    assert_kinds(
+        &change(
+            "fn a(t: (u8,)) { let (x,) = t; }\n",
+            "fn a(t: (u8,)) { let (x) = t; }\n",
+        ),
+        &["logic"],
+    );
+}

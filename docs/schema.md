@@ -145,6 +145,9 @@ are stated in Ruby's terms; for Rust:
 - Comments: `//`, `/* */` and doc comments (`///`, `//!`, `/** */`) are
   comments, so editing one is `comment_only`. Attributes (`#[...]`, `#![...]`,
   `#[doc = "..."]`) are code, and belong to the item after them.
+- A trailing comma (before a closing bracket, or ending a match arm) never
+  changes the parse, so adding or dropping one is formatting, as rustfmt
+  does when it reflows a list. A one-element tuple's comma is code.
 - A macro's arguments can't be parsed: each token is compared on its own
   (`a << b` and `a < < b` differ), and an identifier in them, or a `{name}`
   in one of their string literals, may mean anything. A rename leaving the
