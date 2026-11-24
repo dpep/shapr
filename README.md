@@ -6,7 +6,7 @@ shapr is a deterministic evidence tool: it parses both sides of every hunk, comp
 
 Status: early development. Ruby (with [prism](https://github.com/ruby/prism)) and Rust (with [tree-sitter](https://tree-sitter.github.io/)) are parsed, and every kind below is detected in both; JavaScript, TypeScript and Python are to follow. Hunks in other files are `logic`.
 
-Rust follows its own rules where the languages differ: each file is a module, so a definition moved to another file is a `move_with_changes` (context `module`), not a `move`; doc comments are comments, and attributes are code. [docs/schema.md](docs/schema.md#languages) has the full list.
+Rust follows its own rules where the languages differ: each file is a module, so a definition moved to another file is a `move_with_changes` (context `module`), not a `move`; doc comments are comments (their doctests are code), and attributes are code. [docs/schema.md](docs/schema.md#languages) has the full list.
 
 ## Kinds
 

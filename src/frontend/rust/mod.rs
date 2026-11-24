@@ -44,6 +44,7 @@ impl Frontend for Rust {
                 b: &mut builder,
                 locals: vec![HashSet::new()],
                 opaque_members: false,
+                doctests: doctests(cst.root_node(), &source),
             }
             .children(cst.root_node(), Mode::Expr, &[]),
             None => builder.error(0..source.len()),
@@ -94,6 +95,60 @@ fn trailing(parent: &Node<'_>, rest: &[(Option<&str>, Node<'_>)]) -> bool {
     closes && !(tuple && parent.named_child_count() == 1)
 }
 
+/// Doc comments that hold doctest code, by start byte: in a run of `///`
+/// (or `//!`) lines, each fence line and every line inside a fence; a
+/// `/** */` or `/*! */` block holding a fence.
+fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
+    let mut docs = Vec::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if is_comment(&n) {
+            docs.push(n);
+            continue;
+        }
+        let mut c = n.walk();
+        let kids: Vec<_> = n.children(&mut c).collect();
+        stack.extend(kids.into_iter().rev());
+    }
+    let fence = |text: &str| {
+        let t = text.trim_start();
+        t.starts_with("```") || t.starts_with("~~~")
+    };
+    let mut out = HashSet::new();
+    // (marker, end row) of the previous line doc, and whether a fence is open.
+    let mut run: Option<(&str, usize)> = None;
+    let mut open = false;
+    for n in docs {
+        let text = std::str::from_utf8(&src[span(&n)]).unwrap_or_default();
+        let line_marker = ["///", "//!"]
+            .into_iter()
+            .find(|m| text.starts_with(m) && !text.starts_with("////"));
+        let Some(marker) = line_marker else {
+            run = None;
+            let block_doc =
+                (text.starts_with("/**") && !text.starts_with("/***") && text != "/**/")
+                    || text.starts_with("/*!");
+            if block_doc && text.lines().any(fence) {
+                out.insert(n.start_byte());
+            }
+            continue;
+        };
+        let row = n.start_position().row;
+        if run != Some((marker, row.wrapping_sub(1))) {
+            open = false;
+        }
+        run = Some((marker, row));
+        let body = &text[marker.len()..];
+        if fence(body) {
+            open = !open;
+            out.insert(n.start_byte());
+        } else if open {
+            out.insert(n.start_byte());
+        }
+    }
+    out
+}
+
 fn is_comment(n: &Node<'_>) -> bool {
     matches!(n.kind(), "line_comment" | "block_comment")
 }
@@ -106,11 +161,22 @@ struct Walker<'a> {
     /// The members being emitted are named by more than Rust code (a derive
     /// or attribute reads their names), so they aren't renamable.
     opaque_members: bool,
+    /// Start bytes of doc comments holding doctest code.
+    doctests: HashSet<usize>,
 }
 
 impl<'a> Walker<'a> {
     fn text(&self, n: &Node<'_>) -> &'a str {
         std::str::from_utf8(&self.src[span(n)]).unwrap_or_default()
+    }
+
+    /// A doc comment's fenced code is a doctest, compiled and run: code.
+    fn comment(&mut self, n: &Node<'_>) {
+        if self.doctests.contains(&n.start_byte()) {
+            self.b.directive(span(n));
+        } else {
+            self.b.comment(span(n));
+        }
     }
 
     fn is_local(&self, name: &str) -> bool {
@@ -138,7 +204,7 @@ impl<'a> Walker<'a> {
             .collect();
         for (i, &(field, child)) in kids.iter().enumerate() {
             if is_comment(&child) {
-                self.b.comment(span(&child));
+                self.comment(&child);
                 continue;
             }
             if child.is_missing() {
@@ -234,7 +300,7 @@ impl<'a> Walker<'a> {
     fn token(&mut self, n: Node<'_>) {
         use crate::tree::{Jump, Role};
         if is_comment(&n) {
-            return self.b.comment(span(&n));
+            return self.comment(&n);
         }
         match n.kind() {
             "identifier" => {

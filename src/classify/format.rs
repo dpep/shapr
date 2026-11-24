@@ -6,6 +6,7 @@ use super::{Confidence, Kind, LINE_CAP, Labels};
 use crate::change::{Change, Trees};
 use crate::tree::{NodeId, Span, Tree};
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub(super) fn run(change: &Change, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
@@ -89,11 +90,33 @@ fn by_tree(trees: &Trees, before: &Side, after: &Side) -> Compared {
             .map(|n| n.hash)
             .collect()
     };
-    let comments = |tree: &Tree, side: &Side| -> Vec<String> {
+    // Each comment with where it sits: the parent's place among the cover's
+    // code nodes and the code siblings before it. When the code is equal the
+    // two sides' code nodes correspond one to one, so a comment that moved to
+    // another node (a doc to another item) differs.
+    let comments = |tree: &Tree, side: &Side| -> Vec<(usize, usize, String)> {
+        let code: HashMap<NodeId, usize> = side
+            .cover
+            .iter()
+            .flat_map(|&id| tree.descendants(id))
+            .filter(|&n| !tree.node(n).comment)
+            .enumerate()
+            .map(|(i, n)| (n, i))
+            .collect();
+        let place = |n: NodeId| code.get(&n).copied().unwrap_or(usize::MAX);
         side.cover
             .iter()
             .flat_map(|&id| tree.comments_under(id))
-            .map(|id| comment_text(tree, &tree.node(id).extent))
+            .map(|id| {
+                let node = tree.node(id);
+                let siblings = node.parent.map_or(0, |p| {
+                    let kids = &tree.node(p).children;
+                    let before = kids.iter().take_while(|&&k| k != id);
+                    before.filter(|k| code.contains_key(k)).count()
+                });
+                let text = comment_text(tree, &node.extent);
+                (node.parent.map_or(usize::MAX, place), siblings, text)
+            })
             .collect()
     };
     let code_equal = code(&trees.before, before) == code(&trees.after, after);

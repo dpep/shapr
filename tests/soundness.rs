@@ -127,3 +127,55 @@ fn a_shebang_is_code() {
     );
     assert_eq!(kinds(&report), ["logic"]);
 }
+
+// Rust doc comments: fenced code is a doctest, and docs belong to an item.
+
+#[test]
+fn editing_a_doctest_is_logic() {
+    let doc =
+        |body: &str| format!("/// Adds.\n///\n/// ```\n/// {body}\n/// ```\npub fn f() {{}}\n");
+    let report = rust(&doc("assert_eq!(1, 1);"), &doc("assert_eq!(1, 2);"));
+    assert_eq!(kinds(&report), ["logic"]);
+    let report = rust(
+        "/// Does a thing.\npub fn f() {}\n",
+        "/// Does a thing.\n///\n/// ```\n/// assert_eq!(1, 2);\n/// ```\npub fn f() {}\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+}
+
+#[test]
+fn a_fence_info_string_and_a_block_doctest_are_code() {
+    let report = rust(
+        "//! ```\n//! f();\n//! ```\npub fn f() {}\n",
+        "//! ```ignore\n//! f();\n//! ```\npub fn f() {}\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+    let report = rust(
+        "/** ```\nassert!(true);\n``` */\npub fn f() {}\n",
+        "/** ```\nassert!(false);\n``` */\npub fn f() {}\n",
+    );
+    assert_eq!(kinds(&report), ["logic"]);
+}
+
+#[test]
+fn doc_prose_beside_a_doctest_is_a_comment() {
+    let doc = |prose: &str| {
+        format!("/// {prose}\n///\n/// ```\n/// assert!(true);\n/// ```\npub fn f() {{}}\n")
+    };
+    let report = rust(&doc("Adds."), &doc("Adds two numbers."));
+    assert_eq!(kinds(&report), ["comment_only"]);
+}
+
+#[test]
+fn a_doc_moved_to_another_item_is_not_format_only() {
+    let report = rust(
+        "/// a\nfn f() {}\n\nfn g() {}\n",
+        "fn f() {}\n\n/// a\nfn g() {}\n",
+    );
+    assert_eq!(kinds(&report), ["comment_only"]);
+    let report = ruby(
+        "def a\n  # note\n  1\nend\n\ndef b\n  2\nend\n",
+        "def a\n  1\nend\n\ndef b\n  # note\n  2\nend\n",
+    );
+    assert_eq!(kinds(&report), ["comment_only"]);
+}

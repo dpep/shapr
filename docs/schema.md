@@ -44,8 +44,8 @@ first changed line to last, with the context between them.
 
 | kind | structure? | meaning |
 |---|---|---|
-| `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text. |
-| `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs. |
+| `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. |
+| `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `rename` | yes | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes | Code removed in one place appears unchanged elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. See [Moves](#moves). |
 | `move_with_changes` | no | A move whose body also changed, or whose body is unchanged but now runs among different code (another owner, visibility section, load order, file-level directives, or Rust module): read the changed lines and where it landed. See [Moves](#moves). |
@@ -146,8 +146,12 @@ tree-sitter). Any other file is `null` and its hunks `logic`. The rules above
 are stated in Ruby's terms; for Rust:
 
 - Comments: `//`, `/* */` and doc comments (`///`, `//!`, `/** */`) are
-  comments, so editing one is `comment_only`. Attributes (`#[...]`, `#![...]`,
-  `#[doc = "..."]`) are code, and belong to the item after them.
+  comments, so editing one, or turning a `//` comment into a `///` doc, is
+  `comment_only`. A doc comment's fenced code is a doctest, which `cargo test`
+  compiles and runs: its fence lines (info string included) and the lines
+  between them are code, as is a `/** */` block holding a fence. Attributes
+  (`#[...]`, `#![...]`, `#[doc = "..."]`) are code, and belong to the item
+  after them.
 - A trailing comma (before a closing bracket, or ending a match arm) never
   changes the parse, so adding or dropping one is formatting, as rustfmt
   does when it reflows a list. A one-element tuple's comma is code.
