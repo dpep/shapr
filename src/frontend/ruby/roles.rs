@@ -341,7 +341,19 @@ impl Roles {
                 Role::Hazard(Hazard::Binding)
             }
             b"__method__" | b"__callee__" if implicit => Role::Hazard(Hazard::Frame),
-            b"caller" | b"caller_locations" if implicit => Role::Hazard(Hazard::Stack),
+            b"caller" | b"caller_locations" if implicit || on_constant(&call, b"Kernel") => {
+                Role::Hazard(Hazard::Stack)
+            }
+            // The current thread's stack, read in the code like `caller`.
+            b"backtrace" | b"backtrace_locations"
+                if call.receiver().is_some_and(|r| {
+                    r.as_call_node().is_some_and(|c| {
+                        c.name().as_slice() == b"current" && on_constant(&c, b"Thread")
+                    })
+                }) =>
+            {
+                Role::Hazard(Hazard::Stack)
+            }
             b"__dir__" | b"require_relative" if implicit => Role::Hazard(Hazard::File),
             _ => Role::Call(receiver),
         };
@@ -359,6 +371,18 @@ impl Roles {
             None => flags,
         }
     }
+}
+
+/// A call whose receiver is the top-level constant `name` (`Kernel.x`,
+/// `::Kernel.x`).
+fn on_constant(call: &ruby_prism::CallNode<'_>, name: &[u8]) -> bool {
+    call.receiver().is_some_and(|r| {
+        r.as_constant_read_node()
+            .is_some_and(|c| c.name().as_slice() == name)
+            || r.as_constant_path_node().is_some_and(|p| {
+                p.parent().is_none() && p.name().is_some_and(|n| n.as_slice() == name)
+            })
+    })
 }
 
 /// A computed field name as Ruby accepts it, starting with `@`: so the

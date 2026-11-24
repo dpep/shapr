@@ -722,6 +722,14 @@ mod tests {
             [Frame, Stack, Stack, Frame, Frame, Frame]
         );
         assert_eq!(
+            jumps(
+                "Kernel.caller\n::Kernel.caller_locations(0)\nThread.current.backtrace_locations\n"
+            ),
+            [Stack; 3]
+        );
+        // Another object's stack: an exception's, another thread's.
+        assert!(jumps("e.backtrace\nt.backtrace_locations\nx.caller\n").is_empty());
+        assert_eq!(
             jumps("__LINE__\n__FILE__\n__dir__\nrequire_relative 'a'\n"),
             [Line, File, File, File]
         );
