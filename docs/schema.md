@@ -821,7 +821,7 @@ The hunk's `style`:
 | field | type | meaning |
 |---|---|---|
 | `skipped` | string or null | Why the file isn't judged: `generated`, `vendored` or `docs` (by [category](#categories), plus `db/schema.rb` and `vendor`, `third_party` and `node_modules` directories), or `syntax_error`. |
-| `direction` | string | The strongest of its norms' `direction`; `none` when no norm saw new code. |
+| `direction` | string | The strongest of its norms' `direction` (`diverging`, then `converging`, `aligned`, `abstain`); `none` when no norm saw new code. One norm aligned beside another that abstains reads `aligned`: each norm's own `direction` says what backs it. |
 | `flagged` | bool | Some norm is `flagged`. |
 | `norms` | array | One per norm that saw new code in the hunk. Below. |
 
