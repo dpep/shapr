@@ -453,7 +453,7 @@ fn dispatch() -> ExitCode {
     };
     let labels = classify::classify(&change, outside);
     let mut meta = report::Meta::new("classify", source).input(form, paths);
-    meta.subject = subject(&input, cli.merge_base.as_deref(), &git);
+    meta.subject = subject(&input, cli.merge_base.as_deref());
     meta.untracked = untracked.as_ref().map(Vec::len);
     if let Some(note) = untracked
         .as_deref()
@@ -592,32 +592,18 @@ fn shell_word(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
-/// What INPUT compares, in the words of the text summary; `None` for a
-/// GitHub change, which names its source.
-fn subject(input: &Input, base: Option<&str>, git: &git::Git) -> Option<String> {
+/// What INPUT compares, in the words of the text summary, when shapr chose it
+/// (the working tree, the index, a merge base, stdin); `None` when the caller
+/// spelled it out as revisions, or for a GitHub change, which names its source.
+fn subject(input: &Input, base: Option<&str>) -> Option<String> {
     let Input::Local { form, range, paths } = input else {
         return matches!(input, Input::Stdin).then(|| "stdin".to_string());
     };
-    // git's notation with an empty side read as HEAD: `main...` is `main...HEAD`.
-    let sides = |dots: &str| {
-        let (from, to) = range.split_once(dots)?;
-        let side = |s: &str| if s.is_empty() { "HEAD" } else { s }.to_string();
-        Some(format!("{}{dots}{}", side(from), side(to)))
-    };
     let compared = match form {
-        report::Input::Commit => {
-            let rev = range
-                .strip_suffix("^!")
-                .or_else(|| range.rsplit_once("..").map(|(_, rev)| rev))
-                .unwrap_or(range);
-            format!(
-                "commit {}",
-                git.short(rev).unwrap_or_else(|| rev.to_string())
-            )
+        // The caller typed these; echoing them back says nothing.
+        report::Input::Commit | report::Input::Range | report::Input::MergeBaseRange => {
+            return None;
         }
-        report::Input::Range | report::Input::MergeBaseRange => sides("...")
-            .or_else(|| sides(".."))
-            .unwrap_or_else(|| range.clone()),
         report::Input::MergeBaseWorktree => format!("{}...working tree", base.unwrap_or(range)),
         report::Input::Worktree => "uncommitted changes".to_string(),
         report::Input::Staged if range == "HEAD" => "staged changes".to_string(),
