@@ -129,7 +129,7 @@ Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a fil
 
 Each `classify` or `norms` run appends one JSON line to `$XDG_STATE_HOME/shapr/usage.jsonl` (else `~/.local/state/shapr/usage.jsonl`), so the commands and forms people use can steer what gets built: the time, shapr's version, the command, the input form, the names of the flags given, the output format, the exit code, the duration, and counts (files, hunks, parts per kind and the verdict; for `norms`, files and plan steps). It never records paths, repository names, revisions, code, commit messages or URLs, and nothing leaves your machine.
 
-`SHAPR_USAGE=0` (or `false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) turns it on, and `SHAPR_USAGE=/absolute/path` moves it. `CI=true` turns it off unless `SHAPR_USAGE` is set. `shapr --usage` summarizes it, `shapr --usage --reset` empties it, and `shapr --status` shows where it is and its size. The log keeps its newest half once it passes 5 MB, and a log that can't be written never fails a run.
+`SHAPR_USAGE=0` (or `false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) turns it on, and `SHAPR_USAGE=/absolute/path` moves it. CI (`CI` set to `true`, `1`, `yes` or `on`, or `GITHUB_ACTIONS=true`) turns it off unless `SHAPR_USAGE` is set. `shapr --usage` summarizes it, `shapr --usage --reset` empties it, and `shapr --status` shows where it is and its size. The log is created readable by you alone and never written through a symlink; it keeps its newest half once it passes 5 MB, and a log that can't be written never fails a run.
 
 ## Output
 

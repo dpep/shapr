@@ -1185,7 +1185,7 @@ values), `format` (`text`, `json`, `ndjson`), `exit`, `duration_ms`, and
 `norms`, `files` and `steps`). It holds no paths, repositories, revisions,
 code, messages or URLs. `SHAPR_USAGE=0` (`false`, `off`, `no`) turns logging
 off, `1` (`true`, `on`, `yes`) on, an absolute path moves the log; unset, it is
-on except under `CI=true` and in a debug build. Past 5 MB the log keeps its newest half.
+on except in CI (`CI` set to `true`, `1`, `yes` or `on` in any case, or `GITHUB_ACTIONS=true`) and in a debug build. Past 5 MB the log keeps its newest half.
 
 | field | type | meaning |
 |---|---|---|

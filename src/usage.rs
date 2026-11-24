@@ -75,7 +75,7 @@ pub fn counts(record: &impl Serialize, keys: &[&str]) {
 /// Where the log is, and whether this run writes to it. `SHAPR_USAGE=0`
 /// (`false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) on, and
 /// an absolute path moves it; unset, it is on except in a debug build or
-/// under `CI=true`.
+/// in CI (`in_ci`).
 pub struct Location {
     pub path: Option<PathBuf>,
     pub enabled: bool,
@@ -107,13 +107,23 @@ pub fn location() -> Location {
             }
         }
         (_, None) => {
-            let ci = std::env::var("CI").is_ok_and(|v| v == "true");
+            let ci = in_ci(|name| std::env::var(name).ok());
             Location {
                 enabled: default.is_some() && !cfg!(debug_assertions) && !ci,
                 path: default,
             }
         }
     }
+}
+
+/// Running in CI, as CI services say: `CI` set to a true word (`true`, `1`,
+/// `yes`, `on`, any case), or `GITHUB_ACTIONS=true`. VAR reads a variable.
+fn in_ci(var: impl Fn(&str) -> Option<String>) -> bool {
+    let on = |name: &str| {
+        var(name)
+            .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+    };
+    on("CI") || on("GITHUB_ACTIONS")
 }
 
 /// `$XDG_STATE_HOME/shapr/usage.jsonl`, else `~/.local/state/shapr/usage.jsonl`.
@@ -165,16 +175,38 @@ fn append(path: &Path, line: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    // Never through a symlink left at the path, checked before and after
+    // opening: the file written is the one the path names.
+    let symlink = || std::io::Error::other("the log path is a symlink");
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(symlink());
+    }
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let named = std::fs::symlink_metadata(path)?;
+        let opened = file.metadata()?;
+        if named.file_type().is_symlink()
+            || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
+        {
+            return Err(symlink());
+        }
+    }
+    // One run at a time, so concurrent runs neither interleave nor trim twice.
+    file.lock()?;
     writeln!(file, "{line}")?;
     if file.metadata()?.len() > CAP {
+        // In place, under the lock: a rename would leave other runs writing
+        // to the file it replaced.
         let all = std::fs::read(path)?;
-        let tmp = path.with_extension("jsonl.tmp");
-        std::fs::write(&tmp, newest_half(&all))?;
-        std::fs::rename(tmp, path)?;
+        let kept = newest_half(&all).to_vec();
+        file.set_len(0)?;
+        file.write_all(&kept)?;
     }
     Ok(())
 }
@@ -300,6 +332,25 @@ pub fn summary() -> Summary {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn ci_is_any_true_word_or_github_actions() {
+        let ci = |vars: &[(&str, &str)]| {
+            let vars: Vec<(String, String)> = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            in_ci(|name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()))
+        };
+        for value in ["true", "TRUE", "1", "yes", "on"] {
+            assert!(ci(&[("CI", value)]), "CI={value}");
+        }
+        assert!(ci(&[("GITHUB_ACTIONS", "true")]));
+        for value in ["", "0", "false", "no"] {
+            assert!(!ci(&[("CI", value)]), "CI={value}");
+        }
+        assert!(!ci(&[]));
+    }
 
     #[test]
     fn the_newest_half_starts_at_a_line() {

@@ -1078,6 +1078,62 @@ fn shapr_usage_reads_the_usual_words_for_off_and_on() {
 }
 
 #[test]
+fn the_log_follows_no_symlink_and_is_private() {
+    let dir = branched();
+    let state = tempfile::tempdir().unwrap();
+    let victim = state.path().join("victim");
+    std::fs::write(&victim, "keep\n").unwrap();
+    let link = state.path().join("usage.jsonl");
+    std::os::unix::fs::symlink(&victim, &link).unwrap();
+    let env = [("SHAPR_USAGE", link.to_str().unwrap())];
+    let out = shapr_env(dir.path(), &["-q", "feat"], &env);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep\n");
+
+    let log = state.path().join("new.jsonl");
+    let env = [("SHAPR_USAGE", log.to_str().unwrap())];
+    shapr_env(dir.path(), &["-q", "feat"], &env);
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&log).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[test]
+fn runs_trimming_the_log_at_once_keep_its_newest_half() {
+    let dir = branched();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("usage.jsonl");
+    let line = "{\"command\":\"classify\",\"ts\":\"2026-01-01T00:00:00Z\"}\n";
+    let full = line.repeat(5_100_000 / line.len());
+    std::fs::write(&log, &full).unwrap();
+    let env = [("SHAPR_USAGE", log.to_str().unwrap())];
+    let runs: Vec<_> = (0..30)
+        .map(|_| {
+            let mut cmd = command(env!("CARGO_BIN_EXE_shapr"), dir.path());
+            cmd.args(["-q", "feat"]).envs(env).stdin(Stdio::null());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    for mut run in runs {
+        assert!(run.wait().unwrap().success());
+    }
+    let kept = std::fs::read_to_string(&log).unwrap();
+    let half = full.len() / 2;
+    assert!(
+        kept.len() > half - line.len() && kept.len() < half + 30 * 1000,
+        "{} of {}",
+        kept.len(),
+        full.len()
+    );
+    assert!(
+        kept.lines()
+            .all(|l| serde_json::from_str::<Value>(l).is_ok())
+    );
+    let names: Vec<_> = std::fs::read_dir(state.path()).unwrap().collect();
+    assert_eq!(names.len(), 1, "{names:?}");
+}
+
+#[test]
 fn a_log_that_cant_be_written_never_fails_the_run() {
     let dir = branched();
     let out = shapr_env(

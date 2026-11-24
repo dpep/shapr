@@ -54,7 +54,9 @@ USAGE LOG
   (else ~/.local/state/shapr/usage.jsonl): the command, input form, flag names, format,
   exit code, duration and counts. Never paths, repositories, revisions, code, messages
   or URLs. SHAPR_USAGE=0 (false, off, no) turns it off, 1 (true, on, yes) on, and an
-  absolute path moves it; CI=true turns it off unless SHAPR_USAGE is set. --usage
+  absolute path moves it; CI (CI=true, 1, yes or on; GITHUB_ACTIONS=true) turns it off
+  unless SHAPR_USAGE is set. The log is created private (0600), never through a
+  symlink. --usage
   summarizes it, --usage --reset empties it, --status shows where it is.
 
 EXIT CODES
