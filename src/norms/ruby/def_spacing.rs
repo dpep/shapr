@@ -13,13 +13,8 @@ pub const STYLES: &[&str] = &["empty_line", "no_empty_line"];
 /// RuboCop, which allows two adjacent, it often sits tight against a
 /// longer one (`def version; 1 end`). Nor do defs sharing a line.
 pub fn see(w: &mut Walker, node: &Node) {
-    // The walk reaches the program's statements only through the program.
-    let statements = match node.as_program_node() {
-        Some(program) => program.statements(),
-        None => match node.as_statements_node() {
-            Some(statements) => statements,
-            None => return,
-        },
+    let Some(statements) = node.as_statements_node() else {
+        return;
     };
     let body: Vec<Node> = statements.body().iter().collect();
     for pair in body.windows(2) {
@@ -89,6 +84,21 @@ mod tests {
     fn top_level_defs_count() {
         let src = "def a\n  1\nend\ndef b\n  2\nend\n";
         assert_eq!(styles(src, super::NORM), "no_empty_line@4");
+    }
+
+    #[test]
+    fn defs_in_conditional_and_begin_bodies_count() {
+        let pair = "  def a\n    1\n  end\n  def b\n    2\n  end\n";
+        for (open, close) in [
+            ("if c\n", "end\n"),
+            ("while c\n", "end\n"),
+            ("begin\n", "end\n"),
+        ] {
+            let src = format!("{open}{pair}{close}");
+            assert_eq!(styles(&src, super::NORM), "no_empty_line@5", "{src}");
+        }
+        let src = format!("if c\n  1\nelse\n{pair}end\n");
+        assert_eq!(styles(&src, super::NORM), "no_empty_line@7", "{src}");
     }
 
     #[test]

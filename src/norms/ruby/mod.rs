@@ -18,6 +18,7 @@ use super::editorconfig;
 use super::{
     Analysis, Language, LineIndex, NormDef, Observation, Replace, Scope, ScopeKind, Snapshot,
 };
+use crate::frontend::ruby::{Entered, generated};
 use ruby_prism::{Location, Node, Visit};
 use std::collections::BTreeMap;
 
@@ -237,6 +238,7 @@ impl Language for Ruby {
             embedded: Vec::new(),
             literals: Vec::new(),
             names: naming::Names::default(),
+            entered: Entered::default(),
         };
         walker.visit(&result.node());
         whitespace::lines(&mut walker);
@@ -312,10 +314,14 @@ pub struct Walker<'a> {
     /// Byte ranges of string and heredoc contents.
     pub literals: Vec<std::ops::Range<usize>>,
     names: naming::Names,
+    entered: Entered,
 }
 
 impl<'pr> Visit<'pr> for Walker<'_> {
+    generated::concrete_visits!('pr);
+
     fn visit_branch_node_enter(&mut self, node: Node<'pr>) {
+        self.entered.enter(&node);
         self.see(&node);
         self.embedded
             .push(node.as_embedded_statements_node().is_some());
@@ -326,11 +332,16 @@ impl<'pr> Visit<'pr> for Walker<'_> {
     }
 
     fn visit_leaf_node_enter(&mut self, node: Node<'pr>) {
+        self.entered.enter(&node);
         self.see(&node);
     }
 }
 
 impl Walker<'_> {
+    fn dispatched(&mut self, node: &Node<'_>) -> bool {
+        self.entered.dispatched(node)
+    }
+
     fn see(&mut self, node: &Node<'_>) {
         let kind = if node.as_def_node().is_some() {
             Some(ScopeKind::Method)

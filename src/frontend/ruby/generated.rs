@@ -4,7 +4,7 @@ use ruby_prism::Node;
 
 /// A prism node's kind, and its identifier where prism records one.
 #[allow(clippy::too_many_lines)]
-pub(super) fn kind_and_name<'pr>(node: &Node<'pr>) -> (&'static str, Option<&'pr [u8]>) {
+pub(crate) fn kind_and_name<'pr>(node: &Node<'pr>) -> (&'static str, Option<&'pr [u8]>) {
     match node {
         Node::AliasGlobalVariableNode { .. } => ("alias_global_variable", None),
         Node::AliasMethodNode { .. } => ("alias_method", None),
@@ -401,4 +401,4 @@ macro_rules! concrete_visits {
         }
     };
 }
-pub(super) use concrete_visits;
+pub(crate) use concrete_visits;

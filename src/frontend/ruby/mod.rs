@@ -1,6 +1,6 @@
 //! Ruby, parsed with prism.
 
-mod generated;
+pub(crate) mod generated;
 mod reserved;
 mod roles;
 
@@ -57,7 +57,7 @@ impl Frontend for Ruby {
         Walker {
             builder: &mut builder,
             roles: roles::Roles::default(),
-            entered: None,
+            entered: Entered::default(),
         }
         .visit(&result.node());
         if let Some(data) = result.data_loc() {
@@ -138,8 +138,24 @@ fn span(loc: &Location<'_>) -> Span {
 struct Walker<'b> {
     builder: &'b mut TreeBuilder,
     roles: roles::Roles,
-    /// The node the enter hook just saw, as (kind, start, end).
-    entered: Option<(&'static str, usize, usize)>,
+    entered: Entered,
+}
+
+/// The node an enter hook just saw, as (kind, start, end), for the
+/// overrides `generated::concrete_visits!` adds to a prism visitor: a walk
+/// that sets it in its enter hooks reaches every node through them.
+#[derive(Default)]
+pub(crate) struct Entered(Option<(&'static str, usize, usize)>);
+
+impl Entered {
+    pub(crate) fn enter(&mut self, node: &Node<'_>) {
+        self.0 = Some(key(node));
+    }
+
+    /// Whether `node` arrived through `visit`, which already ran the enter hook.
+    pub(crate) fn dispatched(&mut self, node: &Node<'_>) -> bool {
+        self.0.take() == Some(key(node))
+    }
 }
 
 fn key(node: &Node<'_>) -> (&'static str, usize, usize) {
@@ -152,9 +168,8 @@ fn key(node: &Node<'_>) -> (&'static str, usize, usize) {
 }
 
 impl Walker<'_> {
-    /// Whether `node` arrived through `visit`, which already ran the enter hook.
     fn dispatched(&mut self, node: &Node<'_>) -> bool {
-        self.entered.take() == Some(key(node))
+        self.entered.dispatched(node)
     }
 
     fn facts(&mut self, node: &Node<'_>) -> (&'static str, Option<Vec<u8>>, Role) {
@@ -168,7 +183,7 @@ impl<'pr> Visit<'pr> for Walker<'_> {
     generated::concrete_visits!('pr);
 
     fn visit_branch_node_enter(&mut self, node: Node<'pr>) {
-        self.entered = Some(key(&node));
+        self.entered.enter(&node);
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
@@ -180,7 +195,7 @@ impl<'pr> Visit<'pr> for Walker<'_> {
     }
 
     fn visit_leaf_node_enter(&mut self, node: Node<'pr>) {
-        self.entered = Some(key(&node));
+        self.entered.enter(&node);
         let (kind, name, role) = self.facts(&node);
         let name = name.as_deref();
         // A heredoc's node spans only its opener; the body and terminator

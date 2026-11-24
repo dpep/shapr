@@ -24,7 +24,7 @@ out=src/frontend/ruby/generated.rs
   echo
   echo "/// A prism node's kind, and its identifier where prism records one."
   echo "#[allow(clippy::too_many_lines)]"
-  echo "pub(super) fn kind_and_name<'pr>(node: &Node<'pr>) -> (&'static str, Option<&'pr [u8]>) {"
+  echo "pub(crate) fn kind_and_name<'pr>(node: &Node<'pr>) -> (&'static str, Option<&'pr [u8]>) {"
   echo "    match node {"
   for v in $variants; do
     kind=$(echo "${v%Node}" | snake)
@@ -57,7 +57,7 @@ out=src/frontend/ruby/generated.rs
   done
   echo "    };"
   echo "}"
-  echo "pub(super) use concrete_visits;"
+  echo "pub(crate) use concrete_visits;"
 } >"$out"
 rustfmt --edition 2024 "$out"
 echo "wrote $out" >&2

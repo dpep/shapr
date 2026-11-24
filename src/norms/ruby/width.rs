@@ -192,4 +192,17 @@ mod tests {
         let src = "class A\n  def b\n      c\n  end\n\n  def d\n    if e\n     f\n    else\n      g\n    end\n    x = if y\n          z\n        end\n    h.each do |i|\n        j\n    end\n  end\nend\n";
         assert_eq!(styles(src, super::NORM), "2@2 4@3 2@7 1@8 2@10 4@16");
     }
+
+    #[test]
+    fn rescue_and_ensure_bodies_count() {
+        let src = "begin
+  a
+rescue
+    b
+ensure
+   c
+end
+";
+        assert_eq!(styles(src, super::NORM), "2@2 4@4 3@6");
+    }
 }
