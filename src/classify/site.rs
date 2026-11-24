@@ -145,7 +145,7 @@ fn cover(tree: &Tree, span: &Span, sig: &Significance) -> Vec<NodeId> {
     let mut at = Tree::ROOT;
     loop {
         let node = tree.node(at);
-        if tree.own_offsets(at).any(|o| span.contains(&o)) {
+        if tree.own_offsets_in(at, span).next().is_some() {
             return vec![at];
         }
         let overlapping: Vec<NodeId> = node
@@ -176,16 +176,11 @@ fn contains(outer: &Span, inner: &Span) -> bool {
 /// range.
 pub struct CodeLines<'t> {
     tree: &'t Tree,
-    comments: Vec<&'t Span>,
 }
 
 impl<'t> CodeLines<'t> {
     pub fn of(tree: &'t Tree) -> CodeLines<'t> {
-        let comments = tree.nodes.iter().filter(|n| n.comment);
-        CodeLines {
-            tree,
-            comments: comments.map(|n| &n.extent).collect(),
-        }
+        CodeLines { tree }
     }
 
     /// Offsets of the code bytes on `line`.
@@ -193,7 +188,7 @@ impl<'t> CodeLines<'t> {
         self.tree
             .line_span(line, line)
             .filter(|&at| !self.tree.source[at].is_ascii_whitespace())
-            .filter(|at| !self.comments.iter().any(|c| c.contains(at)))
+            .filter(|&at| !self.tree.in_comment(at))
             .collect()
     }
 
