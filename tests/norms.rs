@@ -18,23 +18,9 @@
 
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 
-fn command(program: &str, dir: &Path) -> Command {
-    let mut cmd = Command::new(program);
-    cmd.current_dir(dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd
-}
-
-fn git(dir: &Path, args: &[&str]) {
-    let out = command("git", dir).args(args).output().unwrap();
-    assert!(out.status.success(), "git {args:?}");
-}
+mod common;
+use common::*;
 
 fn copy_tree(from: &Path, to: &Path) {
     for entry in std::fs::read_dir(from).unwrap() {
@@ -77,9 +63,7 @@ fn run_case(case: &Path) -> Vec<String> {
     let path = spec["path"].as_str().unwrap_or("a.rb");
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    git(root, &["init", "-q", "-b", "main"]);
-    git(root, &["config", "user.email", "test@example.com"]);
-    git(root, &["config", "user.name", "Test"]);
+    init(root);
     if case.join("repo").is_dir() {
         copy_tree(&case.join("repo"), root);
     }
@@ -192,9 +176,7 @@ fn config_above_the_repository_is_not_read() {
     .unwrap();
     let root = outer.path().join("repo");
     std::fs::create_dir(&root).unwrap();
-    git(&root, &["init", "-q", "-b", "main"]);
-    git(&root, &["config", "user.email", "test@example.com"]);
-    git(&root, &["config", "user.name", "Test"]);
+    init(&root);
     for (side, content) in [
         ("before", "def a\n  go\nend\n"),
         ("after", "def a\n  go('x')  \nend\n"),
