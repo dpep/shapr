@@ -378,14 +378,14 @@ field; a `method` or `constant` in every parsed file of the change.
 | `renames` | array | One object per rename the part makes. |
 | `from`, `to` | string | The old and new name. |
 | `scope` | string | Where the old name lives, and so where every use had to change: `local`, `field`, `method` or `constant`. |
-| `occurrences` | int | Uses renamed across the change, the definition included; a class or module name counts once. |
+| `occurrences` | int | Uses this part renames, the definition included; a class or module name counts once. A rename spanning hunks lists the pair in each, so occurrences sum over parts to the change's. |
 
 `evidence`, beside `comparison`:
 
 | key | type | meaning |
 |---|---|---|
 | `renamed` | int | Sum of the part's renames' `occurrences`. |
-| `uses` | int | Uses of the old names shapr saw in their scopes before the change. More than `renamed` when another hunk deleted some. |
+| `uses` | int | Uses of the old names shapr saw in their scopes before the change, across the change. More than `renamed` when another hunk renamed or deleted some. |
 | `searched` | int or null | Files the repository search read for uses of the old and new names outside the change (see [Proof status](#proof-status)); `null` when no name can be used outside its scope (locals), or no search ran. |
 
 `confidence` is the weakest rename's score. A local's is `renamed / uses`.

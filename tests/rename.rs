@@ -152,10 +152,9 @@ fn a_method_rename_across_files_checks_every_file() {
         ],
     );
     assert_eq!(kinds(&report), ["rename", "rename"]);
-    assert_eq!(
-        lead(&report["hunks"][0])["detail"]["renames"][0]["occurrences"],
-        4
-    );
+    // Each file's part counts its own occurrences.
+    let occurrences = |h: usize| &lead(&report["hunks"][h])["detail"]["renames"][0]["occurrences"];
+    assert_eq!((occurrences(0), occurrences(1)), (&3.into(), &1.into()));
 
     let stale = "class Door\n  def open(g)\n    g.greet(\"x\")\n    g.close\n  end\nend\n";
     let report = classify(

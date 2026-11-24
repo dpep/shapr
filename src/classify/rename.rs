@@ -113,7 +113,6 @@ struct Facts {
 type Verdicts<'f> = BTreeMap<&'f Pair, Result<Verdict, String>>;
 
 struct Verdict {
-    renamed: usize,
     uses: usize,
     score: f64,
     /// What the rename relies on that the search couldn't settle.
@@ -249,12 +248,20 @@ pub(super) fn run(
         if claimed.is_empty() {
             continue;
         }
+        // Each pair's occurrences in this hunk: another hunk's part holds its own.
+        let mut here: BTreeMap<&Pair, usize> = BTreeMap::new();
+        for (diff, verdict) in &accepted {
+            if let Ok((pair, _)) = verdict {
+                *here.entry(*pair).or_default() +=
+                    usize::from(!is_name_node(&t.before, diff.before));
+            }
+        }
         let pairs: BTreeMap<&Pair, &Verdict> = accepted
             .into_iter()
             .filter_map(|(_, verdict)| verdict.ok())
             .collect();
         let score = pairs.values().map(|v| v.score).fold(1.0, f64::min);
-        let renamed: usize = pairs.values().map(|v| v.renamed).sum();
+        let renamed: usize = here.values().sum();
         let uses: usize = pairs.values().map(|v| v.uses).sum();
         let assumptions: BTreeSet<Assumption> = pairs
             .values()
@@ -262,13 +269,13 @@ pub(super) fn run(
             .collect();
         let searched = pairs.values().filter_map(|v| v.searched).max();
         let renames: Vec<Value> = pairs
-            .iter()
-            .map(|(p, v)| {
+            .keys()
+            .map(|p| {
                 json!({
                     "from": p.from,
                     "to": p.to,
                     "scope": p.space.scope.as_str(),
-                    "occurrences": v.renamed,
+                    "occurrences": here[p],
                 })
             })
             .collect();
@@ -600,7 +607,6 @@ fn holds(
         renamed as f64 / uses.max(1) as f64
     };
     Ok(Verdict {
-        renamed,
         uses,
         score,
         assumptions,
