@@ -91,6 +91,8 @@ src/
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
     moves.rs        the move pass: declarations the alignment left out, paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
+    runs.rs         after the passes, a hunk left with logic re-run per run of changed lines;
+                    run parts join the whole hunk's
     facets.rs       facets on the residual's lines (condition, signature, ...), from
                     Frontend::construct; runs after the passes and changes no part
     proof.rs        Assumption (a part's unverified reliance), the Outside trait detectors check

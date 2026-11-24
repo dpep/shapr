@@ -34,6 +34,25 @@ impl Site {
             after: Side::new(after, hunk.after),
         }
     }
+
+    /// The two covers sit under the same chain of enclosing syntax, kinds
+    /// and roles to the root; true when a side covers nothing. A hunk's
+    /// enclosing syntax is unchanged context, but a run's can sit in a
+    /// sibling run: a wrapper added there re-nests this run's code.
+    pub fn same_nesting(&self, before: &Tree, after: &Tree) -> bool {
+        let chain = |tree: &Tree, side: &Side| {
+            let first = side.cover.first()?;
+            let chain = tree.ancestors(*first).map(|id| {
+                let node = tree.node(id);
+                (node.kind, node.role)
+            });
+            Some(chain.collect::<Vec<_>>())
+        };
+        match (chain(before, &self.before), chain(after, &self.after)) {
+            (Some(b), Some(a)) => b == a,
+            _ => true,
+        }
+    }
 }
 
 impl Side {

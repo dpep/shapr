@@ -56,7 +56,7 @@ nothing proven is one `logic` part.
 
 | kind | structure? | meaning |
 |---|---|---|
-| `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic. |
+| `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic unless they are a run of their own (see [Runs](#runs)). |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering anything else (callbacks, validations, `include`s, other DSL calls) is `logic`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
@@ -70,6 +70,21 @@ new code also defines): the part is then not claimed and its lines stay
 `logic`.
 
 A part is structure only when it is proven: see [Proof status](#proof-status).
+
+### Runs
+
+Diff context merges edits a few lines apart into one hunk, so a hunk can
+hold several *runs*: maximal stretches of changed lines with no context line
+between them. A hunk is classified whole first; when it isn't all structure
+and holds more than one run, each run is classified again as if it were a
+hunk of its own, and the parts proven on its runs join the hunk's parts
+where they claim no line those hold. So a reformat or a comment fix a few lines from a
+logic edit is its own part, and a reflow git splits into runs, which only
+the whole hunk proves, stays one part. Hunks, their ids and their `before`
+and `after` runs don't change. A run's `format_only`, `comment_only` or
+`rename` part also needs the run's code under the same enclosing syntax on
+both sides: code re-indented under a wrapper another run of the hunk adds
+(an `if` around it) stays `logic`.
 
 A hunk's `kind` is a one-word rollup of its parts: `logic` unless every
 part is structure, else its most substantial part kind in the table's order

@@ -16,6 +16,7 @@ mod format;
 mod hazard;
 mod moves;
 mod rename;
+mod runs;
 
 pub use facets::Facet;
 pub use moves::Context;
@@ -297,6 +298,14 @@ const PASSES: &[Pass] = &[
 /// Labels every hunk; `outside` is the repository beyond the change, where
 /// a part's uses outside it are verified.
 pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
+    let mut labels = passes(change, outside);
+    runs::refine(change, outside, &mut labels);
+    facets::run(change, &mut labels);
+    labels
+}
+
+/// Every pass over every hunk; each residual is what no part claims.
+fn passes(change: &Change, outside: &dyn Outside) -> Labels {
     let mut labels = defaults(change);
     let alignments = Alignments::of(change);
     for pass in PASSES {
@@ -305,7 +314,6 @@ pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     for label in labels.iter_mut().flatten() {
         label.residual.lines = label.unclaimed();
     }
-    facets::run(change, &mut labels);
     labels
 }
 
