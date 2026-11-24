@@ -699,7 +699,7 @@ fn pattern_names(p: Node<'_>, src: &[u8], out: &mut HashSet<String>) {
 pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
     let node = tree.node(id);
     let name = node.name.as_deref();
-    let own = || -> String { tree.own_text(id).iter().map(|&(_, b)| b as char).collect() };
+    let own = || -> String { tree.own_bytes(id).iter().map(|&(_, b)| b as char).collect() };
     let first_named = |want: &str| {
         node.children
             .first()

@@ -21,7 +21,7 @@
 //! unit's lines that changed in the move, which stay logic.
 
 use super::format::{dice, subtree_hashes};
-use super::{Claim, Confidence, Kind, Labels, Part};
+use super::{Claim, Confidence, Kind, Labels, Part, rounded};
 use crate::change::{Change, Trees};
 use crate::tree::{Jump, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
@@ -97,7 +97,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 let here: Vec<(usize, RangeInclusive<usize>)> = (0..units.len())
                     .filter(|&u| units[u].file == f && units[u].side == side)
                     .filter(|u| by_unit.contains_key(u))
-                    .map(|u| (u, lines(tree, units[u].node)))
+                    .map(|u| (u, tree.lines(units[u].node)))
                     .filter(|(_, r)| changed.iter().any(|&l| r.contains(&l) && tree.line(l).code))
                     .collect();
                 mine.extend(here.iter().filter_map(|(u, _)| by_unit.get(u).copied()));
@@ -221,7 +221,7 @@ impl Unit {
 
     /// The hunk whose changed lines on this unit's side first touch it.
     fn hunk(&self, change: &Change) -> Option<usize> {
-        let range = lines(self.tree(change), self.node);
+        let range = self.tree(change).lines(self.node);
         change.files[self.file].diff.hunks.iter().position(|h| {
             let changed = match self.side {
                 Side::Removed => &h.removed,
@@ -230,11 +230,6 @@ impl Unit {
             changed.iter().any(|l| range.contains(l))
         })
     }
-}
-
-fn lines(tree: &Tree, node: NodeId) -> RangeInclusive<usize> {
-    let extent = &tree.node(node).extent;
-    tree.line_of(extent.start)..=tree.line_of(extent.end.saturating_sub(1).max(extent.start))
 }
 
 /// How a child lines up with its counterpart on the other side.
@@ -261,14 +256,7 @@ struct Aligner<'a> {
 impl Aligner<'_> {
     fn align(&mut self, before: NodeId, after: NodeId) {
         let (tb, ta) = (&self.trees.before, &self.trees.after);
-        let kids = |tree: &Tree, id: NodeId| -> Vec<NodeId> {
-            tree.node(id)
-                .children
-                .iter()
-                .copied()
-                .filter(|&c| !tree.node(c).comment)
-                .collect()
-        };
+        let kids = |tree: &Tree, id: NodeId| -> Vec<NodeId> { tree.code_children(id).collect() };
         let (b, a) = (kids(tb, before), kids(ta, after));
         let (kb, ka): (Vec<Key>, Vec<Key>) = (
             b.iter().map(|&n| key(tb, n)).collect(),
@@ -282,8 +270,8 @@ impl Aligner<'_> {
             in_a[j] = true;
             let (nb, na) = (b[i], a[j]);
             if tb.node(nb).hash == ta.node(na).hash {
-                self.kept.push((Side::Removed, lines(tb, nb)));
-                self.kept.push((Side::Added, lines(ta, na)));
+                self.kept.push((Side::Removed, tb.lines(nb)));
+                self.kept.push((Side::Added, ta.lines(na)));
             } else if matches!(kb[i], Key::Namespace(_) | Key::Transparent) {
                 self.align(nb, na);
             }
@@ -337,13 +325,7 @@ fn key(tree: &Tree, id: NodeId) -> Key<'_> {
 /// so one whose attributes were edited still aligns; owners compare with
 /// context.
 fn namespace_name(tree: &Tree, id: NodeId, context: bool) -> Option<u64> {
-    let code: Vec<NodeId> = tree
-        .node(id)
-        .children
-        .iter()
-        .copied()
-        .filter(|&c| !tree.node(c).comment)
-        .collect();
+    let code: Vec<NodeId> = tree.code_children(id).collect();
     let Some(name) = tree.name_child(id) else {
         return code.first().map(|&c| tree.node(c).hash);
     };
@@ -436,13 +418,7 @@ fn transparent(tree: &Tree, id: NodeId) -> bool {
     if node.role != Role::Other || node.children.is_empty() {
         return false;
     }
-    !(node.span.start..node.span.end).any(|at| {
-        !tree.source[at].is_ascii_whitespace()
-            && !node
-                .children
-                .iter()
-                .any(|&c| tree.node(c).extent.contains(&at))
-    })
+    tree.own_offsets(id).next().is_none()
 }
 
 /// What differs around a moved unit in its new place: the code it runs
@@ -555,7 +531,7 @@ fn pair(change: &Change, units: &[Unit]) -> Vec<Pair> {
         if !same {
             return None;
         }
-        let sim = round(dice(
+        let sim = rounded(dice(
             subtree_hashes(ur.tree(change), &[ur.node]),
             subtree_hashes(ua.tree(change), &[ua.node]),
         ));
@@ -833,7 +809,7 @@ fn entry(change: &Change, units: &[Unit], ids: &[usize], pair: &Pair) -> Entry {
     let id = |u: &Unit| u.hunk(change).map(|h| ids[u.file] + h);
     let first = |u: &Unit| {
         let tree = u.tree(change);
-        lines(tree, u.node).find(|&l| tree.line(l).code)
+        tree.lines(u.node).find(|&l| tree.line(l).code)
     };
     let (changed_before, changed_after) = if pair.similarity < 1.0 {
         changed_lines(from.tree(change), from.node, to.tree(change), to.node)
@@ -867,7 +843,7 @@ fn changed_lines(
     to: NodeId,
 ) -> (Vec<usize>, Vec<usize>) {
     let texts = |tree: &Tree, node: NodeId| -> Vec<(usize, Vec<u8>)> {
-        lines(tree, node)
+        tree.lines(node)
             .map(|l| {
                 let text: Vec<u8> = tree
                     .text(&tree.line_span(l, l))
@@ -894,8 +870,4 @@ fn changed_lines(
             .collect()
     };
     (only(&a, |c| c.0), only(&b, |c| c.1))
-}
-
-fn round(value: f64) -> f64 {
-    Confidence::new(value).get()
 }

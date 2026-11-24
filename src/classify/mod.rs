@@ -85,9 +85,15 @@ pub const LINE_CAP: f64 = 0.5;
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize)]
 pub struct Confidence(f64);
 
+/// A score in 0..=1, rounded to two decimals where it is built: the
+/// precision evidence from a handful of counts honestly has.
+pub fn rounded(value: f64) -> f64 {
+    (value.clamp(0.0, 1.0) * 100.0).round() / 100.0
+}
+
 impl Confidence {
     pub fn new(value: f64) -> Confidence {
-        Confidence((value.clamp(0.0, 1.0) * 100.0).round() / 100.0)
+        Confidence(rounded(value))
     }
 
     pub fn get(self) -> f64 {

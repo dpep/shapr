@@ -4,7 +4,7 @@
 //! once, so every frontend gets the same semantics.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 /// A byte range into a file's source.
 pub type Span = Range<usize>;
@@ -172,6 +172,29 @@ pub struct Semantics {
     pub reserved: &'static [&'static str],
 }
 
+/// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A
+/// control byte, so never part of a token next to it (see [`mask_name`]).
+pub const MARK: u8 = 0x01;
+
+/// Stands for a masked name in [`Tree::own_text`].
+pub const MASKED: u8 = 0x00;
+
+/// What [`Tree::walk_own`] visits.
+pub enum Piece {
+    Text(Span),
+    Child(NodeId),
+}
+
+/// One node on a [`Tree::path`].
+#[derive(Clone, Copy, Debug)]
+pub struct Step<'t> {
+    pub kind: &'static str,
+    pub role: Role,
+    pub name: Option<&'t str>,
+    /// For a namespace with no name, its [`Tree::header`].
+    pub header: Option<u64>,
+}
+
 /// Whether a [`Role::DynamicName`]'s name can spell `name`: `*` in it
 /// stands for any text computed at runtime.
 pub fn spells(pattern: &str, name: &str) -> bool {
@@ -191,6 +214,32 @@ pub fn spells(pattern: &str, name: &str) -> bool {
         }
     }
     rest.ends_with(last)
+}
+
+/// Replaces the first occurrence of `name` in `text` that stands as a whole
+/// token with [`MASKED`].
+pub fn mask_name(text: &mut Vec<u8>, name: &[u8]) {
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+    let suffixed = name.last().is_some_and(|b| b"?!=".contains(b));
+    let at = (0..text.len()).find(|&i| {
+        text[i..].starts_with(name)
+            && (i == 0 || !(word(text[i - 1]) || b"@$".contains(&text[i - 1])))
+            && text
+                .get(i + name.len())
+                .is_none_or(|&n| !word(n) && (suffixed || !b"?!".contains(&n)))
+    });
+    if let Some(i) = at {
+        text.splice(i..i + name.len(), [MASKED]);
+    }
+}
+
+/// A name a rename can change: an identifier, not an operator.
+pub fn is_identifier(name: &str) -> bool {
+    let bare = name.trim_start_matches(['@', '$']);
+    let bare = bare.strip_suffix(['?', '!', '=']).unwrap_or(bare);
+    let mut chars = bare.chars();
+    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+        && chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
 impl Semantics {
@@ -285,20 +334,129 @@ impl Tree {
         &self.source[span.clone()]
     }
 
-    /// The non-whitespace bytes of `id`'s own span outside its children,
-    /// with the line each is on: an operator, a keyword, punctuation.
-    pub fn own_text(&self, id: NodeId) -> Vec<(usize, u8)> {
+    /// The 1-based lines `span` touches, first to last.
+    pub fn span_lines(&self, span: &Span) -> RangeInclusive<usize> {
+        self.line_of(span.start)..=self.line_of(span.end.saturating_sub(1).max(span.start))
+    }
+
+    /// The lines node `id`'s extent touches.
+    pub fn lines(&self, id: NodeId) -> RangeInclusive<usize> {
+        self.span_lines(&self.node(id).extent)
+    }
+
+    /// `id`'s children that aren't comments, in order.
+    pub fn code_children(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        let children = self.node(id).children.iter().copied();
+        children.filter(|&c| !self.node(c).comment)
+    }
+
+    /// `id`'s parent, its parent, and so on to the root.
+    pub fn ancestors(&self, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+        std::iter::successors(self.node(id).parent, |&p| self.node(p).parent)
+    }
+
+    /// The nearest ancestor of `id` that `pick` accepts.
+    pub fn enclosing(&self, id: NodeId, pick: impl Fn(&Node) -> bool) -> Option<NodeId> {
+        self.ancestors(id).find(|&p| pick(self.node(p)))
+    }
+
+    /// Offsets of the non-whitespace bytes of `id`'s own span that no
+    /// child's extent holds: an operator, a keyword, punctuation.
+    pub fn own_offsets(&self, id: NodeId) -> impl Iterator<Item = usize> + '_ {
         let node = self.node(id);
-        node.span
-            .clone()
-            .filter(|&at| {
-                !self.source[at].is_ascii_whitespace()
-                    && !node
-                        .children
-                        .iter()
-                        .any(|&c| self.node(c).extent.contains(&at))
-            })
+        node.span.clone().filter(move |&at| {
+            !self.source[at].is_ascii_whitespace()
+                && !node
+                    .children
+                    .iter()
+                    .any(|&c| self.node(c).extent.contains(&at))
+        })
+    }
+
+    /// [`Tree::own_offsets`] as bytes, with the line each is on.
+    pub fn own_bytes(&self, id: NodeId) -> Vec<(usize, u8)> {
+        self.own_offsets(id)
             .map(|at| (self.line_of(at), self.source[at]))
+            .collect()
+    }
+
+    /// Walks `id`'s own span in child order, as the hash reads it: the
+    /// stretch of text before, between and after the children, and each
+    /// child. A child reaching back over text already read reads none twice.
+    pub fn walk_own(&self, id: NodeId, mut visit: impl FnMut(Piece)) {
+        let span = &self.node(id).span;
+        let mut cursor = span.start;
+        for &c in &self.node(id).children {
+            let extent = &self.node(c).extent;
+            let end = extent.start.min(span.end);
+            if cursor < end {
+                visit(Piece::Text(cursor..end));
+            }
+            cursor = cursor.max(extent.end);
+            visit(Piece::Child(c));
+        }
+        if cursor < span.end {
+            visit(Piece::Text(cursor..span.end));
+        }
+    }
+
+    /// The stretches of `id`'s own span outside its children.
+    pub fn own_spans(&self, id: NodeId) -> Vec<Span> {
+        let mut out = Vec::new();
+        self.walk_own(id, |piece| {
+            if let Piece::Text(s) = piece {
+                out.push(s);
+            }
+        });
+        out
+    }
+
+    /// `id`'s own text as the hash reads it, whitespace dropped and [`MARK`]
+    /// where each code child sits. With `mask`, the node's name, where the
+    /// text spells it as a whole token, becomes [`MASKED`], so nodes that
+    /// differ only in name compare equal.
+    pub fn own_text(&self, id: NodeId, mask: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.walk_own(id, |piece| match piece {
+            Piece::Text(s) => out.extend_from_slice(&self.source[s]),
+            Piece::Child(c) if !self.node(c).comment => out.push(MARK),
+            Piece::Child(_) => {}
+        });
+        if let Some(name) = self.node(id).name.as_deref().filter(|_| mask) {
+            mask_name(&mut out, name.as_bytes());
+        }
+        out.retain(|b| !b.is_ascii_whitespace());
+        out
+    }
+
+    /// Hash of the first code child of a namespace with no name (a Rust
+    /// `impl`, by its header): what stands for its name.
+    pub fn header(&self, id: NodeId) -> Option<u64> {
+        let node = self.node(id);
+        let nameless = node.name.is_none()
+            && matches!(
+                node.role,
+                Role::Definition(NameKind::Class | NameKind::Module)
+            );
+        nameless
+            .then(|| self.code_children(id).next().map(|h| self.node(h).hash))
+            .flatten()
+    }
+
+    /// `id` and each of its ancestors, innermost first: where a definition
+    /// sits.
+    pub fn path(&self, id: NodeId) -> Vec<Step<'_>> {
+        std::iter::once(id)
+            .chain(self.ancestors(id))
+            .map(|at| {
+                let node = self.node(at);
+                Step {
+                    kind: node.kind,
+                    role: node.role,
+                    name: node.name.as_deref(),
+                    header: self.header(at),
+                }
+            })
             .collect()
     }
 
@@ -542,25 +700,21 @@ impl TreeBuilder {
 /// own span between them. Comments are skipped; leaves hash every byte.
 fn hash(tree: &Tree, i: usize, leaf: bool) -> u64 {
     let node = &tree.nodes[i];
-    let own = &node.span;
     let mut h = DefaultHasher::new();
     node.kind.hash(&mut h);
     if leaf && node.children.is_empty() {
-        tree.source[own.clone()].hash(&mut h);
+        tree.source[node.span.clone()].hash(&mut h);
         return h.finish();
     }
-    let mut cursor = own.start;
-    for &child in &node.children {
-        let c = &tree.nodes[child.0 as usize];
-        hash_text(tree, cursor..c.extent.start.min(own.end), &mut h);
-        cursor = cursor.max(c.extent.end);
-        if !c.comment {
+    tree.walk_own(NodeId(i as u32), |piece| match piece {
+        Piece::Text(text) => hash_text(tree, text, &mut h),
+        Piece::Child(c) if !tree.node(c).comment => {
             // Marks where a child sits, so text cannot slide across it.
-            h.write_u8(0xff);
-            c.hash.hash(&mut h);
+            h.write_u8(MARK);
+            tree.node(c).hash.hash(&mut h);
         }
-    }
-    hash_text(tree, cursor..own.end, &mut h);
+        Piece::Child(_) => {}
+    });
     h.finish()
 }
 
@@ -720,6 +874,41 @@ mod tests {
         assert!(spells("*_old", "x_old") && spells("a*b*c", "abc"));
         assert!(!spells("a*b*b", "ab") && !spells("name", "names"));
         assert!(spells("name", "name"));
+    }
+
+    fn masked(text: &str, name: &str) -> String {
+        let mut bytes = text.as_bytes().to_vec();
+        mask_name(&mut bytes, name.as_bytes());
+        String::from_utf8_lossy(&bytes).replace('\0', "_")
+    }
+
+    #[test]
+    fn mask_takes_whole_tokens_only() {
+        assert_eq!(masked("def f(", "f"), "def _(");
+        assert_eq!(masked("def de", "de"), "def _");
+        assert_eq!(masked("x += ", "x"), "_ += ");
+        assert_eq!(masked("x? x", "x"), "x? _");
+        assert_eq!(masked(":@x", "@x"), ":_");
+        assert_eq!(masked("@x", "x"), "@x");
+    }
+
+    #[test]
+    fn identifiers_exclude_operators() {
+        for ok in ["a", "@b", "@@c", "d?", "e=", "Foo", "_x1", "é"] {
+            assert!(is_identifier(ok), "{ok}");
+        }
+        for bad in ["+", "[]", "<=>", "", "1a", "a b"] {
+            assert!(!is_identifier(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn own_text_marks_children_and_masks_the_name() {
+        let tree = build("a + z", None);
+        let call = tree.node(Tree::ROOT).children[0];
+        assert_eq!(tree.own_text(call, false), [MARK, b'+', MARK]);
+        assert_eq!(tree.own_spans(call), vec![Range { start: 1, end: 4 }]);
+        assert_eq!(tree.own_bytes(call), [(1, b'+')]);
     }
 
     #[test]

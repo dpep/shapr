@@ -135,7 +135,7 @@ impl<'a> TreeFacts<'a> {
                 definitions.entry(qualified(tree, id)).or_default().push(id);
             }
             if frontend.construct(tree, id) == Some(Construct::Test) {
-                tests.push(lines_of(tree, &tree.node(id).extent));
+                tests.push(tree.lines(id).into_inner());
             }
         }
         TreeFacts {
@@ -148,8 +148,12 @@ impl<'a> TreeFacts<'a> {
 
 /// A method, class or module definition: what `adds_definition` counts.
 fn definition(tree: &Tree, id: NodeId) -> bool {
+    definition_role(tree.node(id).role)
+}
+
+fn definition_role(role: Role) -> bool {
     matches!(
-        tree.node(id).role,
+        role,
         Role::Definition(NameKind::Method | NameKind::Class | NameKind::Module)
     )
 }
@@ -157,27 +161,17 @@ fn definition(tree: &Tree, id: NodeId) -> bool {
 /// The definition's name under its enclosing definitions' names. A nameless
 /// one (a Rust `impl`) is named by its header's hash.
 fn qualified(tree: &Tree, id: NodeId) -> Vec<String> {
-    let mut path = Vec::new();
-    let mut at = Some(id);
-    while let Some(node) = at {
-        if definition(tree, node) {
-            let n = tree.node(node);
-            path.push(match &n.name {
-                Some(name) => name.to_string(),
-                None => format!("{:x}", n.children.first().map_or(0, |&c| tree.node(c).hash)),
-            });
-        }
-        at = tree.node(node).parent;
-    }
+    let mut path: Vec<String> = tree
+        .path(id)
+        .into_iter()
+        .filter(|step| definition_role(step.role))
+        .map(|step| match step.name {
+            Some(name) => name.to_string(),
+            None => format!("{:x}", step.header.unwrap_or(0)),
+        })
+        .collect();
     path.reverse();
     path
-}
-
-fn lines_of(tree: &Tree, span: &Span) -> (usize, usize) {
-    (
-        tree.line_of(span.start),
-        tree.line_of(span.end.saturating_sub(1).max(span.start)),
-    )
 }
 
 /// One side of a hunk: its tree and the lines it changed, ascending.
@@ -198,7 +192,7 @@ impl Side<'_> {
     }
 
     fn touches_span(&self, span: &Span) -> bool {
-        self.touches(lines_of(self.tree(), span))
+        self.touches(self.tree().span_lines(span).into_inner())
     }
 
     /// Definitions here whose own syntax (the line naming it) the change
@@ -210,7 +204,7 @@ impl Side<'_> {
             .filter(|(key, _)| !other.facts.definitions.contains_key(*key))
             .flat_map(|(_, ids)| ids.iter().copied())
             .filter(|&id| {
-                let own = self.tree().own_text(id);
+                let own = self.tree().own_bytes(id);
                 own.iter().any(|&(line, _)| self.touches((line, line)))
             })
             .collect()
@@ -351,7 +345,7 @@ impl<'a> Parsed<'a> {
             let Some(construct) = self.frontend.construct(tree, id) else {
                 continue;
             };
-            let own = tree.own_text(id);
+            let own = tree.own_bytes(id);
             // Where the construct's own syntax is (`?`, `rescue`, `>`), or
             // its first line when it has none of its own (`Err(e)`).
             let own_touched = || match own.is_empty() {
@@ -360,13 +354,7 @@ impl<'a> Parsed<'a> {
             };
             let hashes: Vec<u64> = match construct {
                 Construct::Branch { test } => {
-                    let tests: Vec<NodeId> = node
-                        .children
-                        .iter()
-                        .copied()
-                        .filter(|&c| !tree.node(c).comment)
-                        .take(test)
-                        .collect();
+                    let tests: Vec<NodeId> = tree.code_children(id).take(test).collect();
                     if !tests
                         .iter()
                         .any(|&c| side.touches_span(&tree.node(c).extent))

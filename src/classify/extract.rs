@@ -12,7 +12,7 @@
 
 use super::{Claim, Confidence, Kind, Label, Labels, Part, site};
 use crate::change::{Change, Trees};
-use crate::tree::{Jump, NameKind, NodeId, Receiver, Role, Span, Tree};
+use crate::tree::{Jump, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -164,7 +164,7 @@ struct Stats {
 impl Stats {
     /// Share of the chunk's nodes matched without renaming a parameter.
     fn verbatim(&self) -> f64 {
-        Confidence::new(1.0 - self.renamed as f64 / self.nodes as f64).get()
+        super::rounded(1.0 - self.renamed as f64 / self.nodes as f64)
     }
 
     /// Size saturates at twice the floor; a renamed node is an inferred
@@ -197,7 +197,9 @@ fn find(
         return Err("not called exactly once");
     };
     let (stmt, assigned) = statement(calls, call);
-    let a_call = enclosing_def(calls, call).ok_or("called outside a method")?;
+    let a_call = calls
+        .enclosing(call, |n| n.role == Role::Definition(NameKind::Method))
+        .ok_or("called outside a method")?;
     let scope = calls.node(b).parent.ok_or("no parent")?;
     if calls.node(a_call).parent != Some(scope) || receiver(calls, a_call) != receiver(calls, b) {
         return Err("caller is not a sibling with the same receiver");
@@ -426,23 +428,7 @@ fn ids(tree: &Tree) -> impl Iterator<Item = NodeId> + '_ {
 }
 
 fn code_children(tree: &Tree, id: NodeId) -> Vec<NodeId> {
-    tree.node(id)
-        .children
-        .iter()
-        .copied()
-        .filter(|&c| !tree.node(c).comment)
-        .collect()
-}
-
-fn enclosing_def(tree: &Tree, id: NodeId) -> Option<NodeId> {
-    let mut at = tree.node(id).parent;
-    while let Some(p) = at {
-        if tree.node(p).role == Role::Definition(NameKind::Method) {
-            return Some(p);
-        }
-        at = tree.node(p).parent;
-    }
-    None
+    tree.code_children(id).collect()
 }
 
 /// The receiver a method is defined on (`def self.x`), by its hash.
@@ -465,20 +451,8 @@ type Key<'t> = (
 );
 
 fn key(tree: &Tree, def: NodeId) -> Key<'_> {
-    let mut path = Vec::new();
-    let mut at = Some(def);
-    while let Some(id) = at {
-        let node = tree.node(id);
-        let header = (node.name.is_none()
-            && matches!(
-                node.role,
-                Role::Definition(NameKind::Class | NameKind::Module)
-            ))
-        .then(|| code_children(tree, id).first().map(|&h| tree.node(h).hash))
-        .flatten();
-        path.push((node.kind, node.name.as_deref(), header));
-        at = node.parent;
-    }
+    let path = tree.path(def);
+    let path = path.iter().map(|s| (s.kind, s.name, s.header)).collect();
     (path, receiver(tree, def))
 }
 
@@ -730,28 +704,20 @@ fn splice(
 /// A container's own text, as [`own`] reads it, with the run of children
 /// `first..=last` and everything between them standing as one child.
 fn outside(tree: &Tree, id: NodeId, first: NodeId, last: NodeId) -> Vec<u8> {
-    let node = tree.node(id);
     let region = tree.node(first).extent.start..tree.node(last).extent.end;
     let mut out = Vec::new();
-    let mut cursor = node.span.start;
-    let push = |from: usize, to: usize, out: &mut Vec<u8>| {
-        let bytes = tree.source.get(from..to.max(from)).unwrap_or_default();
-        out.extend(
-            (from..)
-                .zip(bytes)
-                .filter(|(at, b)| !b.is_ascii_whitespace() && !region.contains(at))
-                .map(|(_, b)| *b),
-        );
-    };
-    for &child in &node.children {
-        let c = tree.node(child);
-        push(cursor, c.extent.start.min(node.span.end), &mut out);
-        cursor = cursor.max(c.extent.end);
-        if !c.comment && (child == first || !region.contains(&c.extent.start)) {
-            out.push(MARK);
+    tree.walk_own(id, |piece| match piece {
+        Piece::Text(text) => out.extend(
+            text.filter(|at| !tree.source[*at].is_ascii_whitespace() && !region.contains(at))
+                .map(|at| tree.source[at]),
+        ),
+        Piece::Child(c) => {
+            let child = tree.node(c);
+            if !child.comment && (c == first || !region.contains(&child.extent.start)) {
+                out.push(MARK);
+            }
         }
-    }
-    push(cursor, node.span.end, &mut out);
+    });
     out
 }
 
@@ -1023,37 +989,14 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
             })
 }
 
-/// What the tree's hash reads of a node's own text: its non-whitespace bytes
-/// between children, a marker where each non-comment child sits. A local's
-/// name is dropped, so renamed locals compare equal: the leading name, or for
-/// a [`Role::Bind`] (`let v = …`) the first whole-token one.
+/// What the tree's hash reads of a node's own text ([`Tree::own_text`]). A
+/// local's name is dropped, so renamed locals compare equal: the leading
+/// name, or for a [`Role::Bind`] (`let v = …`) the first whole-token one.
 fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
-    let node = tree.node(id);
-    let span = &node.span;
-    let mut out = Vec::new();
-    let mut cursor = span.start;
-    let push = |from: usize, to: usize, out: &mut Vec<u8>| {
-        if from < to {
-            out.extend_from_slice(&tree.source[from..to]);
-        }
-    };
-    for &child in &node.children {
-        let c = tree.node(child);
-        push(cursor, c.extent.start.min(span.end), &mut out);
-        cursor = cursor.max(c.extent.end);
-        if !c.comment {
-            out.push(MARK);
-        }
-    }
-    push(cursor, span.end, &mut out);
+    let bind = tree.node(id).role == Role::Bind;
+    let mut out = tree.own_text(id, name.is_some() && bind);
     if let Some(name) = name
-        && node.role == Role::Bind
-    {
-        super::align::mask(&mut out, name.as_bytes());
-    }
-    out.retain(|b| !b.is_ascii_whitespace());
-    if let Some(name) = name
-        && node.role != Role::Bind
+        && !bind
         && out.starts_with(name.as_bytes())
     {
         out.drain(..name.len());
@@ -1063,9 +1006,6 @@ fn own(tree: &Tree, id: NodeId, name: Option<&str>) -> Vec<u8> {
 
 /// Largest sibling alignment table worth building; past it, give up.
 const MAX_ALIGN: usize = 1 << 20;
-
-/// Stands for a child in [`own`]; never a byte of Ruby source text.
-const MARK: u8 = 0xff;
 
 fn unmarked(text: Vec<u8>) -> Vec<u8> {
     text.into_iter().filter(|&b| b != MARK).collect()

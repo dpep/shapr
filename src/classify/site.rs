@@ -68,7 +68,18 @@ impl Significance {
             .iter()
             .map(|b| !b.is_ascii_whitespace())
             .collect();
-        for node in tree.nodes.iter().filter(|n| n.children.is_empty()) {
+        // A node's extent holds its children's, so only nodes reaching into
+        // the region can hold a leaf that does.
+        let mut stack = vec![Tree::ROOT];
+        while let Some(id) = stack.pop() {
+            let node = tree.node(id);
+            if node.extent.start >= region.end || node.extent.end <= region.start {
+                continue;
+            }
+            if !node.children.is_empty() {
+                stack.extend(&node.children);
+                continue;
+            }
             let from = node.extent.start.max(region.start);
             let to = node.extent.end.min(region.end);
             for mark in marks
@@ -114,7 +125,7 @@ fn cover(tree: &Tree, span: &Span, sig: &Significance) -> Vec<NodeId> {
     let mut at = Tree::ROOT;
     loop {
         let node = tree.node(at);
-        if own_text_in(tree, at, span) {
+        if tree.own_offsets(at).any(|o| span.contains(&o)) {
             return vec![at];
         }
         let overlapping: Vec<NodeId> = node
@@ -129,19 +140,6 @@ fn cover(tree: &Tree, span: &Span, sig: &Significance) -> Vec<NodeId> {
             _ => return overlapping,
         }
     }
-}
-
-/// Non-whitespace bytes of `id`'s own span, outside its children, in `span`.
-fn own_text_in(tree: &Tree, id: NodeId, span: &Span) -> bool {
-    let node = tree.node(id);
-    let own = clip(&node.span, span);
-    (own.start..own.end).any(|at| {
-        !tree.source[at].is_ascii_whitespace()
-            && !node
-                .children
-                .iter()
-                .any(|&c| tree.node(c).extent.contains(&at))
-    })
 }
 
 fn clip(a: &Span, b: &Span) -> Span {

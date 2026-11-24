@@ -8,7 +8,7 @@
 
 use super::site::Site;
 use crate::change::Trees;
-use crate::tree::{NodeId, Span, Tree};
+use crate::tree::{NodeId, Span, Tree, is_identifier};
 
 /// An aligned node whose name changed.
 pub(super) struct Diff {
@@ -30,7 +30,7 @@ impl Alignment {
     /// Where names changed, on each side: the renamed nodes' own text.
     pub fn renamed(&self, trees: &Trees) -> (Vec<Span>, Vec<Span>) {
         let own = |tree: &Tree, ids: &mut dyn Iterator<Item = NodeId>| -> Vec<Span> {
-            ids.flat_map(|id| own_spans(tree, id)).collect()
+            ids.flat_map(|id| tree.own_spans(id)).collect()
         };
         (
             own(&trees.before, &mut self.diffs.iter().map(|d| d.before)),
@@ -80,16 +80,9 @@ fn pair(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, out: &mut Alignment) {
             .push((vec![bn.extent.clone()], vec![an.extent.clone()]));
         return;
     }
-    let code = |t: &Tree, id: NodeId| -> Vec<NodeId> {
-        t.node(id)
-            .children
-            .iter()
-            .copied()
-            .filter(|&c| !t.node(c).comment)
-            .collect()
-    };
-    let (bc, ac) = (code(b, bi), code(a, ai));
-    if bc.len() != ac.len() || own_text(b, bi) != own_text(a, ai) {
+    let (bc, ac): (Vec<NodeId>, Vec<NodeId>) =
+        (b.code_children(bi).collect(), a.code_children(ai).collect());
+    if bc.len() != ac.len() || b.own_text(bi, true) != a.own_text(ai, true) {
         return differs(out);
     }
     // A leaf's text is its value, whitespace included (string content).
@@ -107,111 +100,9 @@ fn pair(b: &Tree, bi: NodeId, a: &Tree, ai: NodeId, out: &mut Alignment) {
             after: ai,
         });
     } else {
-        out.kept.push((own_spans(b, bi), own_spans(a, ai)));
+        out.kept.push((b.own_spans(bi), a.own_spans(ai)));
     }
     for (b2, a2) in bc.into_iter().zip(ac) {
         pair(b, b2, a, a2, out);
-    }
-}
-
-/// The node's own source, outside its children, with whitespace dropped and
-/// its name (where the text spells it) masked, so two nodes differing only
-/// in name compare equal.
-fn own_text(tree: &Tree, id: NodeId) -> Vec<u8> {
-    let node = tree.node(id);
-    let mut text = Vec::new();
-    let mut cursor = node.span.start;
-    for &child in &node.children {
-        let c = tree.node(child);
-        let end = c.extent.start.min(node.span.end);
-        if cursor < end {
-            text.extend_from_slice(&tree.source[cursor..end]);
-        }
-        if !c.comment {
-            text.push(0x01);
-        }
-        cursor = cursor.max(c.extent.end);
-    }
-    if cursor < node.span.end {
-        text.extend_from_slice(&tree.source[cursor..node.span.end]);
-    }
-    if let Some(name) = &node.name {
-        mask(&mut text, name.as_bytes());
-    }
-    text.retain(|b| !b.is_ascii_whitespace());
-    text
-}
-
-/// The stretches of a node's own span outside its children.
-fn own_spans(tree: &Tree, id: NodeId) -> Vec<Span> {
-    let node = tree.node(id);
-    let mut out = Vec::new();
-    let mut cursor = node.span.start;
-    for &child in &node.children {
-        let c = tree.node(child);
-        let end = c.extent.start.min(node.span.end);
-        if cursor < end {
-            out.push(cursor..end);
-        }
-        cursor = cursor.max(c.extent.end);
-    }
-    if cursor < node.span.end {
-        out.push(cursor..node.span.end);
-    }
-    out
-}
-
-/// Replaces the first occurrence of `name` that stands as a whole token.
-pub(super) fn mask(text: &mut Vec<u8>, name: &[u8]) {
-    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
-    let suffixed = name.last().is_some_and(|b| b"?!=".contains(b));
-    let at = (0..text.len()).find(|&i| {
-        text[i..].starts_with(name)
-            && (i == 0 || !(word(text[i - 1]) || b"@$".contains(&text[i - 1])))
-            && text
-                .get(i + name.len())
-                .is_none_or(|&n| !word(n) && (suffixed || !b"?!".contains(&n)))
-    });
-    if let Some(i) = at {
-        text.splice(i..i + name.len(), [0]);
-    }
-}
-
-fn is_identifier(name: &str) -> bool {
-    let bare = name.trim_start_matches(['@', '$']);
-    let bare = bare.strip_suffix(['?', '!', '=']).unwrap_or(bare);
-    let mut chars = bare.chars();
-    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
-        && chars.all(|c| c.is_alphanumeric() || c == '_')
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn masked(text: &str, name: &str) -> String {
-        let mut bytes = text.as_bytes().to_vec();
-        mask(&mut bytes, name.as_bytes());
-        String::from_utf8_lossy(&bytes).replace('\0', "_")
-    }
-
-    #[test]
-    fn mask_takes_whole_tokens_only() {
-        assert_eq!(masked("def f(", "f"), "def _(");
-        assert_eq!(masked("def de", "de"), "def _");
-        assert_eq!(masked("x += ", "x"), "_ += ");
-        assert_eq!(masked("x? x", "x"), "x? _");
-        assert_eq!(masked(":@x", "@x"), ":_");
-        assert_eq!(masked("@x", "x"), "@x");
-    }
-
-    #[test]
-    fn identifiers_exclude_operators() {
-        for ok in ["a", "@b", "@@c", "d?", "e=", "Foo", "_x1", "é"] {
-            assert!(is_identifier(ok), "{ok}");
-        }
-        for bad in ["+", "[]", "<=>", "", "1a", "a b"] {
-            assert!(!is_identifier(bad), "{bad}");
-        }
     }
 }

@@ -56,7 +56,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
                 residual.reason = reason;
                 residual.confidence = confidence;
                 if let Some(similarity) = compared.similarity {
-                    let rounded = Confidence::new(similarity).get();
+                    let rounded = super::rounded(similarity);
                     residual
                         .evidence
                         .values
@@ -192,13 +192,7 @@ fn comment_texts(tree: &Tree, lines: &BTreeSet<usize>) -> Vec<String> {
         .nodes
         .iter()
         .filter(|n| n.comment)
-        .filter(|n| {
-            let (first, last) = (
-                tree.line_of(n.extent.start),
-                tree.line_of(n.extent.end.saturating_sub(1).max(n.extent.start)),
-            );
-            lines.range(first..=last).next().is_some()
-        })
+        .filter(|n| lines.range(tree.span_lines(&n.extent)).next().is_some())
         .map(|n| comment_text(tree, &n.extent))
         .collect();
     texts.sort();

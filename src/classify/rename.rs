@@ -165,7 +165,7 @@ pub(super) fn run(change: &Change, labels: &mut Labels) {
             let own = |tree: &Tree, side: fn(&Diff) -> NodeId| -> BTreeSet<usize> {
                 diffs
                     .iter()
-                    .flat_map(|(d, _)| tree.own_text(side(d)))
+                    .flat_map(|(d, _)| tree.own_bytes(side(d)))
                     .map(|(line, _)| line)
                     .collect()
             };
@@ -516,17 +516,13 @@ fn is_name_node(tree: &Tree, id: NodeId) -> bool {
 
 /// The method, class or module enclosing `id`: where a local lives.
 fn gate(tree: &Tree, id: NodeId) -> NodeId {
-    let mut at = tree.node(id).parent;
-    while let Some(p) = at {
-        if matches!(
-            tree.node(p).role,
+    let gate = |n: &crate::tree::Node| {
+        matches!(
+            n.role,
             Role::Definition(NameKind::Method | NameKind::Class | NameKind::Module)
-        ) {
-            return p;
-        }
-        at = tree.node(p).parent;
-    }
-    Tree::ROOT
+        )
+    };
+    tree.enclosing(id, gate).unwrap_or(Tree::ROOT)
 }
 
 /// Whether the definition, or one enclosing it, carries syntax that makes its
