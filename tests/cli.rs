@@ -1012,6 +1012,9 @@ fn usage_summarizes_the_log_and_reset_empties_it() {
     let reset = records(&shapr_env(dir.path(), &["-J", "--usage", "--reset"], &env));
     assert_eq!(reset[0]["runs"], 0);
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
+    // An empty log is one line, not a table of blank rows.
+    let text = String::from_utf8(shapr_env(dir.path(), &["--usage"], &env).stdout).unwrap();
+    assert_eq!(text, format!("no runs logged yet at {}\n", log.display()));
     assert_eq!(
         shapr_env(dir.path(), &["--reset"], &env).status.code(),
         Some(64)
@@ -1050,6 +1053,28 @@ fn the_log_defaults_to_xdg_state_and_status_shows_it() {
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
     let status = report(&shapr_env(dir.path(), &["-j", "--status"], &off));
     assert_eq!(status["usage"]["enabled"], false);
+}
+
+#[test]
+fn shapr_usage_reads_the_usual_words_for_off_and_on() {
+    let dir = branched();
+    let home = tempfile::tempdir().unwrap();
+    let home_path = home.path().to_str().unwrap();
+    for (value, enabled) in [
+        ("0", false),
+        ("false", false),
+        ("off", false),
+        ("No", false),
+        ("1", true),
+        ("true", true),
+        ("on", true),
+        ("YES", true),
+    ] {
+        // Set explicitly, it wins over CI=true.
+        let env = [("SHAPR_USAGE", value), ("HOME", home_path), ("CI", "true")];
+        let status = report(&shapr_env(dir.path(), &["-j", "--status"], &env));
+        assert_eq!(status["usage"]["enabled"], enabled, "SHAPR_USAGE={value}");
+    }
 }
 
 #[test]

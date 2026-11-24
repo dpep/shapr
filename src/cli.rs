@@ -52,8 +52,9 @@ USAGE LOG
   Each classify or norms run appends one JSON line to $XDG_STATE_HOME/shapr/usage.jsonl
   (else ~/.local/state/shapr/usage.jsonl): the command, input form, flag names, format,
   exit code, duration and counts. Never paths, repositories, revisions, code, messages
-  or URLs. SHAPR_USAGE=0 turns it off, an absolute path moves it; it is off under
-  CI=true. --usage summarizes it, --usage --reset empties it, --status shows where it is.
+  or URLs. SHAPR_USAGE=0 (false, off, no) turns it off, 1 (true, on, yes) on, and an
+  absolute path moves it; CI=true turns it off unless SHAPR_USAGE is set. --usage
+  summarizes it, --usage --reset empties it, --status shows where it is.
 
 EXIT CODES
   0   success, whatever the verdict: the verdict is in the output
@@ -729,6 +730,11 @@ fn usage(format: Format, reset: bool, quiet: bool) -> ExitCode {
     let rendered = match format {
         Format::Json => serde_json::to_string_pretty(&log).map_err(std::io::Error::from),
         Format::Ndjson => serde_json::to_string(&log).map_err(std::io::Error::from),
+        Format::Text if log.runs == 0 => Ok(match &log.path {
+            Some(path) if log.enabled => format!("no runs logged yet at {path}"),
+            Some(path) => format!("no runs logged yet at {path} (the log is off)"),
+            None => "no runs logged: no home directory for the log".to_string(),
+        }),
         Format::Text => {
             let span = match (&log.first, &log.last) {
                 (Some(first), Some(last)) => format!(", {first} to {last}"),
