@@ -535,6 +535,22 @@ fn is_comment(n: &Node<'_>) -> bool {
     matches!(n.kind(), "line_comment" | "block_comment")
 }
 
+/// A doc comment's text, which rustdoc reads as a `#[doc]` attribute.
+fn is_doc(text: &str) -> bool {
+    (text.starts_with("///") && !text.starts_with("////"))
+        || text.starts_with("//!")
+        || (text.starts_with("/**") && !text.starts_with("/***") && text != "/**/")
+        || text.starts_with("/*!")
+}
+
+/// The attributes before item `n`, across the comments between them.
+fn attributes<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
+    std::iter::successors(n.prev_sibling(), |s| s.prev_sibling())
+        .take_while(|s| is_comment(s) || s.kind() == "attribute_item")
+        .filter(|s| s.kind() == "attribute_item")
+        .collect()
+}
+
 struct Walker<'a> {
     src: &'a [u8],
     b: &'a mut TreeBuilder,
@@ -572,13 +588,33 @@ impl<'a> Walker<'a> {
         std::str::from_utf8(&self.src[span(n)]).unwrap_or_default()
     }
 
-    /// A doc comment's fenced code is a doctest, compiled and run: code.
+    /// A doc comment's fenced code is a doctest, compiled and run: code. So
+    /// is a doc comment a macro may read as a `#[doc]` attribute.
     fn comment(&mut self, n: &Node<'_>) {
-        if self.doctests.contains(&n.start_byte()) {
+        if self.doctests.contains(&n.start_byte()) || self.doc_read(n) {
             self.b.directive(span(n));
         } else {
             self.b.comment(span(n));
         }
+    }
+
+    /// Whether doc comment `n` reaches a macro as a `#[doc]` attribute: it
+    /// sits in a macro's tokens, or on or inside an item whose attributes
+    /// may read its tokens (a derive outside std, an attribute macro).
+    fn doc_read(&self, n: &Node<'_>) -> bool {
+        let text = self.text(n);
+        if !is_doc(text) {
+            return false;
+        }
+        // An inner doc (`//!`) documents the item around it, not the next one.
+        let outer = !(text.starts_with("//!") || text.starts_with("/*!"));
+        let item = std::iter::successors(n.next_sibling(), |s| s.next_sibling())
+            .filter(|_| outer)
+            .find(|s| !is_comment(s) && s.kind() != "attribute_item");
+        let read = |item: &Node<'_>| roles::reads_tokens(&attributes(item), self.src);
+        item.is_some_and(|i| read(&i))
+            || std::iter::successors(n.parent(), |p| p.parent())
+                .any(|p| p.kind() == "token_tree" || read(&p))
     }
 
     fn is_local(&self, name: &str) -> bool {

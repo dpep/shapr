@@ -1,0 +1,6 @@
+{
+  "description": "a doc comment inside a macro's tokens is a doc attribute the macro may match",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

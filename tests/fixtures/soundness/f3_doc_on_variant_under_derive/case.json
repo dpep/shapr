@@ -1,0 +1,6 @@
+{
+  "description": "a variant's doc comment under a derive outside std may be read by it",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "description": "std's derives never read doc comments, so rewording one under them stays a comment",
+  "expect": {
+    "hunks": [{"kind": "comment_only", "verdict": "structure"}]
+  }
+}

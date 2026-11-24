@@ -444,7 +444,10 @@ are stated in Ruby's terms; for Rust:
   compiles and runs: its fence lines (info string included) and the lines
   between them are code, as is an indented code block (by rustdoc's Markdown:
   four columns past the text, or past an open list item's, after a blank
-  line), and a `/** */` block holding either. Attributes
+  line), and a `/** */` block holding either. A doc comment a macro may
+  read as a `#[doc]` attribute is code too: one in a macro's arguments, or on
+  or inside an item under a derive outside std or an attribute macro (a CLI
+  parser's help text, a schema's descriptions). Attributes
   (`#[...]`, `#![...]`, `#[doc = "..."]`) are code, and belong to the item
   after them. A doctest's code isn't parsed into the tree, so a method,
   constant or field's name anywhere in it, as a word, counts as a use: a

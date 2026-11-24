@@ -1,0 +1,6 @@
+{
+  "description": "a schema derive reads doc comments as descriptions, so adding one is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

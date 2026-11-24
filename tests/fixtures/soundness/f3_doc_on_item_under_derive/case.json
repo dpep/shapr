@@ -1,0 +1,6 @@
+{
+  "description": "an item's own doc comment, before a derive outside std, may be read by it (a CLI's about text)",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

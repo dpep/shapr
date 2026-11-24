@@ -1,0 +1,6 @@
+{
+  "description": "an attribute macro reads every token of its item, doc attributes inside it included",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

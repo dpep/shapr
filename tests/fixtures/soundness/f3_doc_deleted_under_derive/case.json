@@ -1,0 +1,6 @@
+{
+  "description": "deleting a field's doc comment under a derive outside std removes text the derive may read",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

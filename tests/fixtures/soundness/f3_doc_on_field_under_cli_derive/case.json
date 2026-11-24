@@ -1,0 +1,6 @@
+{
+  "description": "a derive outside std may read a field's doc comment (a CLI parser's help text), so rewording it is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

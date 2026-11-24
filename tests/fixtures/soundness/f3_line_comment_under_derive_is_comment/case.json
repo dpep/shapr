@@ -1,0 +1,6 @@
+{
+  "description": "a plain comment isn't a token, so no derive sees it",
+  "expect": {
+    "hunks": [{"kind": "comment_only", "verdict": "structure"}]
+  }
+}
