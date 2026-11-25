@@ -1560,7 +1560,7 @@ fn a_file_too_big_to_compare_is_logic_and_says_why() {
     let hunk = &hunks(&report)[0];
     assert_eq!(hunk["verdict"], "behavior");
     let reason = lead(hunk)["reason"].as_str().unwrap();
-    assert!(reason.contains("too big to compare"), "{reason}");
+    assert!(reason.contains("not compared: too big"), "{reason}");
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
@@ -1599,7 +1599,7 @@ fn a_file_added_too_big_to_compare_is_logic() {
         .find(|h| h["file"] == "lib/b.rb")
         .unwrap();
     let reason = lead(hunk)["reason"].as_str().unwrap();
-    assert!(reason.contains("too big to compare"), "{reason}");
+    assert!(reason.contains("not compared: too big"), "{reason}");
     assert_eq!(hunk["verdict"], "behavior");
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
@@ -1659,9 +1659,11 @@ fn a_counted_file_shapr_didnt_compare_stays_in_the_verdict() {
             .unwrap();
         assert_eq!(hunk["verdict"], "behavior", "{name}");
         let reason = lead(hunk)["reason"].as_str().unwrap();
+        assert!(reason.starts_with("not compared: "), "{name}: {reason}");
         assert!(reason.contains(why), "{name}: {reason}");
         let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
         assert!(!text.contains("outside the verdict"), "{name}: {text}");
+        assert!(!text.contains("too big to compare"), "{name}: {text}");
     }
     // On stdin: a diff with no blob ids can't be read.
     let dir = repo(&[&[renamed]]);

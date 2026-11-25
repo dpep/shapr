@@ -108,17 +108,15 @@ fn changed_bytes(diff: &FileDiff, before: &[u8], after: &[u8]) -> usize {
 fn too_big(lines: usize, bytes: usize, spent: usize) -> Option<String> {
     let size = lines.max(bytes.div_ceil(LINE_BYTES));
     if lines > MAX_LINES {
-        Some(format!(
-            "too big to compare: {lines} changed lines, past {MAX_LINES}"
-        ))
+        Some(format!("too big: {lines} changed lines, past {MAX_LINES}"))
     } else if size > MAX_LINES {
         Some(format!(
-            "too big to compare: {bytes} changed bytes, past {}",
+            "too big: {bytes} changed bytes, past {}",
             MAX_LINES * LINE_BYTES
         ))
     } else if spent + size * size > MAX_CHANGE_WORK {
         Some(format!(
-            "too big to compare: the change's files' changed lines, squared, pass {MAX_CHANGE_WORK}"
+            "too big: the change's files' changed lines, squared, pass {MAX_CHANGE_WORK}"
         ))
     } else {
         None
@@ -130,7 +128,7 @@ fn too_wide(before: &Tree, after: &Tree) -> Option<String> {
     let widest = |t: &Tree| t.nodes.iter().map(|n| n.children.len()).max().unwrap_or(0);
     let (b, a) = (widest(before), widest(after));
     (b.saturating_mul(a) > MAX_WIDTH).then(|| {
-        format!("too big to compare: a node of {b} children before and {a} after, past {MAX_WIDTH} multiplied")
+        format!("too big: a node of {b} children before and {a} after, past {MAX_WIDTH} multiplied")
     })
 }
 
@@ -254,9 +252,7 @@ fn file_change(
                 let after = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())?;
                 let largest = before.len().max(after.len());
                 if largest > MAX_FILE_BYTES {
-                    return Err(format!(
-                        "too big to compare: {largest} bytes, past {MAX_FILE_BYTES}"
-                    ));
+                    return Err(format!("too big: {largest} bytes, past {MAX_FILE_BYTES}"));
                 }
                 let bytes = changed_bytes(&diff, &before, &after);
                 if let Some(why) = too_big(lines, bytes, *spent) {
