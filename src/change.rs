@@ -347,7 +347,7 @@ impl Category {
     ];
 
     /// Its hunks count toward the verdict.
-    pub fn counted(self) -> bool {
+    fn counted(self) -> bool {
         matches!(
             self,
             Category::Code | Category::Test | Category::Config | Category::Manifest

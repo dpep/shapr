@@ -664,6 +664,19 @@ fn global_format_flags_may_precede_norms() {
 }
 
 #[test]
+fn a_global_flag_with_a_value_may_precede_norms() {
+    let dir = repo(&[&[("a.rb", "A = 'a'\n")]]);
+    for args in [
+        &["--norm-threshold", "0.7", "-J", "norms", "a.rb"][..],
+        &["--norm-threshold=0.7", "-J", "norms", "a.rb"],
+    ] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        assert!(records(&out).iter().any(|r| r["record"] == "summary"));
+    }
+}
+
+#[test]
 fn help_and_usage_name_every_kind_and_both_commands() {
     let dir = tempfile::tempdir().unwrap();
     let help = shapr(dir.path(), &["--help"]);
@@ -1050,8 +1063,24 @@ fn each_run_appends_names_and_counts_never_paths_or_revisions() {
         shapr_env(dir.path(), &["nope"], &env).status.code(),
         Some(2)
     );
-    // Neither --usage nor --status is a run worth logging.
-    shapr_env(dir.path(), &["--usage"], &env);
+    let cache = state.path().join("cache");
+    let cache = cache.to_str().unwrap();
+    let refactor = state.path().join("secret-refactor.md");
+    std::fs::write(&refactor, "refactor: the secret thing\n").unwrap();
+    for args in [
+        &["--usage"][..],
+        &["-j", "--status", "--cache-dir", cache],
+        &["-q", "--clear-cache", "--cache-dir", cache],
+        &["--completions", "bash"],
+        // A refactor claim on a commit that changes behavior.
+        &["-q", "--message", refactor.to_str().unwrap(), "main"],
+    ] {
+        assert_eq!(
+            shapr_env(dir.path(), args, &env).status.code(),
+            Some(0),
+            "{args:?}"
+        );
+    }
 
     let text = std::fs::read_to_string(&log).unwrap();
     for secret in [root, "feat", "lib", "secret", "nope", "a.rb"] {
@@ -1061,7 +1090,7 @@ fn each_run_appends_names_and_counts_never_paths_or_revisions() {
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
-    assert_eq!(lines.len(), 3, "{text}");
+    assert_eq!(lines.len(), 8, "{text}");
     let classify = &lines[0];
     assert_eq!(classify["command"], "classify");
     assert_eq!(classify["input"], "range");
@@ -1075,6 +1104,8 @@ fn each_run_appends_names_and_counts_never_paths_or_revisions() {
     assert_eq!(classify["counts"]["files"], 1);
     assert_eq!(classify["counts"]["verdict"], "behavior");
     assert_eq!(classify["counts"]["kinds"]["logic"], 1);
+    assert_eq!(classify["counts"]["claim_conflicts"], 0);
+    assert!(classify["counts"]["styles"].is_object(), "{classify}");
     assert!(classify["ts"].as_str().unwrap().ends_with('Z'));
     assert!(classify["duration_ms"].is_u64());
     assert_eq!(classify["version"], env!("CARGO_PKG_VERSION"));
@@ -1089,6 +1120,25 @@ fn each_run_appends_names_and_counts_never_paths_or_revisions() {
     assert_eq!(
         (lines[2]["exit"].as_u64(), lines[2]["input"].clone()),
         (Some(2), Value::Null)
+    );
+    assert_eq!(lines[7]["counts"]["claim_conflicts"], 1, "{}", lines[7]);
+    let early: Vec<(&str, &str)> = lines[3..7]
+        .iter()
+        .map(|l| {
+            (
+                l["command"].as_str().unwrap(),
+                l["format"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        early,
+        [
+            ("usage", "text"),
+            ("status", "json"),
+            ("clear-cache", "text"),
+            ("completions", "text")
+        ]
     );
 }
 
@@ -1125,8 +1175,9 @@ fn usage_summarizes_the_log_and_reset_empties_it() {
     assert_eq!(summary["kinds"]["logic"], 6);
     assert!(summary["first"].as_str() <= summary["last"].as_str());
     let text = String::from_utf8(shapr_env(dir.path(), &["--usage"], &env).stdout).unwrap();
+    // The first --usage is a run too; emptying the log is not.
     assert!(
-        text.contains("3 runs") && text.contains("worktree 1"),
+        text.contains("4 runs") && text.contains("worktree 1"),
         "{text}"
     );
 
@@ -1209,10 +1260,11 @@ fn the_log_defaults_to_xdg_state_and_status_shows_it() {
 
     // Off: written nowhere, and said so.
     let off = [("SHAPR_USAGE", "0"), ("HOME", home_path)];
+    let logged = std::fs::read_to_string(&log).unwrap();
     shapr_env(dir.path(), &["-q", "feat"], &off);
-    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
     let status = report(&shapr_env(dir.path(), &["-j", "--status"], &off));
     assert_eq!(status["usage"]["enabled"], false);
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), logged);
 }
 
 #[test]
@@ -1508,9 +1560,11 @@ fn untracked_files_a_working_tree_form_leaves_out_are_counted_and_named() {
 
 #[test]
 fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
+    let long = "docs/a/very/long/path/that/would/pad/every/line.md";
     let dir = repo(&[
         &[
             ("README.md", "hi\n"),
+            (long, "hi\n"),
             ("Makefile", "x\n"),
             ("config/x.yml", "a: 1\n"),
             ("config/y.yml", "b: 1  \n"),
@@ -1518,6 +1572,7 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         ],
         &[
             ("README.md", "hello\n"),
+            (long, "hello\n"),
             ("Makefile", "y\n"),
             ("config/x.yml", "a: 2\n"),
             ("config/y.yml", "b: 1\n"),
@@ -1525,18 +1580,17 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         ],
     ]);
     let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
-    let lines: Vec<String> = hunk_lines(&text)
-        .take(5)
-        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-        .collect();
+    // Outside the verdict, one line per description after the listed hunks,
+    // which a long path among them doesn't pad.
+    let lines: Vec<&str> = hunk_lines(&text).collect();
     assert_eq!(
         lines,
         [
-            "Makefile:1 unknown file (outside the verdict)",
-            "README.md:1 docs change (outside the verdict)",
-            "config/x.yml:1 config change",
-            "config/y.yml:1 config change, whitespace only (outside the verdict)",
-            "spec/fixtures/f.rb:1 fixture change (outside the verdict)",
+            "config/x.yml:1  config change",
+            "unknown file (outside the verdict), 1 hunk: Makefile:1",
+            "docs change (outside the verdict), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
+            "config change, whitespace only (outside the verdict), 1 hunk: config/y.yml:1",
+            "fixture change (outside the verdict), 1 hunk: spec/fixtures/f.rb:1",
         ],
         "{text}"
     );

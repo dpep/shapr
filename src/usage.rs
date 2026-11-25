@@ -1,4 +1,5 @@
-//! The usage log: one NDJSON line per run of `classify` or `norms`, with
+//! The usage log: one NDJSON line per run (of `classify`, `norms`, or a
+//! command answered before them: `--status`, `--usage`, ...), with
 //! names and counts only (never paths, repositories, revisions, code,
 //! messages or URLs), and its summary for `--usage`. Logging never fails a
 //! run: an IO error is only logged under `-v`.
@@ -33,7 +34,7 @@ fn with(f: impl FnOnce(&mut Run)) {
     }
 }
 
-/// The run is a `classify` or `norms` run, and gets a line.
+/// The run is a COMMAND run, and gets a line.
 pub fn command(name: &'static str) {
     with(|r| r.command = Some(name));
 }
@@ -69,6 +70,16 @@ pub fn counts(record: &impl Serialize, keys: &[&str]) {
                 r.counts.insert(key.to_string(), value.clone());
             }
         }
+    });
+}
+
+/// VALUE as the run's count under KEY.
+pub fn count(key: &str, value: &impl Serialize) {
+    let Ok(value) = serde_json::to_value(value) else {
+        return;
+    };
+    with(|r| {
+        r.counts.insert(key.to_string(), value);
     });
 }
 
@@ -138,8 +149,7 @@ fn default_path() -> Option<PathBuf> {
     Some(state.join("shapr").join("usage.jsonl"))
 }
 
-/// Appends the run's line, when it was a `classify` or `norms` run and the
-/// log is on. FLAGS are the names of the flags given.
+/// Appends the run's line, when it named its command and the log is on. FLAGS are the names of the flags given.
 pub fn finish(started: Instant, flags: Vec<String>) {
     let Some(run) = RUN.lock().ok().and_then(|mut r| r.take()) else {
         return;

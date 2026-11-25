@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Category, Change, FileChange};
-use crate::claims::{self, Claims, CodeFacts, Finding, HunkFacts};
+use crate::claims::{self, Claims, Finding};
 use crate::classify::{
     self, Assumption, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
@@ -56,7 +56,7 @@ impl Verdict {
     }
 
     /// Counts toward the change's verdict.
-    fn counted(self) -> bool {
+    pub(crate) fn counted(self) -> bool {
         matches!(
             self,
             Verdict::Structure | Verdict::Behavior | Verdict::Mixed
@@ -217,19 +217,19 @@ pub struct FileRecord<'a> {
 #[derive(Serialize)]
 pub struct HunkRecord<'a> {
     record: &'static str,
-    id: usize,
+    pub(crate) id: usize,
     file: &'a str,
     old_file: Option<&'a str>,
     language: Option<&'static str>,
     parsed: bool,
-    category: Category,
+    pub(crate) category: Category,
     before: Lines,
     after: Lines,
     kind: Kind,
-    verdict: Verdict,
+    pub(crate) verdict: Verdict,
     #[serde(flatten)]
     lines: LineCounts,
-    parts: Vec<PartRecord>,
+    pub(crate) parts: Vec<PartRecord>,
     /// Against the norms of the code around it; experimental.
     pub style: Option<crate::norms::HunkStyle>,
     /// Of `review_lines`, those in test code.
@@ -238,19 +238,22 @@ pub struct HunkRecord<'a> {
     /// The text output's note on its relocated lines.
     #[serde(skip)]
     relocated_note: Option<String>,
+    /// Its file counts toward the verdict ([`FileChange::counts`]).
+    #[serde(skip)]
+    counted_file: bool,
 }
 
 /// A part of a hunk, or its residual (kind `logic`).
 #[derive(Serialize)]
 pub struct PartRecord {
-    kind: Kind,
+    pub(crate) kind: Kind,
     structure: bool,
     lines: Runs,
     confidence: Confidence,
     reason: String,
     evidence: EvidenceRecord,
     detail: Map<String, Value>,
-    facets: Vec<Facet>,
+    pub(crate) facets: Vec<Facet>,
     assumptions: Vec<Assumption>,
     review_lines: usize,
     /// Changed lines it covers, for `structure_share`.
@@ -331,7 +334,7 @@ pub struct Summary {
     structure_share: f64,
     refactor_lines: usize,
     refactor_share: f64,
-    claims: Claims,
+    pub claims: Claims,
     /// Experimental: per norm config sets, whether the change moves the
     /// code toward it; filled in beside the hunks' style.
     pub config_trajectory: Vec<crate::norms::Trajectory>,
@@ -387,6 +390,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 style: None,
                 test_review_lines,
                 relocated_note: relocated_note(lines.relocated_lines, &label.residual),
+                counted_file: file.counts(),
             });
         }
         files.push(FileRecord {
@@ -611,25 +615,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         .map(|p| p.split_once('/').map_or(".", |(s, _)| s))
         .collect();
     let total = lines.changed();
-    // Only hunks in the verdict are evidence against a claim.
-    claims.check(&CodeFacts {
-        structure: verdict == Verdict::Structure,
-        hunks: hunks
-            .iter()
-            .filter(|h| h.verdict.counted())
-            .map(|h| HunkFacts {
-                id: h.id,
-                behavior: matches!(h.verdict, Verdict::Behavior | Verdict::Mixed),
-                test: h.category == Category::Test
-                    || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
-                code: matches!(h.category, Category::Code | Category::Test),
-                reorder: h
-                    .parts
-                    .iter()
-                    .any(|p| matches!(p.kind, Kind::Reorder | Kind::Move)),
-            })
-            .collect(),
-    });
+    claims.check(verdict, hunks);
     Summary {
         record: "summary",
         verdict,
@@ -736,20 +722,23 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     if !report.hunks.is_empty() {
         writeln!(out)?;
     }
-    let width = report
-        .hunks
-        .iter()
-        .map(|h| place(h).len())
-        .max()
-        .unwrap_or(0);
+    // Uncompared hunks outside the verdict, one line per description, so
+    // they never crowd out the hunks a reviewer reads.
+    let mut outside: Vec<(String, Vec<digest::Place>)> = Vec::new();
+    let mut listed = Vec::new();
     for hunk in &report.hunks {
-        let outside = if hunk.verdict.counted() {
-            ""
-        } else {
-            " (outside the verdict)"
-        };
+        match uncompared(hunk).filter(|_| !hunk.verdict.counted()) {
+            Some(plain) => match outside.iter_mut().find(|(p, _)| *p == plain) {
+                Some((_, at)) => at.push(digest::place(hunk)),
+                None => outside.push((plain, vec![digest::place(hunk)])),
+            },
+            None => listed.push(hunk),
+        }
+    }
+    let width = listed.iter().map(|h| place(h).len()).max().unwrap_or(0);
+    for hunk in listed {
         if let Some(plain) = uncompared(hunk) {
-            emit(out, &format!("{:width$}  {plain}{outside}", place(hunk)))?;
+            emit(out, &format!("{:width$}  {plain}", place(hunk)))?;
             continue;
         }
         // One line per part; the place names the hunk on its first.
@@ -782,6 +771,15 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         for line in hunk.style.iter().flat_map(crate::norms::text) {
             emit(out, &format!("{:width$}  {line}", ""))?;
         }
+    }
+    for (plain, at) in outside {
+        let n = at.len();
+        let hunks = if n == 1 { "hunk" } else { "hunks" };
+        let at = digest::places(&at);
+        emit(
+            out,
+            &format!("{plain} (outside the verdict), {n} {hunks}: {at}"),
+        )?;
     }
     Ok(())
 }
@@ -1020,7 +1018,7 @@ fn uncompared(hunk: &HunkRecord) -> Option<String> {
         Category::Code | Category::Test => return None,
         Category::Unknown | Category::Binary => format!("{} file", hunk.category.as_str()),
         // A counted file outside the verdict changed only in whitespace.
-        category if category.counted() && hunk.verdict == Verdict::None => {
+        category if hunk.counted_file && hunk.verdict == Verdict::None => {
             format!("{} change, whitespace only", category.as_str())
         }
         category => format!("{} change", category.as_str()),

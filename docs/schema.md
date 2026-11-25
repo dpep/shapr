@@ -1379,13 +1379,15 @@ directory.
 ## `usage` record
 
 `shapr --usage` (after `--reset` empties the log) summarizes the usage log, one
-object under `-j` or `-J`. Each `classify` or `norms` run appends a line to the
-log, `$XDG_STATE_HOME/shapr/usage.jsonl`, else
-`~/.local/state/shapr/usage.jsonl`: `ts` (UTC), `version`, `command`, `input`
+object under `-j` or `-J`. Each run appends a line to the log (except
+`--usage --reset`, which empties it), `$XDG_STATE_HOME/shapr/usage.jsonl`, else
+`~/.local/state/shapr/usage.jsonl`: `ts` (UTC), `version`, `command`
+(`classify`, `norms`, `status`, `clear-cache`, `usage`, `completions`), `input`
 and `paths` (as `meta`), `flags` (the long names of the flags given, never their
 values), `format` (`text`, `json`, `ndjson`), `exit`, `duration_ms`, and
-`counts` (`files`, `hunks`, `kinds` and `verdict` from the summary; for
-`norms`, `files` and `steps`). It holds no paths, repositories, revisions,
+`counts` (`files`, `hunks`, `kinds` and `verdict` from the summary,
+`styles`, hunks per `style.direction`, and `claim_conflicts`; for `norms`,
+`files` and `steps`). It holds no paths, repositories, revisions,
 code, messages or URLs. `SHAPR_USAGE=0` (`false`, `off`, `no`) turns logging
 off, `1` (`true`, `on`, `yes`) on, an absolute path moves the log; unset, it is
 on except in CI (`CI` set to `true`, `1`, `yes` or `on` in any case, or `GITHUB_ACTIONS=true`) and in a debug build. Past 5 MB the log keeps its newest half.

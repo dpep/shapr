@@ -101,7 +101,7 @@ lib/greeter.rb:11  logic             1.00  [literal_only]
                    style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
 ```
 
-Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
+Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Hunks outside the verdict that shapr didn't compare close the list, one line per description with every place: `docs change (outside the verdict), 3 hunks: README.md:3 CHANGELOG.md:7,19`. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
 
 `shapr norms` text output, for a directory where one method breaks the quote style:
 
@@ -131,7 +131,7 @@ Experimental: `--digest` keeps the summary lines and narrows the rest to what a 
 
 ## Usage log
 
-Each `classify` or `norms` run appends one JSON line to `$XDG_STATE_HOME/shapr/usage.jsonl` (else `~/.local/state/shapr/usage.jsonl`), so the commands and forms people use can steer what gets built: the time, shapr's version, the command, the input form, the names of the flags given, the output format, the exit code, the duration, and counts (files, hunks, parts per kind and the verdict; for `norms`, files and plan steps). It never records paths, repository names, revisions, code, commit messages or URLs, and nothing leaves your machine.
+Each run appends one JSON line to `$XDG_STATE_HOME/shapr/usage.jsonl` (else `~/.local/state/shapr/usage.jsonl`), so the commands and forms people use can steer what gets built: the time, shapr's version, the command, the input form, the names of the flags given, the output format, the exit code, the duration, and counts (files, hunks, parts per kind, the verdict, hunks per style direction and claim conflicts; for `norms`, files and plan steps). It never records paths, repository names, revisions, code, commit messages or URLs, and nothing leaves your machine.
 
 `SHAPR_USAGE=0` (or `false`, `off`, `no`) turns it off, `1` (`true`, `on`, `yes`) turns it on, and `SHAPR_USAGE=/absolute/path` moves it. CI (`CI` set to `true`, `1`, `yes` or `on`, or `GITHUB_ACTIONS=true`) turns it off unless `SHAPR_USAGE` is set. `shapr --usage` summarizes it, `shapr --usage --reset` empties it, and `shapr --status` shows where it is and its size. The log is created readable by you alone and never written through a symlink; it keeps its newest half once it passes 5 MB, and a log that can't be written never fails a run.
 
