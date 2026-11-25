@@ -159,31 +159,65 @@ fn prove(trees: &Trees, site: &Site, free: &Claim) -> Option<Part> {
         },
     );
     // Equal elements out of order may be a coincidence of in-place edits
-    // (`expect 12` → `10`, `expect 10` → `8`): a move counts only where the
-    // gap between kept elements it leaves, or the one it enters, holds a
-    // different number of elements on each side, so no edit fills it.
+    // (`expect 12` → `10`, `expect 10` → `8`). A move counts where the gap
+    // between kept elements it leaves, or the one it enters, holds a
+    // different number of elements on each side, so no edit fills it; or
+    // where it is part of a permutation: the slot it leaves is taken by
+    // another moved element, and the slot it takes was another's.
     let gap =
         |i: usize, side: fn(&(usize, usize)) -> usize| kept.iter().filter(|p| side(p) < i).count();
-    let mut sizes = vec![(0usize, 0usize); kept.len() + 1];
-    let (all_b, all_a) = (
-        left_b.iter().chain(moved.iter().map(|p| &p.0)),
-        left_a.iter().chain(moved.iter().map(|p| &p.1)),
+    let mut slots_b: Vec<Vec<usize>> = vec![Vec::new(); kept.len() + 1];
+    let mut slots_a: Vec<Vec<usize>> = vec![Vec::new(); kept.len() + 1];
+    let (mut all_b, mut all_a): (Vec<usize>, Vec<usize>) = (
+        left_b
+            .iter()
+            .chain(moved.iter().map(|p| &p.0))
+            .copied()
+            .collect(),
+        left_a
+            .iter()
+            .chain(moved.iter().map(|p| &p.1))
+            .copied()
+            .collect(),
     );
-    for &i in all_b {
-        sizes[gap(i, |p| p.0)].0 += 1;
+    all_b.sort_unstable();
+    all_a.sort_unstable();
+    for i in all_b {
+        slots_b[gap(i, |p| p.0)].push(i);
     }
-    for &j in all_a {
-        sizes[gap(j, |p| p.1)].1 += 1;
+    for j in all_a {
+        slots_a[gap(j, |p| p.1)].push(j);
     }
-    let filled = |g: usize| sizes[g].0 == sizes[g].1;
-    moved.retain(|&(i, j)| {
-        let keep = !filled(gap(i, |p| p.0)) || !filled(gap(j, |p| p.1));
-        if !keep {
-            left_b.push(i);
-            left_a.push(j);
+    let filled = |g: usize| slots_b[g].len() == slots_a[g].len();
+    // The element in the other side's same slot: the slot's position in its
+    // gap, where both sides' gaps hold as many.
+    let across = |i: usize, from: &[Vec<usize>], to: &[Vec<usize>], g: usize| {
+        let at = from[g].iter().position(|&x| x == i)?;
+        to[g].get(at).copied()
+    };
+    loop {
+        let before = moved.len();
+        let still = moved.clone();
+        let is_moved_b = |i: usize| still.iter().any(|p| p.0 == i);
+        let is_moved_a = |j: usize| still.iter().any(|p| p.1 == j);
+        moved.retain(|&(i, j)| {
+            let (gi, gj) = (gap(i, |p| p.0), gap(j, |p| p.1));
+            if !filled(gi) || !filled(gj) {
+                return true;
+            }
+            let left = across(i, &slots_b, &slots_a, gi).is_some_and(is_moved_a);
+            let taken = across(j, &slots_a, &slots_b, gj).is_some_and(is_moved_b);
+            let keep = left && taken;
+            if !keep {
+                left_b.push(i);
+                left_a.push(j);
+            }
+            keep
+        });
+        if moved.len() == before {
+            break;
         }
-        keep
-    });
+    }
     let codes = |groups: &[Group], picks: &mut dyn Iterator<Item = usize>| -> Vec<NodeId> {
         picks.filter_map(|i| groups[i].code).collect()
     };

@@ -1,0 +1,20 @@
+{
+  "description": "the first and last of four use declarations swapped: a permutation, not two edits",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "reorder",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": true,
+            "detail": {
+              "context": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

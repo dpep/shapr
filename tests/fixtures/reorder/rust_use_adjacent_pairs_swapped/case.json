@@ -1,0 +1,20 @@
+{
+  "description": "three adjacent pairs of use declarations each swapped: every element moved",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "reorder",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": true,
+            "detail": {
+              "context": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

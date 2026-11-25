@@ -1,0 +1,20 @@
+{
+  "description": "a struct literal's first and last fields swapped around kept middle fields: a permutation, not two edits",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "reorder",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": true,
+            "detail": {
+              "context": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
