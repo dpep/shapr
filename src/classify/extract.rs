@@ -377,7 +377,14 @@ fn find(
         wiring = Some(why);
         Err(Risk::Wiring)
     } else if chunks.semantics.scoped_drop
-        && outlives(chunks, &chunk, expression, assigned.as_deref(), &params)
+        && outlives(
+            chunks,
+            a_chunk,
+            &chunk,
+            expression,
+            assigned.as_deref(),
+            &params,
+        )
     {
         Err(Risk::Drop)
     } else if mentioned(change, &method, dir, calls, b) == Some(Mention::Named) {
@@ -1157,30 +1164,37 @@ fn outside(tree: &Tree, id: NodeId, first: NodeId, last: NodeId) -> Vec<u8> {
     out
 }
 
-/// Whether something the chunk holds lives to the end of its block in one
+/// Whether something the chunk holds lives to the end of its scope in one
 /// version and to the end of B in the other: code follows the chunk, and it
 /// binds a local (other than the value returned) or takes arguments, which a
-/// call moves into B. An expression always has its statement's rest after it.
+/// call moves into B. A bound local lives to the end of its block; an
+/// argument to the end of the scope declaring it, as far out as A's body.
+/// An expression always has its statement's rest after it.
 fn outlives(
     tree: &Tree,
+    a: NodeId,
     chunk: &[NodeId],
     expression: bool,
     assigned: Option<&str>,
     params: &[String],
 ) -> bool {
-    let Some((&last, _)) = chunk.split_last() else {
+    let Some(&last) = chunk.last() else {
         return false;
     };
-    let follows = expression
-        || tree
-            .node(last)
-            .parent
-            .is_some_and(|block| code_children(tree, block).last() != Some(&last));
+    let followed = |id: NodeId| {
+        (tree.node(id).parent).is_some_and(|p| code_children(tree, p).last() != Some(&id))
+    };
+    let in_block = expression || followed(last);
+    let in_caller = expression
+        || std::iter::once(last)
+            .chain(tree.ancestors(last))
+            .take_while(|&n| n != a)
+            .any(followed);
     let binds = chunk.iter().flat_map(|&s| tree.descendants(s)).any(|id| {
         let node = tree.node(id);
         node.role.defines() == Some(NameKind::Variable) && node.name.as_deref() != assigned
     });
-    follows && (binds || !params.is_empty())
+    (in_block && binds) || (in_caller && !params.is_empty())
 }
 
 /// Local variables around the chunk, in the chunk side's A.

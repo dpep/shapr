@@ -1,0 +1,7 @@
+{
+  "description": "the last statements of a Rust inner block become a call to a new method taking an argument: the argument moves into it and drops at its return, before the caller's code after the block runs, where it dropped at the caller's end: logic, near an extract",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "drop"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}
