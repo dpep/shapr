@@ -37,14 +37,16 @@ end
 
 #[test]
 fn digest_lists_logic_and_counts_structure_to_skip() {
-    let dir = repo(&[&[("a.rb", BEFORE)], &[("a.rb", AFTER)]]);
+    let dir = repo(&[
+        &[("a.rb", BEFORE), ("README.md", "a\n")],
+        &[("a.rb", AFTER), ("README.md", "b\n")],
+    ]);
     let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
     assert_eq!(digest["record"], "digest");
     assert_eq!(digest["verdict"], "mixed");
     let read = digest["read_first"].as_array().unwrap();
     assert_eq!(read.len(), 1, "{digest}");
-    assert_eq!(read[0]["file"], "a.rb");
-    assert_eq!(read[0]["lines"][0], 11);
+    assert_eq!(read[0]["at"], serde_json::json!(["a.rb:11"]));
     assert!(
         read[0]["facets"]
             .as_array()
@@ -53,6 +55,10 @@ fn digest_lists_logic_and_counts_structure_to_skip() {
     );
     assert_eq!(digest["skip"]["kinds"]["format_only"], 1);
     assert_eq!(digest["skip"]["hunks"], 1);
+    assert_eq!(
+        digest["outside"]["docs"],
+        serde_json::json!(["README.md:1"])
+    );
 
     let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
     assert!(text.contains("read first:\n  a.rb:11 "), "{text}");
@@ -75,7 +81,7 @@ fn digest_groups_hunks_sharing_a_note_and_is_smaller_than_the_report() {
     let digest: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let read = digest["read_first"].as_array().unwrap();
     assert_eq!(read.len(), 1, "{digest}");
-    assert_eq!(read[0]["lines"], serde_json::json!([7, 16]));
+    assert_eq!(read[0]["at"], serde_json::json!(["a.rb:7", "a.rb:16"]));
     assert!(
         out.len() * 4 < full.len(),
         "{} vs {}",
