@@ -529,11 +529,7 @@ fn owner(analysis: &Analysis, line: usize) -> Option<(String, bool)> {
         .filter(|s| s.kind == ScopeKind::Class && s.first <= line && line <= s.last)
         .collect();
     around.sort_by_key(|s| s.last - s.first);
-    let singleton = around
-        .first()
-        .is_some_and(|s| s.name.starts_with("class << "));
-    let named = around
-        .into_iter()
-        .find(|s| !s.name.starts_with("class << "))?;
+    let singleton = around.first().is_some_and(|s| s.singleton);
+    let named = around.into_iter().find(|s| !s.singleton)?;
     Some((named.name.clone(), singleton))
 }
