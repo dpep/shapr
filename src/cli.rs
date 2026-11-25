@@ -587,15 +587,17 @@ fn input(cli: &Cli, dashdash: bool, git: &git::Git) -> Result<Input, (String, u8
     };
     let (form, range) = match shape {
         None => return Ok(Input::Stdin),
-        Some(Shape::Commit(rev)) if !git.is_commit(&rev) => {
-            return Err(usage(format!(
-                "`{rev}` doesn't name one commit: shapr REV takes a commit, not a tree, a file or several commits"
-            )));
+        Some(Shape::Commit(rev)) => {
+            let Some(name) = git.commit_name(&rev) else {
+                return Err(usage(format!(
+                    "`{rev}` doesn't name one commit: shapr REV takes a commit, not a tree, a file or several commits"
+                )));
+            };
+            (
+                report::Input::Commit,
+                git.commit_range(&name).map_err(error)?,
+            )
         }
-        Some(Shape::Commit(rev)) => (
-            report::Input::Commit,
-            git.commit_range(&rev).map_err(error)?,
-        ),
         Some(Shape::Range(range)) => (report::Input::Range, range),
         Some(Shape::MergeBaseRange(range)) => (report::Input::MergeBaseRange, range),
         Some(Shape::MergeBaseWorktree(base)) => (

@@ -418,3 +418,17 @@ fn one_revision_that_isnt_one_commit_is_a_usage_error() {
         assert!(message.contains("one commit"), "{message}");
     }
 }
+
+/// `:/TEXT` names the newest commit whose message matches: one commit.
+#[test]
+fn a_message_search_names_one_commit() {
+    let dir = repo(&[&[("lib/a.rb", METHOD)]]);
+    commit(dir.path(), &[("lib/a.rb", "def greet\nend\n")], "change it");
+    commit(dir.path(), &[], "later");
+    let found = shapr(dir.path(), &["-j", ":/change it"]);
+    assert_eq!(found.status.code(), Some(0), "{found:?}");
+    assert_eq!(
+        report(&found)["hunks"],
+        report(&shapr(dir.path(), &["-j", "HEAD~1"]))["hunks"]
+    );
+}

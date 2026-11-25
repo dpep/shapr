@@ -400,15 +400,27 @@ impl Git {
         Ok(())
     }
 
-    /// REV names one commit (not a tree, a blob, or several commits).
-    pub fn is_commit(&self, rev: &str) -> bool {
-        self.command()
-            .args(["rev-parse", "--verify", "--quiet", END_OF_OPTIONS])
-            .arg(format!("{rev}^{{commit}}"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    /// REV as a name a suffix (`^!`) can follow, when it names one commit
+    /// (not a tree, a blob, or several commits): REV itself, or its id
+    /// where a suffix would change its meaning (`:/TEXT` searches for it).
+    pub fn commit_name(&self, rev: &str) -> Option<String> {
+        let verify = |name: &str| {
+            let out = run(self.command().args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                END_OF_OPTIONS,
+                name,
+            ]))
+            .ok()?;
+            Some(String::from_utf8_lossy(&out).trim().to_string())
+        };
+        let id = verify(rev)?;
+        verify(&format!("{id}^{{commit}}")).filter(|commit| *commit == id)?;
+        match verify(&format!("{rev}^0")) {
+            Some(same) if same == id => Some(rev.to_string()),
+            _ => Some(id),
+        }
     }
 
     /// ARG names revisions in this repository (read-only; false outside one).
