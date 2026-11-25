@@ -1,0 +1,7 @@
+{
+  "description": "an argument expression becomes a call to a new method returning it",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "description": "an expression holding return returns from the new method instead of the caller: logic, near an extract",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "jump"
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

@@ -171,6 +171,8 @@ struct Stats {
     renamed: usize,
     params: usize,
     returns: bool,
+    /// The chunk is one expression, not statements.
+    expression: bool,
     /// What the refactoring relies on that the search couldn't settle.
     assumptions: Vec<Assumption>,
     /// Files searched for the method's name outside the change.
@@ -230,8 +232,24 @@ fn find(
     // A bare `private` added (or removed) with B, governing only B, is B's.
     changed.0.retain(|&v| !governs_only(calls, scope, v, b));
     let (params, body) = method_body(calls, b).ok_or("unsupported parameters or body")?;
-    let chunk = splice(calls, a_call, stmt, calls.node(body).kind, chunks, a_chunk)
-        .ok_or("caller differs beyond the call")?;
+    // An expression first (a binding's value, an argument): the binding or
+    // the call around it stays in the caller. Then a run of statements.
+    let (expression, assigned, chunk) = match splice(calls, a_call, call, None, chunks, a_chunk) {
+        Some(chunk) => (true, None, chunk),
+        None => (
+            false,
+            assigned,
+            splice(
+                calls,
+                a_call,
+                stmt,
+                Some(calls.node(body).kind),
+                chunks,
+                a_chunk,
+            )
+            .ok_or("caller differs beyond the call")?,
+        ),
+    };
     let b_stmts = code_children(calls, body);
     let args = arguments(calls, call);
     let flow = Flow::of(chunks, a_chunk, &chunk);
@@ -300,7 +318,8 @@ fn find(
     } else if let Some(why) = miswired(exact.is_some() && free == arg_set, &flow, &assigned_set) {
         wiring = Some(why);
         Err(Risk::Wiring)
-    } else if chunks.semantics.scoped_drop && outlives(chunks, &chunk, assigned.as_deref(), &params)
+    } else if chunks.semantics.scoped_drop
+        && outlives(chunks, &chunk, expression, assigned.as_deref(), &params)
     {
         Err(Risk::Drop)
     } else if mentioned(change, &method, dir, calls, b) {
@@ -314,6 +333,7 @@ fn find(
             renamed: matched,
             params: params.len(),
             returns: assigned.is_some(),
+            expression,
             assumptions: Vec::new(),
             searched: None,
         })
@@ -468,8 +488,14 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
         Ok(stats) => {
             let mut reason = match found.dir {
                 Dir::Extract => format!(
-                    "statements of `{}` moved into new method `{}`, replaced by a call",
-                    found.caller, found.method
+                    "{} of `{}` moved into new method `{}`, replaced by a call",
+                    if stats.expression {
+                        "an expression"
+                    } else {
+                        "statements"
+                    },
+                    found.caller,
+                    found.method
                 ),
                 Dir::Inline => format!(
                     "method `{}` removed; its body replaces its call in `{}`",
@@ -694,11 +720,13 @@ fn arguments(tree: &Tree, call: NodeId) -> Option<Vec<String>> {
 /// Walks A on both sides down to the call statement, requiring every node off
 /// the path to be equal; at the statement's container, the call side's
 /// statement stands where the chunk side has one or more. Returns them.
+/// Without `body_kind`, `stmt` is the call as an expression, and the chunk
+/// is the one node standing in its place.
 fn splice(
     calls: &Tree,
     a_call: NodeId,
     stmt: NodeId,
-    body_kind: &str,
+    body_kind: Option<&str>,
     chunks: &Tree,
     a_chunk: NodeId,
 ) -> Option<Vec<NodeId>> {
@@ -725,6 +753,13 @@ fn splice(
                     .all(|(&l, &r)| calls.node(l).hash == chunks.node(r).hash)
         };
         if child == stmt {
+            let Some(body_kind) = body_kind else {
+                let same_own = unmarked(own(calls, x, None)) == unmarked(own(chunks, y, None));
+                let around = cx.len() == cy.len()
+                    && same(&cx[..i], &cy[..i])
+                    && same(&cx[i + 1..], &cy[i + 1..]);
+                return (same_own && around).then(|| vec![cy[i]]);
+            };
             // Statements only: the chunk becomes a method body.
             if calls.node(x).kind != body_kind || cy.len() < cx.len() {
                 return None;
@@ -769,15 +804,22 @@ fn outside(tree: &Tree, id: NodeId, first: NodeId, last: NodeId) -> Vec<u8> {
 /// Whether something the chunk holds lives to the end of its block in one
 /// version and to the end of B in the other: code follows the chunk, and it
 /// binds a local (other than the value returned) or takes arguments, which a
-/// call moves into B.
-fn outlives(tree: &Tree, chunk: &[NodeId], assigned: Option<&str>, params: &[String]) -> bool {
+/// call moves into B. An expression always has its statement's rest after it.
+fn outlives(
+    tree: &Tree,
+    chunk: &[NodeId],
+    expression: bool,
+    assigned: Option<&str>,
+    params: &[String],
+) -> bool {
     let Some((&last, _)) = chunk.split_last() else {
         return false;
     };
-    let follows = tree
-        .node(last)
-        .parent
-        .is_some_and(|block| code_children(tree, block).last() != Some(&last));
+    let follows = expression
+        || tree
+            .node(last)
+            .parent
+            .is_some_and(|block| code_children(tree, block).last() != Some(&last));
     let binds = chunk.iter().flat_map(|&s| tree.descendants(s)).any(|id| {
         let node = tree.node(id);
         node.role.defines() == Some(NameKind::Variable) && node.name.as_deref() != assigned

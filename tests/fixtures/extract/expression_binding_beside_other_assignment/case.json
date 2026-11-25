@@ -1,0 +1,19 @@
+{
+  "description": "a binding's right-hand side becomes a call to a new method returning it (the shape of dpep/polyid#100); the caller assigning the same local elsewhere doesn't matter, as the binding stays in the caller",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "extract",
+        "parts": [
+          {
+            "kind": "extract",
+            "structure": true
+          }
+        ]
+      }
+    },
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}
