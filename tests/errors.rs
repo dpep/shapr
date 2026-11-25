@@ -489,3 +489,23 @@ fn a_message_search_names_one_commit() {
         report(&shapr(dir.path(), &["-j", "HEAD~1"]))["hunks"]
     );
 }
+
+/// An annotated tag names the commit it points at.
+#[test]
+fn an_annotated_tag_names_one_commit() {
+    let dir = repo(&[&[("lib/a.rb", METHOD)], &[("lib/a.rb", "def greet\nend\n")]]);
+    git(dir.path(), &["tag", "-a", "-m", "release", "v1"]);
+    let tagged = shapr(dir.path(), &["-j", "v1"]);
+    assert_eq!(tagged.status.code(), Some(0), "{tagged:?}");
+    assert_eq!(
+        report(&tagged)["hunks"],
+        report(&shapr(dir.path(), &["-j", "HEAD"]))["hunks"]
+    );
+    // A tag of a tree still isn't a commit.
+    git(
+        dir.path(),
+        &["tag", "-a", "-m", "tree", "t1", "HEAD^{tree}"],
+    );
+    let message = error(&shapr(dir.path(), &["-J", "t1"]), 64);
+    assert!(message.contains("one commit"), "{message}");
+}

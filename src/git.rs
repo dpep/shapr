@@ -423,8 +423,9 @@ impl Git {
             .ok()?;
             Some(String::from_utf8_lossy(&out).trim().to_string())
         };
-        let id = verify(rev)?;
-        verify(&format!("{id}^{{commit}}")).filter(|commit| *commit == id)?;
+        // An annotated tag peels to the commit it points at.
+        let object = verify(rev)?;
+        let id = verify(&format!("{object}^{{commit}}"))?;
         match verify(&format!("{rev}^0")) {
             Some(same) if same == id => Some(rev.to_string()),
             _ => Some(id),
