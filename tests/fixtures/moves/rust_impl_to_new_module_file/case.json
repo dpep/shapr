@@ -1,0 +1,24 @@
+{
+  "description": "an impl moved to a new module file, one method gaining pub(super): its methods move with context module, only the changed line stays logic",
+  "expect": {
+    "hunks": [
+      {
+        "file": "src/main.rs",
+        "verdict": "behavior",
+        "parts": [
+          {"kind": "move", "structure": false, "detail": {"context": {"$some": "module"}}},
+          {"kind": "logic", "lines": {"before": {"$some": {"start": 6, "count": 1}}}, "review_lines": 3}
+        ]
+      },
+      {
+        "file": "src/parsed.rs",
+        "verdict": "behavior",
+        "parts": [
+          {"kind": "move", "structure": false, "detail": {"context": {"$some": "module"}}},
+          {"kind": "logic", "lines": {"after": {"$some": {"start": 6, "count": 1}}}, "review_lines": 1}
+        ]
+      }
+    ],
+    "summary": {"verdict": "behavior"}
+  }
+}

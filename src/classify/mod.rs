@@ -17,6 +17,7 @@ mod format;
 pub use format::PLAIN_LOGIC;
 mod hazard;
 mod moves;
+mod relocate;
 mod rename;
 mod reorder;
 mod restyle;
@@ -206,6 +207,22 @@ pub struct Residual {
     pub detail: Map<String, Value>,
     /// What kind of logic change it is.
     pub facets: Vec<Facet>,
+    /// Runs of its lines the change removes or adds verbatim elsewhere.
+    pub relocated: Vec<Relocation>,
+}
+
+/// A run of residual lines whose text, whitespace aside, the change removes
+/// (for added lines) or adds (for removed lines) in another hunk.
+#[derive(Clone, Debug)]
+pub struct Relocation {
+    /// The run is added lines, come from `path`; otherwise removed lines,
+    /// gone to it.
+    pub added: bool,
+    /// The run, on its hunk's side.
+    pub lines: std::ops::RangeInclusive<usize>,
+    /// The other end's file, on its own side, and its first line.
+    pub path: String,
+    pub line: usize,
 }
 
 /// One hunk's composition: the parts passes proved, and the residual.
@@ -329,6 +346,7 @@ pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     let mut labels = passes(change, outside);
     runs::refine(change, outside, &mut labels);
     facets::run(change, &mut labels);
+    relocate::run(change, &mut labels);
     labels
 }
 
@@ -443,6 +461,7 @@ fn defaults(change: &Change) -> Labels {
                 },
                 detail: Map::new(),
                 facets: Vec::new(),
+                relocated: Vec::new(),
             };
             file.diff
                 .hunks
@@ -512,6 +531,7 @@ mod tests {
                 },
                 detail: Map::new(),
                 facets: Vec::new(),
+                relocated: Vec::new(),
             },
         };
         assert!(label.claim(part(Kind::Rename, &[1], &[1])));

@@ -1,0 +1,24 @@
+{
+  "description": "statements cut from one method and pasted into a new method in another file: logic on both sides, the relocated block recorded with where it came from and went, and counted",
+  "expect": {
+    "hunks": [
+      {
+        "file": "lib/csv.rb",
+        "verdict": "behavior",
+        "relocated_lines": 4,
+        "parts": [
+          {"kind": "logic", "detail": {"relocated": [{"lines": {"start": 9, "count": 4}, "from": {"file": "lib/report.rb", "line": 3}}]}}
+        ]
+      },
+      {
+        "file": "lib/report.rb",
+        "verdict": "behavior",
+        "relocated_lines": 4,
+        "parts": [
+          {"kind": "logic", "detail": {"relocated": [{"lines": {"start": 3, "count": 4}, "to": {"file": "lib/csv.rb", "line": 9}}]}}
+        ]
+      }
+    ],
+    "summary": {"verdict": "behavior", "relocated_lines": 8}
+  }
+}

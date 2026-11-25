@@ -1,0 +1,7 @@
+{
+  "description": "the lines shared between a deletion and an addition elsewhere are one-word lines and `end`s: too common to say anything relocated",
+  "expect": {
+    "hunks": {"$every": {"relocated_lines": 0, "parts": {"$every": {"detail": {"$not": {"relocated": {"$some": {}}}}}}}},
+    "summary": {"relocated_lines": 0}
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "description": "statements reindented under a new block in the same hunk: not relocated from anywhere",
+  "expect": {
+    "hunks": {"$every": {"relocated_lines": 0}},
+    "summary": {"relocated_lines": 0}
+  }
+}
