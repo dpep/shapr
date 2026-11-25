@@ -248,3 +248,16 @@ fn a_group_aggregates_its_members_and_keeps_tests_apart() {
     assert_eq!(at("src/b.rb:2")["test"], false, "{digest}");
     assert_eq!(at("spec/b_spec.rb:3")["test"], true, "{digest}");
 }
+
+#[test]
+fn text_places_every_hunk_one_file_at_a_time() {
+    let before: String = (1..=200).map(|n| format!("line {n}\n")).collect();
+    let after = before.replace("0\n", "0 changed\n");
+    let dir = repo(&[&[("README.md", &before)], &[("README.md", &after)]]);
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
+    let lines: Vec<String> = (1..=20).map(|n| (n * 10).to_string()).collect();
+    assert!(
+        text.contains(&format!("docs: README.md:{}\n", lines.join(","))),
+        "{text}"
+    );
+}

@@ -11,8 +11,6 @@ use std::io::{self, Write};
 
 /// Logic items listed before the rest are only placed.
 const SHOWN: usize = 15;
-/// Places a text line names before counting the rest.
-const PLACES: usize = 12;
 
 #[derive(Serialize)]
 pub struct Digest<'a> {
@@ -253,22 +251,20 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
     }
 }
 
-/// Places as text, one file's lines together: `a.rb:3,9 b.rb:1`, the rest
-/// counted past `PLACES`.
+/// Places as text, every one, each file's lines together in the order the
+/// files first appear: `a.rb:3,9 b.rb:1`.
 fn places(at: &[Place]) -> String {
-    let mut out: Vec<String> = Vec::new();
-    let mut last = None;
-    for p in at.iter().take(PLACES) {
-        match (last, out.last_mut()) {
-            (Some(file), Some(s)) if file == p.0 => s.push_str(&format!(",{}", p.1)),
-            _ => out.push(format!("{}:{}", quote_path(p.0), p.1)),
+    let mut files: Vec<(&str, Vec<String>)> = Vec::new();
+    for p in at {
+        match files.iter_mut().find(|(file, _)| *file == p.0) {
+            Some((_, lines)) => lines.push(p.1.to_string()),
+            None => files.push((p.0, vec![p.1.to_string()])),
         }
-        last = Some(p.0);
     }
-    if at.len() > PLACES {
-        out.push(format!("and {} more", at.len() - PLACES));
-    }
-    out.join(" ")
+    (files.iter())
+        .map(|(file, lines)| format!("{}:{}", quote_path(file), lines.join(",")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn plural(n: usize) -> &'static str {

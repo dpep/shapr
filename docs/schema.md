@@ -1261,7 +1261,8 @@ to skip, the style check and the hunks outside the verdict. Under `-j` it is
 one compact `digest` object; `-J` doesn't take it. It holds nothing the full
 output doesn't: a consumer that needs the evidence reads the full JSON.
 A place is a `"file:line"` string, the line a hunk's first (on the after
-side unless it only deletes) or a style deviation's.
+side unless it only deletes) or a style deviation's. The text names every place,
+each file's lines together (`a.rb:3,9 b.rb:1`); nothing hides behind a count.
 
 | field | type | meaning |
 |---|---|---|
