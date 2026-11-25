@@ -334,7 +334,7 @@ pub struct Summary {
     structure_share: f64,
     refactor_lines: usize,
     refactor_share: f64,
-    claims: Claims,
+    pub claims: Claims,
     /// Experimental: per norm config sets, whether the change moves the
     /// code toward it; filled in beside the hunks' style.
     pub config_trajectory: Vec<crate::norms::Trajectory>,

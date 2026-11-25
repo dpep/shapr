@@ -356,6 +356,23 @@ fn dispatch() -> ExitCode {
     } else {
         Format::Text
     };
+    let command = match () {
+        _ if cli.completions.is_some() => "completions",
+        _ if cli.clear_cache => "clear-cache",
+        _ if cli.status => "status",
+        _ if cli.usage => "usage",
+        _ => "classify",
+    };
+    // Emptying the log leaves it empty.
+    if !(cli.usage && cli.reset) {
+        crate::usage::command(command);
+    }
+    // The format asked for, though -q renders none.
+    crate::usage::format(match (cli.ndjson, cli.json) {
+        (true, _) => Format::Ndjson,
+        (_, true) => Format::Json,
+        _ => Format::Text,
+    });
 
     if let Some(shell) = cli.completions {
         let Some(shell) = shell.or_else(Shell::from_env) else {
@@ -385,13 +402,6 @@ fn dispatch() -> ExitCode {
     if cli.usage {
         return usage(format, cli.reset, cli.quiet);
     }
-    crate::usage::command("classify");
-    // The format asked for, though -q renders none.
-    crate::usage::format(match (cli.ndjson, cli.json) {
-        (true, _) => Format::Ndjson,
-        (_, true) => Format::Json,
-        _ => Format::Text,
-    });
     if let Err(error) = git::check_version() {
         return fail(format, &format!("{error:#}"), ERROR);
     }
@@ -538,6 +548,13 @@ fn dispatch() -> ExitCode {
         });
     }
     crate::usage::counts(&report.summary, &["files", "hunks", "kinds", "verdict"]);
+    let mut styles = std::collections::BTreeMap::new();
+    for style in report.hunks.iter().filter_map(|h| h.style.as_ref()) {
+        *styles.entry(style.direction).or_insert(0) += 1;
+    }
+    crate::usage::count("styles", &styles);
+    let conflicts = report.summary.claims.experimental.conflicts.len();
+    crate::usage::count("claim_conflicts", &conflicts);
     if !cli.quiet {
         let written = report::to_stdout(|out| match (cli.digest, format) {
             (true, Format::Json) => report::digest::json(out, &report),
