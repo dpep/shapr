@@ -129,7 +129,7 @@ pub fn warn_unread(notes: &[String]) {
     let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
     for note in notes {
         if seen.insert(note.clone()) {
-            eprintln!("shapr: config not read, norms judge without it: {note}");
+            crate::report::note(&format!("config not read, norms judge without it: {note}"));
         }
     }
 }

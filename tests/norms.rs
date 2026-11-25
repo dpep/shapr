@@ -389,6 +389,25 @@ fn config_it_cannot_read_is_named() {
     }
 }
 
+/// A config note naming a directory with a newline stays one line, so it
+/// can't start a workflow command on stderr.
+#[test]
+fn config_notes_are_escaped() {
+    let dir = "lib/y\n::error title=x::ship it";
+    let config = format!("{dir}/.rubocop.yml");
+    let file = format!("{dir}/a.rb");
+    let repo = repo(&[
+        &[
+            (config.as_str(), "Style/StringLiterals: [oops\n"),
+            (file.as_str(), "def a\n  'x'\nend\n"),
+        ],
+        &[(file.as_str(), "def a\n  'y'\nend\n")],
+    ]);
+    let stderr = String::from_utf8(shapr(repo.path(), &["HEAD~1..HEAD"]).stderr).unwrap();
+    assert!(stderr.contains("config not read"), "{stderr}");
+    assert!(stderr.lines().all(|l| l.starts_with("shapr: ")), "{stderr}");
+}
+
 /// Deviations config doesn't check (a `.rubocop_todo.yml` exclude) count as
 /// withheld, edit or not, read as withheld in the plan's text, and rank no
 /// hotspot.

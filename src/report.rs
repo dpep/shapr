@@ -465,7 +465,12 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             detail: r.detail.clone(),
             facets: r.facets.clone(),
             assumptions: Vec::new(),
-            review_lines: code(&r.lines),
+            // Comments or blank lines no part proved are read whole: a line
+            // shift refused, say, reaches behavior through them.
+            review_lines: match code(&r.lines) {
+                0 => changed(&r.lines),
+                n => n,
+            },
             changed: changed(&r.lines),
             context: Vec::new(),
         });
@@ -497,8 +502,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             lines.add(&hunk.lines);
             test_review_lines += hunk.test_review_lines;
         }
+        // Part counts are over the hunks the verdict rolls up.
         let counted = hunk.verdict.counted();
-        for part in &hunk.parts {
+        for part in hunk.parts.iter().filter(|_| counted) {
             *kinds.entry(part.kind.as_str()).or_default() += 1;
             for context in part.context.iter().filter(|_| part.kind == Kind::Move) {
                 *move_contexts.entry(context.as_str()).or_default() += 1;
@@ -508,9 +514,6 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
             for assumption in &part.assumptions {
                 *assumptions.entry(assumption.as_str()).or_default() += 1;
-            }
-            if !counted {
-                continue;
             }
             if part.structure {
                 structure += 1;
@@ -708,16 +711,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
 fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     let s = &report.summary;
     // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
-    let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
-    for part in report
-        .hunks
-        .iter()
-        .filter(|h| h.verdict.counted())
-        .flat_map(|h| &h.parts)
-    {
-        *kinds.entry(part.kind.as_str()).or_default() += 1;
-    }
-    let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    let kinds: Vec<String> = (s.kinds.iter())
+        .filter(|(_, n)| **n > 0)
+        .map(|(k, n)| format!("{n} {k}"))
+        .collect();
     let lead = if let Some(source) = &report.meta.source {
         let merge = match source.merge {
             true => " (a merge, against its first parent)",
@@ -880,6 +877,37 @@ pub(crate) fn emit(out: &mut impl Write, line: &str) -> io::Result<()> {
     writeln!(out, "{}", escape(line))
 }
 
+/// TEXT through `emit`, line by line.
+pub(crate) fn emit_text(out: &mut impl Write, text: &str) -> io::Result<()> {
+    text.lines().try_for_each(|line| emit(out, line))
+}
+
+/// MESSAGE on stderr as one `shapr: ` line, escaped. Every note, warning and
+/// error message goes through here.
+pub fn note(message: &str) {
+    eprintln!("shapr: {}", escape(message));
+}
+
+/// WRITE against stdout, then flushed. The only handle on stdout: what
+/// WRITE writes is shapr's own (`emit`, JSON, a completion script).
+pub(crate) fn to_stdout(
+    write: impl FnOnce(&mut io::StdoutLock<'static>) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    write(&mut out).and_then(|()| out.flush())
+}
+
+/// A clap message (help, version, a usage error) on clap's stream, each
+/// line escaped: argv quoted back may hold anything.
+pub(crate) fn clap(error: &clap::Error) {
+    let text = error.render().to_string();
+    if error.use_stderr() {
+        text.lines().for_each(|line| eprintln!("{}", escape(line)));
+    } else {
+        let _ = to_stdout(|out| emit_text(out, &text));
+    }
+}
+
 /// TEXT with each control character (C0, DEL, C1) escaped C-style, as git
 /// quotes paths: `\n`, `\t`, `\033`.
 pub fn escape(text: &str) -> std::borrow::Cow<'_, str> {
@@ -943,6 +971,49 @@ fn push_escaped(out: &mut String, c: char) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Text reaches stdout and stderr only through this module, which
+    /// escapes it (#123): a raw write elsewhere could print an untrusted path.
+    #[test]
+    fn every_output_write_goes_through_report() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let raw = [
+            "println!",
+            "eprintln!",
+            "print!",
+            "eprint!",
+            "io::stdout()",
+            "io::stderr()",
+            ".print()",
+        ];
+        let mut dirs = vec![root.join("src")];
+        let mut offenders = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let name = path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                if name == "src/report.rs" {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                let code = text.split("#[cfg(test)]").next().unwrap();
+                for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
+                    if raw.iter().any(|r| line.contains(r)) {
+                        offenders.push(format!("{name}: {}", line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "write through report: {offenders:#?}");
+    }
 
     #[test]
     fn paths_quote_as_git_quotes_them() {

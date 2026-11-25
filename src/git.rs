@@ -80,12 +80,18 @@ impl Git {
                 .env_remove("GIT_WORK_TREE")
                 .env_remove("GIT_INDEX_FILE")
                 .env("GIT_TERMINAL_PROMPT", "0");
-        } else if let Some(dir) = &self.dir {
-            // `-C` names the repository; an inherited GIT_DIR would override it.
-            cmd.current_dir(dir)
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE");
+        } else {
+            // A fetch runs what the repository's config names (`uploadpack`,
+            // `core.sshCommand`, a credential helper): never into a
+            // repository shapr didn't clone.
+            cmd.env("GIT_NO_LAZY_FETCH", "1");
+            if let Some(dir) = &self.dir {
+                // `-C` names the repository; an inherited GIT_DIR would override it.
+                cmd.current_dir(dir)
+                    .env_remove("GIT_DIR")
+                    .env_remove("GIT_WORK_TREE")
+                    .env_remove("GIT_INDEX_FILE");
+            }
         }
         cmd
     }
@@ -94,6 +100,14 @@ impl Git {
     /// rename detection and three lines of context whatever the user's
     /// config says.
     pub fn diff(&self, range: &str, cached: bool, paths: &[String]) -> Result<String> {
+        if self.bare.is_none() && self.partial() && version().is_some_and(|v| v < NO_LAZY_FETCH_GIT)
+        {
+            bail!(
+                "{PARTIAL}; git before {}.{} would fetch anyway",
+                NO_LAZY_FETCH_GIT.0,
+                NO_LAZY_FETCH_GIT.1
+            );
+        }
         self.verify_range(range)?;
         // Against all its parents a merge diffs as a combined diff, or nothing.
         if let Some(rev) = range.strip_suffix("^!")
@@ -104,8 +118,9 @@ impl Git {
         let text = self
             .run_diff(range, cached, paths, false)
             .map_err(|e| self.shallow_hint(e))?;
-        // An attribute (`-diff`, `binary`) makes git call a text file binary,
-        // which would take it out of the verdict: diff those again as text.
+        // An attribute (`-diff`, `binary`) or a NUL in code makes git call a
+        // file binary, which would take it out of the verdict: diff those
+        // again as text.
         let mut blobs = Blobs::new(self);
         let attributed: Vec<FileDiff> = crate::diff::parse(&text)
             .into_iter()
@@ -334,6 +349,9 @@ impl Git {
     /// ERROR, and in a shallow clone the history it may lack: a revision
     /// past the boundary doesn't resolve.
     fn shallow_hint(&self, error: anyhow::Error) -> anyhow::Error {
+        if self.bare.is_none() && self.partial() {
+            return anyhow::anyhow!("{:#}; {PARTIAL}", error);
+        }
         if self.boundary().is_empty() {
             return error;
         }
@@ -390,15 +408,27 @@ impl Git {
         Ok(())
     }
 
-    /// REV names one commit (not a tree, a blob, or several commits).
-    pub fn is_commit(&self, rev: &str) -> bool {
-        self.command()
-            .args(["rev-parse", "--verify", "--quiet", END_OF_OPTIONS])
-            .arg(format!("{rev}^{{commit}}"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    /// REV as a name a suffix (`^!`) can follow, when it names one commit
+    /// (not a tree, a blob, or several commits): REV itself, or its id
+    /// where a suffix would change its meaning (`:/TEXT` searches for it).
+    pub fn commit_name(&self, rev: &str) -> Option<String> {
+        let verify = |name: &str| {
+            let out = run(self.command().args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                END_OF_OPTIONS,
+                name,
+            ]))
+            .ok()?;
+            Some(String::from_utf8_lossy(&out).trim().to_string())
+        };
+        let id = verify(rev)?;
+        verify(&format!("{id}^{{commit}}")).filter(|commit| *commit == id)?;
+        match verify(&format!("{rev}^0")) {
+            Some(same) if same == id => Some(rev.to_string()),
+            _ => Some(id),
+        }
     }
 
     /// ARG names revisions in this repository (read-only; false outside one).
@@ -649,6 +679,9 @@ impl Git {
         let Some(remote) = self.promisor() else {
             return Ok(());
         };
+        if self.bare.is_none() {
+            bail!("{PARTIAL}");
+        }
         let mut input = ids.join("\n").into_bytes();
         input.push(b'\n');
         let mut check = self.command();
@@ -953,6 +986,42 @@ pub fn command() -> Command {
 pub const SHALLOW: &str =
     "shallow clone: the base commit isn't fetched (set fetch-depth: 0, or git fetch --unshallow)";
 
+/// The oldest git shapr runs: `--end-of-options` came in 2.24.
+const MIN_GIT: (u32, u32) = (2, 24);
+
+/// The oldest git that honors `GIT_NO_LAZY_FETCH`: an older one would fetch
+/// into a partial clone.
+const NO_LAZY_FETCH_GIT: (u32, u32) = (2, 44);
+
+/// The installed git's version, asked once; `None` when it doesn't run or
+/// says something else.
+fn version() -> Option<(u32, u32)> {
+    static VERSION: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
+    *VERSION.get_or_init(|| {
+        let out = run(command().arg("--version")).ok()?;
+        let text = String::from_utf8_lossy(&out);
+        let mut numbers = text.strip_prefix("git version ")?.split(['.', ' ']);
+        Some((numbers.next()?.parse().ok()?, numbers.next()?.parse().ok()?))
+    })
+}
+
+/// Fails when the installed git is older than shapr needs.
+pub fn check_version() -> Result<()> {
+    match version() {
+        Some(v) if v < MIN_GIT => bail!(
+            "git {}.{} is too old: shapr needs git {}.{} or later",
+            v.0,
+            v.1,
+            MIN_GIT.0,
+            MIN_GIT.1
+        ),
+        _ => Ok(()),
+    }
+}
+
+/// Why a partial clone's missing objects stay missing, and the fix.
+pub const PARTIAL: &str = "a partial clone: shapr fetches nothing into a repository it didn't clone (check out without a filter, or fetch the blobs first)";
+
 /// Why a merge's combined diff isn't read, and what to run instead.
 pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
 
@@ -982,9 +1051,18 @@ pub fn binary_content(content: &[u8]) -> bool {
     content[..content.len().min(8000)].contains(&0)
 }
 
-/// Whether a file git diffed as binary holds binary content on either side;
-/// a side shapr can't read counts as binary, as git said.
+/// Whether a file git diffed as binary is binary to shapr: content binary on
+/// either side (a side shapr can't read counts, as git said), in a language
+/// shapr doesn't parse. A language reads a NUL as its own: Ruby runs the code
+/// before it, Rust takes it as content.
 pub fn holds_binary(blobs: &mut Blobs, file: &FileDiff) -> bool {
+    let parsed = [&file.old_path, &file.new_path]
+        .into_iter()
+        .flatten()
+        .any(|path| crate::frontend::for_path(path).is_some());
+    if parsed {
+        return false;
+    }
     let side = |blobs: &mut Blobs, id: &Option<String>, path: &Option<String>| match (id, path) {
         (_, None) => false,
         (Some(id), Some(path)) => blobs.read(id, path).is_none_or(|c| binary_content(&c)),

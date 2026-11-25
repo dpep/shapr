@@ -52,23 +52,35 @@ impl FileChange {
 /// The passes recurse once per level.
 pub const MAX_DEPTH: usize = 10_000;
 
-/// Most removed-by-added line pairs one file may hold and be compared: the
-/// passes grow with the pairs (a 4,000-line file shuffled takes seconds; the
-/// largest a corpus commit holds is under a fifth of this).
-pub const MAX_PAIRS: usize = 16_000_000;
+/// Most changed lines (removed plus added) one file may hold and be
+/// compared. The passes grow with their square: removed lines paired with
+/// added ones, and a file only added has its declarations compared with
+/// each other (a 4,000-line file shuffled, or 8,000 one-line methods added,
+/// take seconds).
+pub const MAX_LINES: usize = 8_000;
 
-/// Most pairs one change compares, over all its files; files past it aren't.
-pub const MAX_CHANGE_PAIRS: usize = 4 * MAX_PAIRS;
+/// Most work one change compares: the sum of its files' changed lines
+/// squared. Files past it aren't compared.
+pub const MAX_CHANGE_WORK: usize = 4 * MAX_LINES * MAX_LINES;
 
-/// Why a file holding PAIRS isn't compared after SPENT pairs; `None` when it is.
-fn too_big(pairs: usize, spent: usize) -> Option<String> {
-    if pairs > MAX_PAIRS {
+/// DIFF's changed lines, removed plus added.
+fn changed_lines(diff: &FileDiff) -> usize {
+    diff.hunks
+        .iter()
+        .map(|h| h.removed.len() + h.added.len())
+        .sum()
+}
+
+/// Why a file of LINES changed lines isn't compared after SPENT work;
+/// `None` when it is.
+fn too_big(lines: usize, spent: usize) -> Option<String> {
+    if lines > MAX_LINES {
         Some(format!(
-            "too big to compare: {pairs} removed-by-added line pairs, past {MAX_PAIRS}"
+            "too big to compare: {lines} changed lines, past {MAX_LINES}"
         ))
-    } else if spent + pairs > MAX_CHANGE_PAIRS {
+    } else if spent + lines * lines > MAX_CHANGE_WORK {
         Some(format!(
-            "too big to compare: the change's files hold more than {MAX_CHANGE_PAIRS} removed-by-added line pairs"
+            "too big to compare: the change's files' changed lines, squared, pass {MAX_CHANGE_WORK}"
         ))
     } else {
         None
@@ -85,46 +97,51 @@ pub fn assemble(
 ) -> Change {
     let paths: Vec<&str> = diffs.iter().map(FileDiff::path).collect();
     let attributes = git.linguist(&paths, after);
-    // Each file's attributes before the change, for its category there:
-    // where the change edits a .gitattributes, as they were at its start, for
-    // both its paths (a file it adds included); unknown, as none.
-    let edits_attributes = diffs
-        .iter()
-        .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
-        .flatten()
-        .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
+    // Each file's attributes before the change, for its category there, for
+    // both its paths (a file it adds included): at the revision it starts
+    // from, whatever the diff lists (a path limit can leave out the
+    // .gitattributes it edits). On stdin, where it edits one, unknown, as none.
     let both: Vec<&str> = diffs
         .iter()
         .flat_map(|d| [d.old_path.as_deref(), d.new_path.as_deref()])
         .flatten()
         .collect();
-    let was = match edits_attributes {
-        true => before
-            .map(|rev| git.linguist(&both, Some(rev)))
-            .unwrap_or_default(),
-        false => git.linguist(&both, after),
+    let edits_attributes = both
+        .iter()
+        .any(|p| p.rsplit('/').next() == Some(".gitattributes"));
+    let was = match (before, edits_attributes) {
+        (Some(rev), _) => git.linguist(&both, Some(rev)),
+        (None, true) => HashMap::new(),
+        (None, false) => git.linguist(&both, after),
     };
     let mut blobs = Blobs::new(git);
     let mut spent = 0;
-    let mut files = diffs
-        .into_iter()
-        .filter_map(|mut diff| {
-            if diff.binary && diff.hunks.is_empty() {
-                // Stands for the whole file, so a binary change is never silent.
-                let whole = Lines { start: 1, count: 0 };
-                diff.hunks.push(Hunk {
-                    before: whole,
-                    after: whole,
-                    ..Hunk::default()
-                });
-            }
-            // A pure rename or mode change: no content to classify.
-            if diff.hunks.is_empty() {
-                return None;
-            }
-            Some(file_change(diff, &mut blobs, &attributes, &was, &mut spent))
-        })
-        .collect::<Vec<FileChange>>();
+    // The change's budget is spent smallest file first, so files named to
+    // sort first can't push a small edit out of the verdict.
+    let mut diffs: Vec<Option<FileDiff>> = diffs.into_iter().map(Some).collect();
+    let mut by_size: Vec<usize> = (0..diffs.len()).collect();
+    by_size.sort_by_key(|&i| diffs[i].as_ref().map_or(0, changed_lines));
+    let mut made: Vec<Option<FileChange>> = diffs.iter().map(|_| None).collect();
+    for i in by_size {
+        let Some(mut diff) = diffs[i].take() else {
+            continue;
+        };
+        if diff.binary && diff.hunks.is_empty() {
+            // Stands for the whole file, so a binary change is never silent.
+            let whole = Lines { start: 1, count: 0 };
+            diff.hunks.push(Hunk {
+                before: whole,
+                after: whole,
+                ..Hunk::default()
+            });
+        }
+        // A pure rename or mode change: no content to classify.
+        if diff.hunks.is_empty() {
+            continue;
+        }
+        made[i] = Some(file_change(diff, &mut blobs, &attributes, &was, &mut spent));
+    }
+    let mut files: Vec<FileChange> = made.into_iter().flatten().collect();
     let mut next = 0;
     for file in &mut files {
         file.ids = (next..next + file.diff.hunks.len()).collect();
@@ -140,8 +157,9 @@ fn file_change(
     was: &HashMap<String, Linguist>,
     spent: &mut usize,
 ) -> FileChange {
-    // git calls a text file binary under an attribute (`-diff`, `binary`);
-    // a range is diffed again as text, a diff on stdin can't be.
+    // git calls a text file binary under an attribute (`-diff`, `binary`),
+    // and code holding a NUL; a range is diffed again as text, a diff on
+    // stdin can't be.
     let attributed = diff.binary && !crate::git::holds_binary(blobs, &diff);
     let binary = diff.binary && !attributed;
     let category = |path: &str, attributes: &HashMap<String, Linguist>| {
@@ -175,20 +193,18 @@ fn file_change(
             .collect();
     }
     let trees = if attributed {
-        Err("git diffed it as binary for an attribute (`-diff`, `binary`): give the range, or pipe `git diff --text`".to_string())
+        Err("git diffed it as binary (an attribute, or a NUL in code): give the range, or pipe `git diff --text`".to_string())
     } else if diff.binary {
         Err("binary file".to_string())
     } else if category == Category::Fixture {
         Err("test data, not classified".to_string())
     } else {
-        let removed: usize = diff.hunks.iter().map(|h| h.removed.len()).sum();
-        let added: usize = diff.hunks.iter().map(|h| h.added.len()).sum();
-        let pairs = removed.saturating_mul(added);
+        let lines = changed_lines(&diff);
         match frontend::for_path(diff.path()) {
             None => Err(format!("no frontend for {}", diff.path())),
-            Some(_) if let Some(why) = too_big(pairs, *spent) => Err(why),
+            Some(_) if let Some(why) = too_big(lines, *spent) => Err(why),
             Some(frontend) => before.and_then(|before| {
-                *spent += pairs;
+                *spent += lines * lines;
                 let after = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())?;
                 let before = frontend.parse(before);
                 let after = frontend.parse(after);
@@ -512,12 +528,13 @@ mod tests {
     }
 
     #[test]
-    fn a_file_or_a_change_past_its_pairs_isnt_compared() {
-        assert_eq!(too_big(MAX_PAIRS, 0), None);
-        assert!(too_big(MAX_PAIRS + 1, 0).unwrap().contains("past"));
-        assert_eq!(too_big(MAX_PAIRS, MAX_CHANGE_PAIRS - MAX_PAIRS), None);
+    fn a_file_or_a_change_past_its_lines_isnt_compared() {
+        assert_eq!(too_big(MAX_LINES, 0), None);
+        assert!(too_big(MAX_LINES + 1, 0).unwrap().contains("past"));
+        let rest = MAX_CHANGE_WORK - MAX_LINES * MAX_LINES;
+        assert_eq!(too_big(MAX_LINES, rest), None);
         assert!(
-            too_big(1, MAX_CHANGE_PAIRS)
+            too_big(MAX_LINES, rest + 1)
                 .unwrap()
                 .contains("the change's")
         );

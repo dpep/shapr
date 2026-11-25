@@ -432,7 +432,7 @@ still parsed and classified. The first rule that matches wins:
 
 | category | rule |
 |---|---|
-| `binary` | Its content is binary as git reads content: a NUL byte in the first 8000 bytes. An attribute that makes git diff a text file as binary (`-diff`, `binary`) doesn't: shapr diffs such a file again with `--text`; a diff on stdin can't be, so the file keeps its category by name, and its hunk is `unknown` with a reason saying to pipe `git diff --text`. |
+| `binary` | Its content is binary as git reads content: a NUL byte in the first 8000 bytes, in a file shapr doesn't parse. A Ruby or Rust file holding a NUL is code (Ruby runs the code before it, Rust reads it as content), and an attribute that makes git diff a text file as binary (`-diff`, `binary`) doesn't count either: shapr diffs such a file again with `--text`; a diff on stdin can't be, so the file keeps its category by name, and its hunk is `unknown` with a reason saying to pipe `git diff --text`. |
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
 | `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
 | `fixture` | Under a `fixtures`, `__fixtures__` or `testdata` directory, at any depth, unless it is binary, vendored, or `.gitattributes` marks it `linguist-generated` or `linguist-documentation`. It wins over the name rules below and over `generated` by name: `spec/fixtures/Gemfile.lock` and `tests/fixtures/a.rb` are fixtures. Test data: not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; the tests that read it judge it. |
@@ -449,8 +449,9 @@ Attributes are read as `git check-attr` sees them in the revision the
 change ends in (B of `A..B`, a GitHub change's head), or in the working
 tree's `.gitattributes` when it ends there (one revision, a diff on stdin). A change can't hide its own edit: a file whose
 category counts toward the verdict (`code`, `test`, `config`, `manifest`)
-by its old path, or by either path under the attributes the change starts
-from where it edits a `.gitattributes`, keeps that category. So moving code
+by its old path, or by either path under the attributes of the revision
+the change starts from (whatever a path limit leaves out of the diff),
+keeps that category. So moving code
 into `vendor/`, marking a file `linguist-generated` in the change that
 edits it, or adding a file and marking it generated, vendored or
 documentation at once, leaves the edit `code`; an attribute takes a file out
@@ -482,11 +483,14 @@ tree-sitter). Any other file is `null` and its hunks `logic`.
 
 A parsed file isn't compared, and its hunks are `unknown` with
 `parsed: false` and a reason saying why, when its code nests deeper than
-10,000 levels, or when it is too big to compare: its removed lines times its
-added lines pass 16,000,000 (4,000 lines rewritten in place; the largest a
-corpus commit holds, 2,842 by 937, is under a fifth of it), or the change's
-compared files together pass 64,000,000, in diff order. Comparison grows
-with those pairs: a 4,000-line file shuffled takes seconds.
+10,000 levels, or when it is too big to compare: its changed lines (removed
+plus added) pass 8,000 (4,000 lines rewritten in place, or 8,000 added),
+or the change's compared files' changed lines, squared and summed, pass
+256,000,000, charged smallest file first (so files named to sort first
+can't push a small edit out). Comparison grows with the square of the changed
+lines: removed lines are paired with added ones, and a file only added has
+its declarations compared with each other; a 4,000-line file shuffled, or
+8,000 one-line methods added, take seconds.
 
 The rules above
 are stated in Ruby's terms; for Rust:
@@ -630,7 +634,7 @@ Each part:
 | `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
-| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them. `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. A part that isn't structure whose picked lines aren't among its own changed ones (an arbitrary moved element left unchanged): all of its lines. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
+| `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them, or every changed line when it holds no code line (comments or blank lines no part proved, such as a comment edit refused because it moves a line that reads its own position). `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. A part that isn't structure whose picked lines aren't among its own changed ones (an arbitrary moved element left unchanged): all of its lines. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
 
 ## Evidence
 
@@ -935,8 +939,10 @@ file. The table above says which settings configure each norm.
 
 Where RuboCop wouldn't check a norm's cop, its config says nothing: a file
 under `AllCops` or the cop's `Exclude`, or outside the cop's `Include`
-(patterns matched as RuboCop does, `File.fnmatch?` with `**/` and `{a,b}`,
-from the directory of the `.rubocop*` file that lists them; a pattern shapr
+(patterns matched as RuboCop's `match_path?` does: `File.fnmatch?` with
+`FNM_PATHNAME` and `FNM_EXTGLOB`, so `*` skips a leading `.`, `**/` skips
+hidden directories and `{a,b}` nests, and a hidden file in no hidden
+directory matched with `FNM_DOTMATCH` as well; the directory of the `.rubocop*` file that lists them; a pattern shapr
 can't read, such as a regexp, counts against the file), and a line under
 `# rubocop:disable` or `# rubocop:todo` for the cop, its department or `all`
 (to the matching `# rubocop:enable`, or that line alone after code). There
@@ -1094,7 +1100,9 @@ style inferred), `deviations`, `hotspots`, `steps`, `fixes`,
 under that shapr didn't read, one note each (`inherit_gem: NAME`,
 `inherit_from: PATH (not found)`, `(remote)`, `(cycle)` or `(past 32 config
 files)`, `FILE: lines N not read`, `FILE: pattern P not read (over 256
-alternatives)`, `FILE: line N not read (a section glob over 1024 characters)`, `FILE: not read (over 1 MiB)`),
+alternatives)`, `FILE: line N not read (a section glob over 1024 characters)`, `FILE: lines N not read
+(matching its globs against a path this long passes 1000000)`: sections past a
+budget of glob characters times path characters, `FILE: not read (over 1 MiB)`),
 so their norms were judged without it. Each note is also one stderr line,
 under `shapr norms` and a change's hunks alike.
 
@@ -1107,8 +1115,8 @@ under `shapr norms` and a change's hunks alike.
 | `verdicts` | object | Hunk count per hunk `verdict`, every verdict present. `unknown` counts what shapr didn't judge. |
 | `hunks` | int | Hunk records. |
 | `unparsed_hunks` | int | Hunks with `parsed: false`. |
-| `categories` | object | Hunk count per [category](#categories), every category present. Generated and vendored hunks count in `hunks` and `kinds`, and in no size measure below. |
-| `kinds` | object | Part count per kind, every kind present: `logic` counts residuals. A hunk that is one part counts once. |
+| `categories` | object | Hunk count per [category](#categories), every category present. Generated and vendored hunks count in `hunks`, and in no size measure below. |
+| `kinds` | object | Part count per kind, every kind present: `logic` counts residuals. A hunk that is one part counts once. This and the three part counts below are over hunks whose verdict is `structure`, `behavior` or `mixed`: a docs or unparsed file's residual is no logic change. |
 | `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
 | `assumptions` | object | Part count per assumption (see [Proof status](#proof-status)), every assumption present; a part with two counts under both. |
 | `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |

@@ -269,31 +269,68 @@ fn readable(line: &str) -> bool {
 /// pattern lists, and a bound on one built to multiply.
 const MAX_ALTERNATIVES: usize = 256;
 
-/// RuboCop's path match: `File.fnmatch?` with `FNM_PATHNAME` and
-/// `FNM_EXTGLOB`, so `*` stays within a directory, `**/` spans any number of
-/// them and `{a,b}` is either; a pattern with no wildcard matches only itself.
+/// RuboCop's path match (`PathUtil.match_path?`): the pattern itself, or a
+/// pattern with a wildcard under `File.fnmatch?` with `FNM_PATHNAME` and
+/// `FNM_EXTGLOB`, so `*` stays within a directory and skips a leading `.`,
+/// `**/` spans directories but not hidden ones, and `{a,b}` nests; or a
+/// hidden file in no hidden directory under `FNM_DOTMATCH` too.
 pub fn glob(pattern: &str, path: &str) -> bool {
-    let path: Vec<&[u8]> = path.split('/').map(str::as_bytes).collect();
-    (alternatives(pattern).unwrap_or_default().iter()).any(|p| {
-        let p: Vec<&[u8]> = p.split('/').map(str::as_bytes).collect();
-        segments(&p, &path)
-    })
+    let wild = pattern.contains(['*', '{', '[', '?']);
+    if pattern == path || (wild && fnmatch(pattern, path, false)) {
+        return true;
+    }
+    // RuboCop matches absolute paths, so every file sits under a separator.
+    let (dirs, name) = path.rsplit_once('/').unwrap_or(("", path));
+    let hidden_dir = dirs.split('/').any(|d| d.starts_with('.'));
+    name.starts_with('.') && !hidden_dir && fnmatch(pattern, path, true)
 }
 
-/// The patterns `{a,b}` stands for, braces expanded; `None` past
-/// [`MAX_ALTERNATIVES`].
+/// `File.fnmatch?(pattern, path, FNM_PATHNAME | FNM_EXTGLOB)`, plus
+/// `FNM_DOTMATCH` when DOTMATCH: any brace alternative matches.
+fn fnmatch(pattern: &str, path: &str, dotmatch: bool) -> bool {
+    (alternatives(pattern).unwrap_or_default().iter())
+        .any(|p| pathname(p.as_bytes(), path.as_bytes(), dotmatch))
+}
+
+/// The patterns `{a,b}` stands for, braces expanded as Ruby's
+/// `ruby_brace_expand` does: nested, `\` escaping, and none at all for an
+/// unclosed `{`. `None` past [`MAX_ALTERNATIVES`].
 fn alternatives(pattern: &str) -> Option<Vec<String>> {
     let mut done = Vec::new();
     let mut todo = vec![pattern.to_string()];
     while let Some(p) = todo.pop() {
-        let Some((open, close)) =
-            (p.find('{')).and_then(|open| Some((open, open + p[open..].find('}')?)))
-        else {
-            done.push(p);
-            continue;
+        let b = p.as_bytes();
+        let (mut open, mut close, mut nest, mut i) = (None, None, 0, 0);
+        while i < b.len() {
+            match b[i] {
+                b'{' => {
+                    if nest == 0 {
+                        open = Some(i);
+                    }
+                    nest += 1;
+                }
+                b'}' if open.is_some() => {
+                    nest -= 1;
+                    if nest == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                b'\\' => i += 1,
+                _ => {}
+            }
+            i += 1;
+        }
+        let (open, close) = match (open, close) {
+            (None, _) => {
+                done.push(p);
+                continue;
+            }
+            (Some(open), Some(close)) => (open, close),
+            (Some(_), None) => continue,
         };
-        // Each expansion drops a `{`, so the work ends.
-        for alt in p[open + 1..close].split(',').rev() {
+        // Each expansion drops a brace pair, so the work ends.
+        for alt in split_top(&p[open + 1..close]).into_iter().rev() {
             todo.push(format!("{}{alt}{}", &p[..open], &p[close + 1..]));
         }
         if done.len() + todo.len() > MAX_ALTERNATIVES {
@@ -303,89 +340,188 @@ fn alternatives(pattern: &str) -> Option<Vec<String>> {
     Some(done)
 }
 
-/// Path segments against pattern segments, where a `**` that isn't last
-/// spans any number of segments; table-driven, so no pattern backtracks.
-fn segments(pattern: &[&[u8]], path: &[&[u8]]) -> bool {
-    // `rest[j]`: the pattern from the segment at hand on matches `path[j..]`.
-    let mut rest: Vec<bool> = (0..=path.len()).map(|j| j == path.len()).collect();
-    for (i, p) in pattern.iter().enumerate().rev() {
-        rest = if *p == b"**" && i + 1 < pattern.len() {
-            let mut any = false;
-            let mut spans: Vec<bool> = (0..=path.len())
-                .rev()
-                .map(|j| {
-                    any |= rest[j];
-                    any
-                })
-                .collect();
-            spans.reverse();
-            spans
-        } else {
-            (0..=path.len())
-                .map(|j| j < path.len() && rest[j + 1] && wildcard(p, path[j]))
-                .collect()
-        };
+/// INNER split at its commas outside nested braces and escapes.
+fn split_top(inner: &str) -> Vec<&str> {
+    let b = inner.as_bytes();
+    let (mut out, mut from, mut nest, mut i) = (Vec::new(), 0, 0i32, 0);
+    while i < b.len() {
+        match b[i] {
+            b'{' => nest += 1,
+            b'}' => nest -= 1,
+            b',' if nest == 0 => {
+                out.push(&inner[from..i]);
+                from = i + 1;
+            }
+            b'\\' => i += 1,
+            _ => {}
+        }
+        i += 1;
     }
-    rest[0]
+    out.push(&inner[from.min(inner.len())..]);
+    out
 }
 
-/// One path segment against `*`, `?` and `[...]`: on a mismatch only the
-/// last `*` retries, which suffices when `*` is the only wildcard spanning
-/// more than one byte.
-fn wildcard(pattern: &[u8], name: &[u8]) -> bool {
-    let (mut p, mut n) = (0, 0);
-    // The last `*` seen, and where in `name` it next resumes.
-    let mut star: Option<(usize, usize)> = None;
-    while n < name.len() {
-        let step = match pattern.get(p) {
-            Some(b'*') => {
-                star = Some((p, n));
-                p += 1;
+/// Ruby's `fnmatch` under `FNM_PATHNAME` (dir.c): segment by segment, with
+/// the last `**/` retried one directory further on a mismatch, never into a
+/// hidden one unless DOTMATCH. Each retry advances, so no pattern
+/// backtracks without bound.
+fn pathname(p: &[u8], s: &[u8], dotmatch: bool) -> bool {
+    let (mut pi, mut si) = (0, 0);
+    let mut retry: Option<(usize, usize)> = None;
+    loop {
+        if p[pi..].starts_with(b"**/") {
+            while p[pi..].starts_with(b"**/") {
+                pi += 3;
+            }
+            retry = Some((pi, si));
+        }
+        if let Some((np, ns)) = segment(p, pi, s, si, dotmatch) {
+            (pi, si) = (np, ns);
+            while si < s.len() && s[si] != b'/' {
+                si += 1;
+            }
+            if pi < p.len() && si < s.len() {
+                (pi, si) = (pi + 1, si + 1);
                 continue;
             }
-            Some(b'?') => Some(1),
-            Some(b'[') => class(&pattern[p + 1..], name[n]).map(|len| len + 1),
-            Some(&b) => (b == name[n]).then_some(1),
-            None => None,
-        };
-        match (step, star) {
-            (Some(len), _) => {
-                p += len;
-                n += 1;
+            if pi == p.len() && si == s.len() {
+                return true;
             }
-            (None, Some((at, from))) => {
-                star = Some((at, from + 1));
-                p = at + 1;
-                n = from + 1;
+        }
+        match retry {
+            Some((at, mut from)) if dotmatch || s.get(from) != Some(&b'.') => {
+                while from < s.len() && s[from] != b'/' {
+                    from += 1;
+                }
+                if from == s.len() {
+                    return false;
+                }
+                retry = Some((at, from + 1));
+                (pi, si) = (at, from + 1);
             }
-            (None, None) => return false,
+            _ => return false,
         }
     }
-    pattern[p..].iter().all(|&b| b == b'*')
 }
 
-/// The bytes of a `[...]` after its `[` that `c` matches, `]` included; an
-/// unclosed `[` is a literal one.
-fn class(pattern: &[u8], c: u8) -> Option<usize> {
-    let Some(end) = pattern.iter().position(|&b| b == b']') else {
-        return (c == b'[').then_some(0);
-    };
-    let (negate, set) = match pattern[..end].split_first() {
-        Some((b'!' | b'^', set)) => (true, set),
-        _ => (false, &pattern[..end]),
-    };
-    let mut hit = false;
-    let mut i = 0;
-    while i < set.len() {
-        if i + 2 < set.len() && set[i + 1] == b'-' {
-            hit |= (set[i]..=set[i + 2]).contains(&c);
-            i += 3;
+/// Ruby's `fnmatch_helper`: P from PI against one segment of S from SI,
+/// where only the last `*` retries; the positions it stopped at on a match.
+fn segment(
+    p: &[u8],
+    mut pi: usize,
+    s: &[u8],
+    mut si: usize,
+    dotmatch: bool,
+) -> Option<(usize, usize)> {
+    let end = |b: &[u8], i: usize| i >= b.len() || b[i] == b'/';
+    let unescape = |i: usize| i + usize::from(p.get(i) == Some(&b'\\'));
+    if !dotmatch && s.get(si) == Some(&b'.') && p.get(unescape(pi)) != Some(&b'.') {
+        return None;
+    }
+    let mut star: Option<(usize, usize)> = None;
+    loop {
+        match p.get(pi) {
+            Some(b'*') => {
+                while p.get(pi) == Some(&b'*') {
+                    pi += 1;
+                }
+                if end(p, unescape(pi)) {
+                    return Some((unescape(pi), si));
+                }
+                if end(s, si) {
+                    return None;
+                }
+                star = Some((pi, si));
+                continue;
+            }
+            Some(b'?') => {
+                if end(s, si) {
+                    return None;
+                }
+                pi += 1;
+                si += char_len(s, si);
+                continue;
+            }
+            Some(b'[') => {
+                if end(s, si) {
+                    return None;
+                }
+                if let Some(next) = bracket(p, pi + 1, s, si) {
+                    pi = next;
+                    si += char_len(s, si);
+                    continue;
+                }
+            }
+            _ => {
+                let q = unescape(pi);
+                if end(s, si) {
+                    return end(p, q).then_some((q, si));
+                }
+                if !end(p, q) {
+                    let r = char_len(p, q);
+                    if s[si..].starts_with(&p[q..q + r]) {
+                        pi = q + r;
+                        si += r;
+                        continue;
+                    }
+                }
+            }
+        }
+        let (at, from) = star?;
+        let from = from + char_len(s, from);
+        star = Some((at, from));
+        (pi, si) = (at, from);
+    }
+}
+
+/// Ruby's `bracket`: a `[...]` from after its `[` against the character at
+/// S\[SI\]; the position after its `]` when it matches. Unclosed, it never does.
+fn bracket(p: &[u8], mut i: usize, s: &[u8], si: usize) -> Option<usize> {
+    let negate = matches!(p.get(i), Some(b'!' | b'^'));
+    i += usize::from(negate);
+    let c = &s[si..si + char_len(s, si)];
+    let mut ok = false;
+    while p.get(i) != Some(&b']') {
+        let lo = i + usize::from(p.get(i) == Some(&b'\\'));
+        if lo >= p.len() {
+            return None;
+        }
+        i = lo + char_len(p, lo);
+        if i >= p.len() {
+            return None;
+        }
+        let lo = &p[lo..i];
+        if p[i] == b'-' && p.get(i + 1) != Some(&b']') {
+            let hi = i + 1 + usize::from(p.get(i + 1) == Some(&b'\\'));
+            if hi >= p.len() {
+                return None;
+            }
+            i = hi + char_len(p, hi);
+            let hi = &p[hi..i];
+            ok |= c == lo || c == hi || (codepoint(lo)..=codepoint(hi)).contains(&codepoint(c));
         } else {
-            hit |= set[i] == c;
-            i += 1;
+            ok |= c == lo;
         }
     }
-    (hit != negate).then_some(end + 1)
+    (ok != negate).then_some(i + 1)
+}
+
+/// The length of the UTF-8 character at B\[I\].
+fn char_len(b: &[u8], i: usize) -> usize {
+    let len = match b[i] {
+        0..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        _ => 4,
+    };
+    len.min(b.len() - i)
+}
+
+fn codepoint(c: &[u8]) -> u32 {
+    std::str::from_utf8(c)
+        .ok()
+        .and_then(|c| c.chars().next())
+        .map_or(0, u32::from)
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -484,6 +620,38 @@ mod tests {
         assert!(glob("a/[b-c]?.rb", "a/cd.rb"));
         assert!(!glob("a/*", "a/b/c.rb"));
         assert!(!glob("a", "a/b.rb"));
+    }
+
+    /// Cases where a hand-rolled matcher parted from RuboCop's
+    /// `match_path?` (expectations from Ruby 3.4 and RuboCop 1.92).
+    #[test]
+    fn globs_match_as_rubocop_matches_them() {
+        let cases = [
+            ("{lib,app/{models,jobs}}/**/*.rb", "app/jobs/x.rb", true),
+            ("{lib,app/{models,jobs}}/**/*.rb", "lib/x.rb", true),
+            ("{a,{b,c}}.rb", "c.rb", true),
+            ("a{a*{a,b}", "ab", false),
+            ("{}a\\***", "a*b", true),
+            ("\\*", "\\", false),
+            ("*", ".a", true),
+            ("**/*", ".a/b", false),
+            ("**/*", "a/.b", true),
+            ("lib/*", "lib/.b", true),
+            ("lib/*", ".lib/b", false),
+            ("**/*", "x/.a/b", false),
+            ("?{a,b}", ".a", true),
+            ("[!a][^b]", ".a", true),
+            ("[/{,a}[a-b]", "b", true),
+            ("a[.**/[^b]", "ab", true),
+            ("*a/*", ".a/b", false),
+            ("**/**/[!a][ab]", "a/.b", true),
+            ("lib/.*", "lib/.b", true),
+            ("lib/**/x", "lib/.d/x", false),
+        ];
+        let wrong: Vec<_> = (cases.iter())
+            .filter(|(p, s, want)| glob(p, s) != *want)
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     #[test]

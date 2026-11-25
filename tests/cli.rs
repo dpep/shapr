@@ -472,6 +472,25 @@ fn completions_carry_each_shells_marker() {
     assert_eq!(unknown.status.code(), Some(64));
 }
 
+/// `summary.kinds` counts the parts the verdict rolls up, as the text
+/// summary does: a docs or unparsed file's residual isn't a logic change.
+#[test]
+fn kinds_count_parts_inside_the_verdict() {
+    let report = classify(
+        &[("README.md", "a\n"), ("Makefile", "a:\n"), ("a.rb", METHOD)],
+        &[
+            ("README.md", "b\n"),
+            ("Makefile", "b:\n"),
+            ("a.rb", &METHOD.replace("hi", "yo")),
+        ],
+    );
+    assert_eq!(
+        report["summary"]["kinds"]["logic"], 1,
+        "{:#}",
+        report["summary"]
+    );
+}
+
 #[test]
 fn every_output_field_is_documented() {
     let schema =
@@ -600,6 +619,23 @@ fn a_merge_against_its_second_parent_starts_from_that_parent() {
         .find(|h| h["file"] == "lib/a.rb")
         .unwrap();
     assert_eq!(hunk["category"], "code", "{report:#}");
+    assert_eq!(report["summary"]["verdict"], "behavior");
+}
+
+/// A path limit that leaves out the `.gitattributes` a change edits still
+/// reads each file's category under the attributes it started from.
+#[test]
+fn a_path_limit_keeps_the_before_attributes() {
+    let code = "class A\n  def total\n    1\n  end\nend\n";
+    let dir = repo(&[
+        &[("lib/a.rb", code)],
+        &[
+            (".gitattributes", "*.rb linguist-generated\n"),
+            ("lib/a.rb", &code.replace("1\n", "2\n")),
+        ],
+    ]);
+    let report = report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD", "--", "lib"]));
+    assert_eq!(hunks(&report)[0]["category"], "code", "{report:#}");
     assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
@@ -1021,6 +1057,45 @@ fn usage_summarizes_the_log_and_reset_empties_it() {
     );
 }
 
+/// A log path that isn't a regular file (a FIFO would block the open) is
+/// skipped, and the run finishes.
+#[test]
+fn a_log_path_that_isnt_a_file_is_skipped() {
+    let dir = branched();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("usage.jsonl");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&log)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    for args in [&["-q", "feat"][..], &["-j", "--usage"]] {
+        let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
+            .args(args)
+            .env("SHAPR_USAGE", &log)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if started.elapsed().as_secs() > 20 {
+                child.kill().unwrap();
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(
+            status.and_then(|s| s.code()),
+            Some(0),
+            "{args:?} hung or failed"
+        );
+    }
+}
+
 #[test]
 fn the_log_defaults_to_xdg_state_and_status_shows_it() {
     let dir = branched();
@@ -1407,6 +1482,40 @@ fn hunk_lines(text: &str) -> std::str::Lines<'_> {
         .lines()
 }
 
+/// A NUL makes git call a file binary, but Ruby runs the code before it and
+/// Rust reads it as content: a file a frontend parses is code, judged.
+#[test]
+fn a_code_file_holding_a_nul_counts_toward_the_verdict() {
+    let dir = repo(&[
+        &[
+            ("lib/a.rb", "def f\n  1\nend\n\0junk\n"),
+            ("src/b.rs", "fn g() -> &'static str {\n    \"a\0b\"\n}\n"),
+            ("lib/c.rb", "def h\n  1\nend\n"),
+        ],
+        &[
+            ("lib/a.rb", "def f\n  system(\"x\")\nend\n\0junk\n"),
+            ("src/b.rs", "fn g() -> &'static str {\n    \"c\0d\"\n}\n"),
+            ("lib/c.rb", "def h\n    1\nend\n"),
+        ],
+    ]);
+    let report = report(&shapr(dir.path(), &["-j", "HEAD"]));
+    let mut got = categories(&report);
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("lib/a.rb", "code"),
+            ("lib/c.rb", "code"),
+            ("src/b.rs", "code")
+        ]
+    );
+    for file in ["lib/a.rb", "src/b.rs"] {
+        let hunk = hunks(&report).iter().find(|h| h["file"] == file).unwrap();
+        assert_eq!(hunk["verdict"], "behavior", "{hunk:#}");
+    }
+    assert_eq!(report["summary"]["verdict"], "mixed");
+}
+
 #[test]
 fn a_diff_on_stdin_that_git_called_binary_for_an_attribute_is_code() {
     let dir = repo(&[
@@ -1453,4 +1562,42 @@ fn a_file_too_big_to_compare_is_unknown_and_says_why() {
     let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(reason.contains("too big to compare"), "{reason}");
     assert_eq!(report["summary"]["verdict"], "unknown");
+}
+
+/// The change's budget is spent smallest file first, so big files named to
+/// sort first can't push a small edit out of the verdict.
+#[test]
+fn big_files_cant_push_a_small_edit_past_the_change_budget() {
+    let big = "#\n".repeat(8000);
+    let names = ["lib/a.rb", "lib/b.rb", "lib/c.rb", "lib/d.rb"];
+    let mut before: Vec<(&str, &str)> = names.iter().map(|n| (*n, big.as_str())).collect();
+    before.push(("lib/z.rb", "def z\n  1\nend\n"));
+    let dir = repo(&[&before]);
+    for name in names {
+        git(dir.path(), &["rm", "-q", name]);
+    }
+    commit(dir.path(), &[("lib/z.rb", "def z\n  2\nend\n")], "delete");
+    let report = report(&shapr(dir.path(), &["-j", "HEAD"]));
+    let hunk = hunks(&report)
+        .iter()
+        .find(|h| h["file"] == "lib/z.rb")
+        .unwrap();
+    assert_eq!(hunk["verdict"], "behavior", "{hunk:#}");
+}
+
+/// A file only added has no removed-by-added pairs, but its declarations
+/// are compared with each other: its lines count against the same cap.
+#[test]
+fn a_file_added_too_big_to_compare_is_unknown() {
+    let big: String = (0..8001).map(|i| format!("def m{i}; end\n")).collect();
+    let report = classify(
+        &[("lib/a.rb", "x = 1\n")],
+        &[("lib/a.rb", "x = 1\n"), ("lib/b.rb", &big)],
+    );
+    let hunk = hunks(&report)
+        .iter()
+        .find(|h| h["file"] == "lib/b.rb")
+        .unwrap();
+    let reason = lead(hunk)["reason"].as_str().unwrap();
+    assert!(reason.contains("too big to compare"), "{reason}");
 }
