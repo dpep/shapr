@@ -106,8 +106,12 @@ pub fn parse(text: &str) -> Result<Vec<FileDiff>, Malformed> {
     let mut lines = text.lines().enumerate().peekable();
     // Inside a `diff --git` header, `---` belongs to the current file.
     let mut in_header = false;
+    // Past a file's `+++` and before the next `diff --git`: elsewhere (mail
+    // headers, a commit message) a line starting `@@ ` is text.
+    let mut in_file = false;
     while let Some((at, line)) = lines.next() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
+            in_file = false;
             let (old, new) = split_git_header(rest);
             files.push(FileDiff {
                 old_path: Some(old),
@@ -124,6 +128,7 @@ pub fn parse(text: &str) -> Result<Vec<FileDiff>, Malformed> {
                 file.old_path = side_path(rest, "a/");
             }
         } else if let Some(rest) = line.strip_prefix("+++ ") {
+            in_file = true;
             if let Some(file) = files.last_mut() {
                 file.new_path = side_path(rest, "b/");
             }
@@ -131,7 +136,10 @@ pub fn parse(text: &str) -> Result<Vec<FileDiff>, Malformed> {
             in_header = false;
             let malformed = Malformed(at + 1);
             let Some((old_start, new_start)) = parse_range_header(line) else {
-                return Err(malformed);
+                if in_file {
+                    return Err(malformed);
+                }
+                continue;
             };
             let mut body = Vec::new();
             while let Some((_, next)) = lines.peek() {
@@ -144,9 +152,10 @@ pub fn parse(text: &str) -> Result<Vec<FileDiff>, Malformed> {
                 }
                 lines.next();
             }
-            let hunk = hunk(old_start, new_start, &body).ok_or(malformed)?;
-            if let Some(file) = files.last_mut() {
-                file.hunks.push(hunk);
+            match (hunk(old_start, new_start, &body), files.last_mut()) {
+                (Some(hunk), Some(file)) => file.hunks.push(hunk),
+                (None, _) if in_file => return Err(malformed),
+                _ => {}
             }
         } else if let Some(file) = files.last_mut().filter(|_| in_header) {
             header_line(file, line);

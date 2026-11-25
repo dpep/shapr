@@ -1829,3 +1829,17 @@ fn a_malformed_hunk_header_is_an_error_not_an_empty_change() {
         );
     }
 }
+
+#[test]
+fn a_hunk_header_outside_a_file_section_is_message_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mail = "From abc Mon Sep 17 00:00:00 2001\nSubject: x\n\n@@ not a header in the message\n---\ndiff --git a/x.rb b/x.rb\nindex 1111111..2222222 100644\n--- a/x.rb\n+++ b/x.rb\n@@ -1 +1 @@\n-x = 1\n+x = 2\n";
+    let out = shapr_stdin(dir.path(), &["-j"], mail);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(report(&out)["summary"]["hunks"], 1);
+}
