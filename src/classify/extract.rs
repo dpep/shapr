@@ -18,6 +18,7 @@ use super::proof::{self, Assumption, Naming, Verified};
 use super::site::CodeLines;
 use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
 use crate::change::{Change, Trees};
+use crate::frontend::Construct;
 use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -392,12 +393,16 @@ fn find(
         Err(Risk::Wiring)
     } else if chunks.semantics.scoped_drop
         && outlives(
-            chunks,
-            a_chunk,
+            Around {
+                tree: chunks,
+                frontend,
+                a: a_chunk,
+                body_kind,
+            },
             &chunk,
             expression,
             assigned.as_deref(),
-            &params,
+            args.as_deref().unwrap_or_default(),
         )
     {
         Err(Risk::Drop)
@@ -1187,37 +1192,95 @@ fn outside(tree: &Tree, id: NodeId, first: NodeId, last: NodeId) -> Vec<u8> {
     out
 }
 
-/// Whether something the chunk holds lives to the end of its scope in one
-/// version and to the end of B in the other: code follows the chunk, and it
-/// binds a local (other than the value returned) or takes arguments, which a
-/// call moves into B. A bound local lives to the end of its block; an
-/// argument to the end of the scope declaring it, as far out as A's body.
-/// An expression always has its statement's rest after it.
-fn outlives(
-    tree: &Tree,
+/// The caller on the chunk side, for [`outlives`].
+#[derive(Clone, Copy)]
+struct Around<'t> {
+    tree: &'t Tree,
+    frontend: Option<&'static dyn crate::frontend::Frontend>,
+    /// A, the caller.
     a: NodeId,
+    /// The kind of node that holds statements in sequence: B's body's.
+    body_kind: &'t str,
+}
+
+impl Around<'_> {
+    /// Code after `id` runs after it: a later sibling, unless `id` and it
+    /// are alternatives of a branch (an `else`, another match arm).
+    fn followed(&self, id: NodeId) -> bool {
+        let Some(parent) = self.tree.node(id).parent else {
+            return false;
+        };
+        let kids = code_children(self.tree, parent);
+        let Some(at) = kids.iter().position(|&c| c == id) else {
+            return false;
+        };
+        let alternatives = self
+            .frontend
+            .and_then(|fe| fe.construct(self.tree, parent))
+            .is_some_and(|c| matches!(c, Construct::Branch { test } if at >= test));
+        at + 1 < kids.len() && !alternatives
+    }
+
+    /// The scope declaring the local `name` as seen from `at`: the
+    /// statements holding its last definition before `at` that encloses
+    /// it, else A. A pattern binding (`for x`, `if let`) is given the
+    /// statements around it, wider than its own scope.
+    fn declaring(&self, name: &str, at: NodeId) -> NodeId {
+        let tree = self.tree;
+        let start = tree.node(at).extent.start;
+        let enclosing: Vec<NodeId> = tree.ancestors(at).take_while(|&n| n != self.a).collect();
+        tree.descendants(self.a)
+            .filter(|&d| {
+                let node = tree.node(d);
+                node.extent.start < start
+                    && node.role != Role::Reference(NameKind::Variable)
+                    && local_name(node) == Some(name)
+            })
+            .filter_map(|d| {
+                tree.ancestors(d)
+                    .take_while(|&n| n != self.a)
+                    .find(|&n| tree.node(n).kind == self.body_kind)
+            })
+            .filter(|s| enclosing.contains(s))
+            .max_by_key(|&s| tree.node(s).extent.start)
+            .unwrap_or(self.a)
+    }
+}
+
+/// Whether something the chunk holds lives to the end of its scope in one
+/// version and to the end of B in the other: code of the caller runs after
+/// the chunk while it lives. A local the chunk binds (other than the value
+/// returned) lives to the end of its block; an argument, which the call
+/// moves into B, to the end of the scope declaring it. An expression always
+/// has its statement's rest after it.
+fn outlives(
+    around: Around<'_>,
     chunk: &[NodeId],
     expression: bool,
     assigned: Option<&str>,
-    params: &[String],
+    args: &[String],
 ) -> bool {
+    let tree = around.tree;
     let Some(&last) = chunk.last() else {
         return false;
     };
-    let followed = |id: NodeId| {
-        (tree.node(id).parent).is_some_and(|p| code_children(tree, p).last() != Some(&id))
+    // Code runs after the chunk before the walk up from it reaches `scope`.
+    let runs_after = |scope: NodeId| {
+        expression
+            || std::iter::once(last)
+                .chain(tree.ancestors(last))
+                .take_while(|&n| n != scope && n != around.a)
+                .any(|n| around.followed(n))
     };
-    let in_block = expression || followed(last);
-    let in_caller = expression
-        || std::iter::once(last)
-            .chain(tree.ancestors(last))
-            .take_while(|&n| n != a)
-            .any(followed);
     let binds = chunk.iter().flat_map(|&s| tree.descendants(s)).any(|id| {
         let node = tree.node(id);
         node.role.defines() == Some(NameKind::Variable) && node.name.as_deref() != assigned
     });
-    (in_block && binds) || (in_caller && !params.is_empty())
+    let block = tree.node(last).parent.unwrap_or(around.a);
+    (binds && runs_after(block))
+        || args
+            .iter()
+            .any(|arg| runs_after(around.declaring(arg, chunk[0])))
 }
 
 /// Local variables around the chunk, in the chunk side's A.
