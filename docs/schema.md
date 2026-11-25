@@ -783,7 +783,7 @@ against the code rather than instead of it.
 | field | type | meaning |
 |---|---|---|
 | `messages` | int | Messages read: one per commit, plus one for the description. |
-| `hints` | array | Each hint, in message order, once per message. A description whose subject repeats a commit's subject (a pull request titled after its one commit) adds no subject hints. Below. |
+| `hints` | array | Each hint, in message order, once per message. A description whose subject repeats a commit's subject, case, spacing and closing punctuation aside (a pull request titled after its one commit) adds no subject hints. Below. |
 | `experimental` | object | *Experimental*: judgements drawn from the hints. Below. |
 
 Each hint:
@@ -1223,8 +1223,19 @@ under `shapr norms` and a change's hunks alike.
 | `test_review_lines` | int | Of `review_lines`, those in test code: every one in a `test` file, and a residual's carrying the `test` facet elsewhere. Reviewers weigh test changes apart from code changes. |
 | `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings, parts with assumptions) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts of hunks whose verdict is `structure` or `mixed`, over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |
+| `refactor_lines` | int | Changed lines in parts of a structure kind (every kind but `logic`), proven or not, in hunks whose verdict is `structure`, `behavior` or `mixed`, generated and vendored hunks left out: the refactoring's size, whether or not shapr could rule out a behavior change. A move whose surroundings may observe it, or a Sorbet signature a runtime checks, counts here and not in `structure_share`. |
+| `refactor_share` | number 0–1 | `refactor_lines` over all changed lines, as `structure_share` counts them; 0 when nothing changed. At least `structure_share`. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
 | `config_trajectory` | array | *Experimental.* Per norm `.rubocop.yml` (or `.editorconfig`) sets in a changed file, whether the change moves the code toward it: `norm`, `configured`, `before` and `after` (each `checked`, the observations config checks in the changed files, and `offenses`, those not in the configured style), `fixed` and `added` (offenses only before, and only after, in a changed file, matched by content with the style taken out, so one carried over, or moved within its file, is neither), and `direction`, `toward` (fewer offenses), `away` (more) or `level`, which nets them. Both sides are judged by the config as of the after side; unchanged files hold the same offenses on both sides, so the counts move as the file's, its directory's and the repository's do. Only norms whose counts move, or with an offense fixed or added, are listed. |
+
+When `refactor_share` is two thirds or more and some hunk in the verdict
+holds `logic`, the text output points at it under the summary line:
+`refactor: 94% of changed lines; 6 logic lines inside (lib/a.rb:12,
+lib/b.rb:40)`, the residuals' `review_lines` and the first three hunks'
+places. A refactoring is where a behavior change is easiest to miss; below
+two thirds, or with no logic, the line is left out. It names the hunks an
+`unproven` refactor or style claim (see [Claims](#claims)) would count, so
+that line is left out of the text when this one prints; the JSON keeps both.
 
 ## GitHub input
 

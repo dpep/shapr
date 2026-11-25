@@ -197,6 +197,36 @@ fn claims_show_in_text_output() {
 }
 
 #[test]
+fn the_refactor_line_takes_the_place_of_an_unproven_refactor_claim() {
+    // Four reformatted constants beside the gate's flipped condition.
+    let consts = |sep: &str| -> String { (1..=4).map(|n| format!("X{n} = {n}{sep}1\n")).collect() };
+    let dir = tempfile::tempdir().unwrap();
+    init(dir.path());
+    let before = consts("+");
+    commit(dir.path(), &[("a.rb", &before), ("gate.rb", GATE)], "Start");
+    let after = consts(" + ");
+    commit(
+        dir.path(),
+        &[("a.rb", &after), ("gate.rb", &flipped())],
+        "Refactor the constants",
+    );
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("claims: refactor in 1 of 1 message"),
+        "{text}"
+    );
+    assert!(
+        text.contains("refactor: 80% of changed lines; 2 logic lines inside (gate.rb:3)"),
+        "{text}"
+    );
+    // The conflict stays in the JSON; the text says it once.
+    assert!(!text.contains("unproven"), "{text}");
+    let summary = &report(&shapr(dir.path(), &["-j", "HEAD"]))["summary"];
+    let conflicts = &summary["claims"]["experimental"]["conflicts"];
+    assert_eq!(conflicts[0]["finding"], "behavior_hunks", "{conflicts}");
+}
+
+#[test]
 fn every_claims_field_is_documented() {
     let schema =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/schema.md")).unwrap();

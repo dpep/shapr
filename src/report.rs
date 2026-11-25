@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Category, Change, FileChange};
-use crate::claims::{Claims, CodeFacts, Finding, HunkFacts};
+use crate::claims::{self, Claims, CodeFacts, Finding, HunkFacts};
 use crate::classify::{
     self, Assumption, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
@@ -322,6 +322,8 @@ pub struct Summary {
     test_review_lines: usize,
     behavior_lines: usize,
     structure_share: f64,
+    refactor_lines: usize,
+    refactor_share: f64,
     claims: Claims,
     /// Experimental: per norm config sets, whether the change moves the
     /// code toward it; filled in beside the hunks' style.
@@ -549,6 +551,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         Verdict::ALL.iter().map(|v| (v.as_str(), 0)).collect();
     let mut lines = LineCounts::default();
     let (mut structure, mut behavior, mut structure_lines, mut behavior_lines) = (0, 0, 0, 0);
+    let mut refactor_lines = 0;
     let mut test_review_lines = 0;
     for hunk in hunks {
         *categories.entry(hunk.category.as_str()).or_default() += 1;
@@ -570,6 +573,10 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
             for assumption in &part.assumptions {
                 *assumptions.entry(assumption.as_str()).or_default() += 1;
+            }
+            // A structure kind is a refactoring, proven or not.
+            if part.kind.is_structure() {
+                refactor_lines += part.changed * usize::from(size);
             }
             if part.structure {
                 structure += 1;
@@ -639,11 +646,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         lines,
         test_review_lines,
         behavior_lines,
-        structure_share: if total == 0 {
-            0.0
-        } else {
-            round2(structure_lines as f64 / total as f64)
-        },
+        structure_share: share(structure_lines, total),
+        refactor_lines,
+        refactor_share: share(refactor_lines, total),
         claims,
         config_trajectory: Vec::new(),
     }
@@ -672,6 +677,14 @@ fn sized(category: Category) -> bool {
 /// aren't.
 fn reviewed(category: Category) -> bool {
     sized(category) && !matches!(category, Category::Docs | Category::Binary)
+}
+
+/// PART over TOTAL, 0 when TOTAL is.
+fn share(part: usize, total: usize) -> f64 {
+    match total {
+        0 => 0.0,
+        _ => round2(part as f64 / total as f64),
+    }
 }
 
 fn round2(value: f64) -> f64 {
@@ -831,12 +844,57 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     for line in crate::norms::trajectory::text(&s.config_trajectory) {
         emit(out, &line)?;
     }
-    claims(out, &s.claims)?;
+    let refactor = refactor_text(report);
+    if let Some(line) = &refactor {
+        emit(out, line)?;
+    }
+    claims(out, &s.claims, refactor.is_some())?;
     Ok(())
 }
 
+/// Where logic hides in a change that is two thirds refactoring or more:
+/// `refactor: 80% of changed lines; 2 logic lines inside (lib/b.rb:2)`.
+/// Nothing when there is none to point at.
+fn refactor_text(report: &Report) -> Option<String> {
+    let s = &report.summary;
+    if 3 * s.refactor_lines < 2 * s.lines.changed() {
+        return None;
+    }
+    let inside: Vec<(&HunkRecord, usize)> = (report.hunks.iter())
+        .filter(|h| h.verdict.counted())
+        .map(|h| {
+            let logic = h.parts.iter().filter(|p| p.kind == Kind::Logic);
+            (h, logic.map(|p| p.review_lines).sum())
+        })
+        .filter(|(_, lines)| *lines > 0)
+        .collect();
+    if inside.is_empty() {
+        return None;
+    }
+    let lines: usize = inside.iter().map(|(_, n)| n).sum();
+    // A hunk's first line, on the after side unless it only deletes.
+    let start = |h: &HunkRecord| match h.after.count {
+        0 => h.before.start,
+        _ => h.after.start,
+    };
+    let mut places: Vec<String> = (inside.iter().take(3))
+        .map(|(h, _)| format!("{}:{}", quote_path(h.file), start(h)))
+        .collect();
+    if inside.len() > 3 {
+        places.push(format!("{} more", inside.len() - 3));
+    }
+    Some(format!(
+        "refactor: {:.0}% of changed lines; {lines} logic line{} inside ({})",
+        s.refactor_share * 100.0,
+        if lines == 1 { "" } else { "s" },
+        places.join(", "),
+    ))
+}
+
 /// What the messages claim, and where the code doesn't bear a claim out.
-fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
+/// With REFACTOR, the refactor line already names the hunks an unproven
+/// refactor or style claim would count.
+fn claims(out: &mut impl Write, claims: &Claims, refactor: bool) -> io::Result<()> {
     if claims.messages == 0 {
         return Ok(());
     }
@@ -859,6 +917,19 @@ fn claims(out: &mut impl Write, claims: &Claims) -> io::Result<()> {
         many => emit(out, &format!("claims: {} (of {of})", many.join(", ")))?,
     }
     for conflict in &claims.experimental.conflicts {
+        let unproven = matches!(
+            conflict.finding,
+            Finding::BehaviorHunks | Finding::NonTestBehaviorHunks | Finding::LogicHunks
+        );
+        if refactor
+            && unproven
+            && matches!(
+                conflict.claim,
+                claims::Category::Refactor | claims::Category::Style
+            )
+        {
+            continue;
+        }
         let plural = if conflict.count == 1 { "" } else { "s" };
         // Hunks shapr couldn't prove structural aren't proof of behavior.
         let (label, finding) = match conflict.finding {

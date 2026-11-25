@@ -85,6 +85,91 @@ fn format_and_logic_in_one_change_is_mixed() {
     assert_eq!(report["files"][0]["lines_before"], 16);
 }
 
+type Files = Vec<(&'static str, String)>;
+
+/// Four reformatted lines in `lib/a.rb`, one changed line in `lib/b.rb`.
+fn mostly_reformat() -> (Files, Files) {
+    let a = |sep: &str| (1..=4).map(|n| format!("X{n} = {n}{sep}1\n")).collect();
+    let b = |n: u8| format!("def f\n  {n}\nend\n");
+    (
+        vec![("lib/a.rb", a("+")), ("lib/b.rb", b(1))],
+        vec![("lib/a.rb", a(" + ")), ("lib/b.rb", b(2))],
+    )
+}
+
+fn pairs<'a>(files: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str)> {
+    files.iter().map(|(p, c)| (*p, c.as_str())).collect()
+}
+
+#[test]
+fn a_mostly_refactor_change_names_the_logic_inside_it() {
+    let (before, after) = mostly_reformat();
+    let dir = repo(&[&pairs(&before), &pairs(&after)]);
+    let summary = report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]))["summary"].clone();
+    assert_eq!(summary["refactor_lines"], 8);
+    assert_eq!(summary["refactor_share"], 0.8);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert_eq!(
+        text.lines().nth(1),
+        Some("refactor: 80% of changed lines; 2 logic lines inside (lib/b.rb:2)"),
+        "{text}"
+    );
+    // Two thirds is enough; a hunk is named by its first line.
+    let (mut before, mut after) = mostly_reformat();
+    before[1].1 = "X = 1\nY = 1\n".into();
+    after[1].1 = "X = 2\nY = 2\n".into();
+    let dir = repo(&[&pairs(&before), &pairs(&after)]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("refactor: 67% of changed lines; 4 logic lines inside (lib/b.rb:1)"),
+        "{text}"
+    );
+}
+
+#[test]
+fn refactor_counts_parts_shapr_couldnt_prove_structure() {
+    // Without a lockfile naming sorbet-runtime, a sig may be checked.
+    let sig = |s: &str| {
+        format!(
+            "class A\n  extend T::Sig\n\n{s}  def a(x)\n    x\n  end\n\n{s}  def b(x)\n    x\n  end\nend\n"
+        )
+    };
+    let (mut before, mut after) = mostly_reformat();
+    before[0] = ("lib/a.rb", sig(""));
+    after[0] = (
+        "lib/a.rb",
+        sig("  sig { params(x: Integer).returns(Integer) }\n"),
+    );
+    let report = classify(&pairs(&before), &pairs(&after));
+    let summary = &report["summary"];
+    assert_eq!(summary["structure_share"], 0.0, "{summary:#}");
+    assert!(
+        summary["refactor_share"].as_f64().unwrap() >= 0.5,
+        "{summary:#}"
+    );
+}
+
+#[test]
+fn the_refactor_line_stays_out_when_it_says_nothing() {
+    let text = |before: &[(&str, &str)], after: &[(&str, &str)]| {
+        let dir = repo(&[before, after]);
+        String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap()
+    };
+    // All refactor: nothing inside to point at.
+    let (before, after) = mostly_reformat();
+    let pure = text(&pairs(&before[..1]), &pairs(&after[..1]));
+    assert!(!pure.contains("refactor:"), "{pure}");
+    // Mostly logic: not a refactor with something inside it.
+    let logic = text(&pairs(&before[1..]), &pairs(&after[1..]));
+    assert!(!logic.contains("refactor:"), "{logic}");
+    // Under two thirds refactor (8 changed lines of 14).
+    let (mut before, mut after) = mostly_reformat();
+    before[1].1 = format!("{}X = 1\nY = 1\n", before[1].1);
+    after[1].1 = format!("{}X = 2\nY = 2\n", after[1].1);
+    let under = text(&pairs(&before), &pairs(&after));
+    assert!(!under.contains("refactor:"), "{under}");
+}
+
 fn review_lines(report: &Value) -> Vec<u64> {
     report["hunks"]
         .as_array()
