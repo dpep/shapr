@@ -1017,6 +1017,7 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
                 let (calls, chunks) = dir.sides(trees);
                 ids(chunks).any(|id| {
                     super::rename::literal_names(chunks, id, method)
+                        || super::rename::directive_names(chunks, id, method)
                         || named(chunks, id)
                             && matches!(
                                 chunks.node(id).role,

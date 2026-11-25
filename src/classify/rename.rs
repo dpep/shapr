@@ -829,7 +829,7 @@ pub(super) fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
 
 /// A directive (a Rust doctest line) holding `name` as a word: its code isn't
 /// parsed into the tree, so any mention may be a use.
-fn directive_names(tree: &Tree, id: NodeId, name: &str) -> bool {
+pub(super) fn directive_names(tree: &Tree, id: NodeId, name: &str) -> bool {
     let n = tree.node(id);
     if !n.flags.contains(Flags::DIRECTIVE) {
         return false;

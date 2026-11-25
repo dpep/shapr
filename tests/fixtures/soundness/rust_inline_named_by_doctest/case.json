@@ -1,0 +1,6 @@
+{
+  "description": "a Rust function inlined while a doctest still calls it: the doctest no longer compiles, so it is not an inline",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}, "$some": {"parts": {"$some": {"detail": {"near": "inline", "risk": "collision"}}}}}
+  }
+}
