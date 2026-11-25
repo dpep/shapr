@@ -1,0 +1,15 @@
+{
+  "description": "a function and its test moved to a new module file with its own mod tests: the test moves into the new mod (context module), the new mod's header and use stay logic",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "file": "src/triple.rs",
+        "parts": [
+          {"kind": "move", "structure": false, "detail": {"context": {"$some": "module"}, "moves": {"$some": {"name": "triples"}}}},
+          {"kind": "logic"}
+        ]
+      },
+      "$every": {"verdict": {"$not": "structure"}}
+    }
+  }
+}

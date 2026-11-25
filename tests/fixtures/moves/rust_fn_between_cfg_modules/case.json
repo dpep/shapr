@@ -1,0 +1,4 @@
+{
+  "description": "a function moved from a cfg(unix) module into a cfg(windows) module of the same name: another owner, never structure",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}}, "summary": {"verdict": {"$not": "structure"}}}
+}

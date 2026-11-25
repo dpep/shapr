@@ -549,7 +549,11 @@ are stated in Ruby's terms; for Rust:
   definition moved to another file is a `move` part with context
   `module`, which isn't structure. Struct fields, enum
   variants and `macro_rules!` don't move. An `impl` is its methods' owner,
-  told apart from another by its header.
+  told apart from another by its header (attributes, generics, trait and
+  type, whitespace aside). An `impl`, trait or inline `mod` that doesn't
+  move whole is opened like any namespace (see [New files](#new-files)), so
+  its items pair on their own: an `impl` moved to another module file with
+  one method changed moves its other methods.
 - Extract and inline: a `self` parameter rides on the call's receiver, and
   parameter types are allowed. Values are dropped when their block ends, so
   moving statements into a function can move a drop: risk `drop` (see

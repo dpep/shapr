@@ -1,0 +1,4 @@
+{
+  "description": "an inherent impl and a trait impl with equal bodies swap places: each impl moves whole, keyed by its header, never paired across headers",
+  "expect": {"hunks": {"$every": {"parts": {"$every": {"detail": {"moves": {"$not": {"$some": {"context": {"$some": "owner"}}}}}}}}}}
+}

@@ -23,8 +23,8 @@ pub(super) enum Plan {
     Emit(Mode),
     /// A leaf carrying its text as its name, in this role.
     Name(Role),
-    /// Its children stand in its place (a body's braces fold into the item).
-    Splice,
+    /// A module's or trait's items: [`Walker::body`].
+    Body,
     /// Wrapped in an `annotation` node: a type.
     Annotate,
 }
@@ -162,7 +162,7 @@ impl Walker<'_> {
                 self.children(n, Mode::Expr, &body.into_iter().collect::<Vec<_>>());
                 self.b.close();
                 if let Some(body) = body {
-                    self.children(body, Mode::Expr, &[]);
+                    self.body(body);
                 }
                 self.b.close();
             }
@@ -639,12 +639,34 @@ impl Walker<'_> {
             n,
             &mut |f, c| match f {
                 Some("name") => Plan::Name(Role::Reference(name_kind)),
-                Some("body") if c.kind() == "declaration_list" => Plan::Splice,
+                Some("body") if c.kind() == "declaration_list" => Plan::Body,
                 _ => Plan::Emit(Mode::Expr),
             },
             &[],
         );
         self.opaque_members = opaque;
+        self.b.close();
+    }
+
+    /// A module's, trait's or impl's items, under a node with no text of its
+    /// own (its braces fold into the item), as a Ruby class body is: the core
+    /// tells the items from the header by it.
+    pub(super) fn body(&mut self, list: Node<'_>) {
+        let mut cursor = list.walk();
+        let items: Vec<Node<'_>> = list
+            .named_children(&mut cursor)
+            .filter(|c| !super::is_comment(c))
+            .collect();
+        let (Some(first), Some(last)) = (items.first(), items.last()) else {
+            return self.children(list, Mode::Expr, &[]);
+        };
+        self.b.open(
+            "body",
+            first.start_byte()..last.end_byte(),
+            None,
+            Role::Other,
+        );
+        self.children(list, Mode::Expr, &[]);
         self.b.close();
     }
 

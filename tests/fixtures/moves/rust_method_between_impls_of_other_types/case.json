@@ -1,0 +1,4 @@
+{
+  "description": "a method moved from impl A into impl B: another owner, never structure",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}}, "summary": {"verdict": {"$not": "structure"}}}
+}

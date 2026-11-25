@@ -681,7 +681,7 @@ impl<'a> Walker<'a> {
                     let name = self.text(&child);
                     self.leaf(&child, Some(name), role);
                 }
-                Plan::Splice => self.children(child, Mode::Expr, &[]),
+                Plan::Body => self.body(child),
                 Plan::Annotate => {
                     self.b.open(
                         "annotation",

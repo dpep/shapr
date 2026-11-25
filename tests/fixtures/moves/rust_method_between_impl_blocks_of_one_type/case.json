@@ -1,0 +1,4 @@
+{
+  "description": "a method moved between two impl blocks with the same header: the same owner, a move",
+  "expect": {"hunks": {"$some": {"parts": {"$some": {"kind": "move"}}}}}
+}
