@@ -293,6 +293,28 @@ fn claims_read_the_pull_requests_commits_and_description() {
     assert_eq!(r["summary"]["claims"]["messages"], 2);
 }
 
+/// A commit id from the API is checked before it is used, in a pull
+/// request's commit list too.
+#[test]
+fn a_malformed_commit_id_from_the_api_is_an_error() {
+    let f = Fixture::new();
+    let (base, head) = (&f.main, &f.feature);
+    let merge_base = f.fork_point.clone();
+    f.server.route(
+        &format!("/repos/acme/widgets/compare/{base}...{head}"),
+        200,
+        json!({"merge_base_commit": {"sha": merge_base},
+               "commits": [{"sha": "abcdefabcde\u{e9}", "commit": {"message": "Add count"}}]}),
+    );
+    let out = f.shapr(&["-j", "acme/widgets#12"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(
+        stderr(&out).contains("is not a commit id"),
+        "{}",
+        stderr(&out)
+    );
+}
+
 #[test]
 fn hash_references_are_looked_up_once_and_failures_stay_references() {
     let f = Fixture::new();

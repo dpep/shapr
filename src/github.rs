@@ -236,8 +236,8 @@ pub struct Source {
     pub repo: String,
     pub number: Option<u64>,
     pub title: String,
-    pub base: String,
-    pub head: String,
+    pub base: CommitId,
+    pub head: CommitId,
     pub merge: bool,
 }
 
@@ -246,7 +246,7 @@ impl Source {
     pub fn name(&self) -> String {
         match (self.kind, self.number) {
             ("pr", Some(n)) => format!("{}#{n}", self.repo),
-            _ => format!("{}@{}", self.repo, &self.head[..7.min(self.head.len())]),
+            _ => format!("{}@{}", self.repo, self.head.short(7)),
         }
     }
 }
@@ -310,7 +310,10 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
         Target::Pull { repo, number } => {
             let what = format!("pull request {repo}#{number}");
             let pr: PullJson = api.get(&format!("/repos/{repo}/pulls/{number}"), &what)?;
-            let (base, head) = (sha(&pr.base.sha)?, sha(&pr.head.sha)?);
+            let (base, head) = (
+                CommitId::parse(&pr.base.sha)?,
+                CommitId::parse(&pr.head.sha)?,
+            );
             let compare: CompareJson =
                 api.get(&format!("/repos/{repo}/compare/{base}...{head}"), &what)?;
             let source = Source {
@@ -319,7 +322,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
                 repo: repo.to_string(),
                 number: Some(*number),
                 title: pr.title,
-                base: sha(&compare.merge_base_commit.sha)?,
+                base: CommitId::parse(&compare.merge_base_commit.sha)?,
                 head,
                 merge: false,
             };
@@ -328,7 +331,9 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
                 commit: None,
                 text: format!("{}\n\n{}", source.title, pr.body.unwrap_or_default()),
             };
-            let commits = compare.commits.into_iter().map(Message::from).collect();
+            let commits = (compare.commits.into_iter())
+                .map(Message::try_from)
+                .collect::<Result<_>>()?;
             (repo, source, Some(description), commits)
         }
         Target::Commit {
@@ -338,11 +343,11 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
         } => {
             let what = format!("commit {repo}@{short}");
             let found: CommitJson = api.get(&format!("/repos/{repo}/commits/{short}"), &what)?;
-            let head = sha(&found.sha)?;
-            let base = match found.parents.first() {
-                Some(parent) => sha(&parent.sha)?,
-                None => git::EMPTY_TREE.to_string(),
-            };
+            let head = CommitId::parse(&found.sha)?;
+            let base = CommitId::parse(match found.parents.first() {
+                Some(parent) => &parent.sha,
+                None => git::EMPTY_TREE,
+            })?;
             let source = Source {
                 kind: "commit",
                 url: match pull {
@@ -362,15 +367,15 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
                 head,
                 merge: found.parents.len() > 1,
             };
-            (repo, source, None, vec![Message::from(found)])
+            (repo, source, None, vec![Message::try_from(found)?])
         }
     };
     crate::verbose!(
         "{} \"{}\": diffing {}..{}{}",
         source.name(),
         source.title,
-        &source.base[..7],
-        &source.head[..7],
+        source.base.short(7),
+        source.head.short(7),
         if source.merge {
             " (merge: against its first parent)"
         } else {
@@ -383,7 +388,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
         .collect();
     let (git_dir, lock) = cache.fetch(repo, &wanted)?;
     Ok(Remote {
-        git: Git::bare(git_dir, source.head.clone(), lock),
+        git: Git::bare(git_dir, source.head.as_str().to_string(), lock),
         range: format!("{}..{}", source.base, source.head),
         source,
         commits,
@@ -392,12 +397,34 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
     })
 }
 
-/// A full commit id from the API, checked before it reaches git.
-fn sha(value: &str) -> Result<String> {
-    if value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Ok(value.to_ascii_lowercase())
-    } else {
-        bail!("unexpected response from GitHub: `{value}` is not a commit id")
+/// A full commit id from the API, checked before it reaches git: 40 hex
+/// digits, lowercase.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct CommitId(String);
+
+impl CommitId {
+    fn parse(value: &str) -> Result<CommitId> {
+        if value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Ok(CommitId(value.to_ascii_lowercase()))
+        } else {
+            bail!("unexpected response from GitHub: `{value}` is not a commit id")
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Its first N digits.
+    pub fn short(&self, n: usize) -> &str {
+        &self.0[..n.min(self.0.len())]
+    }
+}
+
+impl std::fmt::Display for CommitId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -434,13 +461,15 @@ struct MessageJson {
     message: String,
 }
 
-impl From<CommitJson> for Message {
-    fn from(c: CommitJson) -> Self {
-        Message {
+impl TryFrom<CommitJson> for Message {
+    type Error = anyhow::Error;
+
+    fn try_from(c: CommitJson) -> Result<Self> {
+        Ok(Message {
             source: claims::Source::Commit,
-            commit: Some(c.sha[..c.sha.len().min(12)].to_string()),
+            commit: Some(CommitId::parse(&c.sha)?.short(12).to_string()),
             text: c.commit.message,
-        }
+        })
     }
 }
 
