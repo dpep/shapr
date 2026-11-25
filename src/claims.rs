@@ -3,6 +3,9 @@
 //! reported beside the code's facts, never folded into a hunk's kind or
 //! facets: shapr reads the code first and doesn't take the message's word.
 
+use crate::change::Category as FileCategory;
+use crate::classify::{Facet, Kind};
+use crate::report::{HunkRecord, Verdict};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -157,24 +160,47 @@ pub struct Experimental {
 }
 
 /// What the code shows, for checking claims against it.
-pub struct CodeFacts {
+struct CodeFacts {
     /// Every hunk is structure (and there is at least one).
-    pub structure: bool,
+    structure: bool,
     /// The hunks in the verdict (structure, behavior or mixed): hunks shapr
     /// couldn't compare are unknown, not evidence.
-    pub hunks: Vec<HunkFacts>,
+    hunks: Vec<HunkFacts>,
 }
 
-pub struct HunkFacts {
-    pub id: usize,
+struct HunkFacts {
+    id: usize,
     /// Its verdict is behavior or mixed.
-    pub behavior: bool,
+    behavior: bool,
     /// In test code: a test file, or a residual with the `test` facet.
-    pub test: bool,
+    test: bool,
     /// In a code or test file, not config or a manifest.
-    pub code: bool,
+    code: bool,
     /// Holds a reorder or move part.
-    pub reorder: bool,
+    reorder: bool,
+}
+
+impl CodeFacts {
+    fn of(verdict: Verdict, hunks: &[HunkRecord]) -> CodeFacts {
+        CodeFacts {
+            structure: verdict == Verdict::Structure,
+            hunks: hunks
+                .iter()
+                .filter(|h| h.verdict.counted())
+                .map(|h| HunkFacts {
+                    id: h.id,
+                    behavior: matches!(h.verdict, Verdict::Behavior | Verdict::Mixed),
+                    test: h.category == FileCategory::Test
+                        || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
+                    code: matches!(h.category, FileCategory::Code | FileCategory::Test),
+                    reorder: h
+                        .parts
+                        .iter()
+                        .any(|p| matches!(p.kind, Kind::Reorder | Kind::Move)),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl Claims {
@@ -239,7 +265,9 @@ impl Claims {
     /// Records each claim the code doesn't bear out. A purpose claim (refactor,
     /// docs, test, style) conflicts only when no message also claims a behavior
     /// change.
-    pub fn check(&mut self, code: &CodeFacts) {
+    /// The change's VERDICT and HUNKS are the code's side.
+    pub fn check(&mut self, verdict: Verdict, hunks: &[HunkRecord]) {
+        let code = &CodeFacts::of(verdict, hunks);
         let claimed = |c: Category| self.experimental.categories[c.as_str()] > 0;
         let behavior = Category::ALL.iter().any(|&c| c.behavior() && claimed(c));
         let reorder = self

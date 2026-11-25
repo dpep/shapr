@@ -2,7 +2,7 @@
 //! rendering. Everything shapr writes to stdout goes through here.
 
 use crate::change::{Category, Change, FileChange};
-use crate::claims::{self, Claims, CodeFacts, Finding, HunkFacts};
+use crate::claims::{self, Claims, Finding};
 use crate::classify::{
     self, Assumption, Claim, Confidence, Context, Evidence, Facet, Kind, Label, Labels, Method,
 };
@@ -56,7 +56,7 @@ impl Verdict {
     }
 
     /// Counts toward the change's verdict.
-    fn counted(self) -> bool {
+    pub(crate) fn counted(self) -> bool {
         matches!(
             self,
             Verdict::Structure | Verdict::Behavior | Verdict::Mixed
@@ -217,19 +217,19 @@ pub struct FileRecord<'a> {
 #[derive(Serialize)]
 pub struct HunkRecord<'a> {
     record: &'static str,
-    id: usize,
+    pub(crate) id: usize,
     file: &'a str,
     old_file: Option<&'a str>,
     language: Option<&'static str>,
     parsed: bool,
-    category: Category,
+    pub(crate) category: Category,
     before: Lines,
     after: Lines,
     kind: Kind,
-    verdict: Verdict,
+    pub(crate) verdict: Verdict,
     #[serde(flatten)]
     lines: LineCounts,
-    parts: Vec<PartRecord>,
+    pub(crate) parts: Vec<PartRecord>,
     /// Against the norms of the code around it; experimental.
     pub style: Option<crate::norms::HunkStyle>,
     /// Of `review_lines`, those in test code.
@@ -243,14 +243,14 @@ pub struct HunkRecord<'a> {
 /// A part of a hunk, or its residual (kind `logic`).
 #[derive(Serialize)]
 pub struct PartRecord {
-    kind: Kind,
+    pub(crate) kind: Kind,
     structure: bool,
     lines: Runs,
     confidence: Confidence,
     reason: String,
     evidence: EvidenceRecord,
     detail: Map<String, Value>,
-    facets: Vec<Facet>,
+    pub(crate) facets: Vec<Facet>,
     assumptions: Vec<Assumption>,
     review_lines: usize,
     /// Changed lines it covers, for `structure_share`.
@@ -611,25 +611,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         .map(|p| p.split_once('/').map_or(".", |(s, _)| s))
         .collect();
     let total = lines.changed();
-    // Only hunks in the verdict are evidence against a claim.
-    claims.check(&CodeFacts {
-        structure: verdict == Verdict::Structure,
-        hunks: hunks
-            .iter()
-            .filter(|h| h.verdict.counted())
-            .map(|h| HunkFacts {
-                id: h.id,
-                behavior: matches!(h.verdict, Verdict::Behavior | Verdict::Mixed),
-                test: h.category == Category::Test
-                    || h.parts.iter().any(|p| p.facets.contains(&Facet::Test)),
-                code: matches!(h.category, Category::Code | Category::Test),
-                reorder: h
-                    .parts
-                    .iter()
-                    .any(|p| matches!(p.kind, Kind::Reorder | Kind::Move)),
-            })
-            .collect(),
-    });
+    claims.check(verdict, hunks);
     Summary {
         record: "summary",
         verdict,
