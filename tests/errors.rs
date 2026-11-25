@@ -172,7 +172,7 @@ fn deeply_nested_code_is_classified_or_not_compared() {
         let hunk = &hunks(&report)[0];
         assert_eq!(hunk["parsed"], !too_deep, "{path} {}", lead(hunk)["reason"]);
         if too_deep {
-            assert_eq!(hunk["verdict"], "unknown", "{path}");
+            assert_eq!(hunk["verdict"], "behavior", "{path}");
             let reason = lead(hunk)["reason"].as_str().unwrap();
             assert!(reason.contains("nested deeper than"), "{reason}");
         }

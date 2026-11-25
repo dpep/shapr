@@ -125,8 +125,8 @@ A hunk's `verdict` is the first that applies:
 | `none` | The file is `docs` or `fixture`. |
 | `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
 | `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.comparison` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
-| `behavior` | A `config` or `manifest` file shapr has no parser for: its text changed beyond whitespace, and that text is the setting. |
-| `unknown` | Anything else: an `unknown` file, or `code` or `test` whose content couldn't be read (`evidence.comparison` `"none"`). |
+| `behavior` | A `code`, `test`, `config` or `manifest` file shapr didn't compare (`evidence.comparison` `"none"`): a config or manifest has no parser, and its text is the setting; code too big, nested too deep or unreadable is `logic` its reason names, never left out of the verdict on its own say. |
+| `unknown` | Anything else: an `unknown` file, or a `test` file in a language shapr doesn't parse. |
 
 The change's `verdict` rolls up the hunks whose verdict is `structure`,
 `behavior` or `mixed`: `structure` when every part among them is structure,
@@ -481,8 +481,8 @@ extensionless DSL files RuboCop includes by default (`Gemfile`, `Rakefile`,
 the like; a file found only by its shebang is not) (parsed with prism) and `"rust"` for `.rs` (parsed with
 tree-sitter). Any other file is `null` and its hunks `logic`.
 
-A parsed file isn't compared, and its hunks are `unknown` with
-`parsed: false` and a reason saying why, when its code nests deeper than
+A parsed file isn't compared, and its hunks are `logic` (verdict
+`behavior`) with `parsed: false` and a reason saying why, when its code nests deeper than
 10,000 levels, or when it is too big to compare: its changed lines (removed
 plus added) pass 8,000 (4,000 lines rewritten in place, or 8,000 added),
 or the change's compared files' changed lines, squared and summed, pass

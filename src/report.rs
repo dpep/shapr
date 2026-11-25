@@ -77,12 +77,11 @@ fn hunk_verdict(file: &FileChange, whitespace_only: bool, label: &Label) -> Verd
         Category::Binary | Category::Generated | Category::Vendored => Verdict::Unknown,
         Category::Docs | Category::Fixture => Verdict::None,
         _ if !compared && whitespace_only => Verdict::None,
-        Category::Code | Category::Test | Category::Config | Category::Manifest if compared => {
-            Verdict::of(label.verdict())
-        }
-        // Their text differs beyond whitespace, and their text is the setting.
-        Category::Config | Category::Manifest => Verdict::Behavior,
-        Category::Code | Category::Test | Category::Unknown => Verdict::Unknown,
+        _ if !file.counts() => Verdict::Unknown,
+        _ if compared => Verdict::of(label.verdict()),
+        // Counted but not compared (no parser for config, a cap, unreadable):
+        // what shapr didn't compare is logic, never left out on its own say.
+        _ => Verdict::Behavior,
     }
 }
 

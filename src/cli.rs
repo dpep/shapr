@@ -39,7 +39,8 @@ EXAMPLES                          each is a git command: shapr X is git show/dif
   Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0. Only
   code, test, config and manifest files count toward the verdict: a docs-only change
   is `none` (so is test data under fixtures/ or testdata/), and lockfiles, vendored and binary files and unparsed languages are
-  `unknown`, counted in summary.verdicts.
+  `unknown`, counted in summary.verdicts. Ruby or Rust shapr didn't compare (too
+  big, nested too deep) is `logic`, inside the verdict.
 
 GITHUB (experimental: the forms, meta.source and the cache may change before 1.0)
   The argument may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,

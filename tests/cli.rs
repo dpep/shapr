@@ -1543,7 +1543,7 @@ fn a_diff_on_stdin_that_git_called_binary_for_an_attribute_is_code() {
         .iter()
         .find(|h| h["file"] == "lib/a.rb")
         .unwrap();
-    assert_eq!(hunk["verdict"], "unknown");
+    assert_eq!(hunk["verdict"], "behavior");
     assert!(
         lead(hunk)["reason"].as_str().unwrap().contains("--text"),
         "{hunk:#}"
@@ -1551,17 +1551,17 @@ fn a_diff_on_stdin_that_git_called_binary_for_an_attribute_is_code() {
 }
 
 #[test]
-fn a_file_too_big_to_compare_is_unknown_and_says_why() {
+fn a_file_too_big_to_compare_is_logic_and_says_why() {
     let side = |name: &str| -> String { (0..4001).map(|i| format!("{name}{i} = 1\n")).collect() };
     let (before, after) = (side("x"), side("y"));
     let report = classify(&[("lib/a.rb", &before)], &[("lib/a.rb", &after)]);
     let file = &report["files"][0];
     assert_eq!(file["parsed"], false, "{file:#}");
     let hunk = &hunks(&report)[0];
-    assert_eq!(hunk["verdict"], "unknown");
+    assert_eq!(hunk["verdict"], "behavior");
     let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(reason.contains("too big to compare"), "{reason}");
-    assert_eq!(report["summary"]["verdict"], "unknown");
+    assert_eq!(report["summary"]["verdict"], "behavior");
 }
 
 /// The change's budget is spent smallest file first, so big files named to
@@ -1588,7 +1588,7 @@ fn big_files_cant_push_a_small_edit_past_the_change_budget() {
 /// A file only added has no removed-by-added pairs, but its declarations
 /// are compared with each other: its lines count against the same cap.
 #[test]
-fn a_file_added_too_big_to_compare_is_unknown() {
+fn a_file_added_too_big_to_compare_is_logic() {
     let big: String = (0..8001).map(|i| format!("def m{i}; end\n")).collect();
     let report = classify(
         &[("lib/a.rb", "x = 1\n")],
@@ -1600,4 +1600,74 @@ fn a_file_added_too_big_to_compare_is_unknown() {
         .unwrap();
     let reason = lead(hunk)["reason"].as_str().unwrap();
     assert!(reason.contains("too big to compare"), "{reason}");
+    assert_eq!(hunk["verdict"], "behavior");
+    assert_eq!(report["summary"]["verdict"], "behavior");
+}
+
+/// Code shapr didn't compare never leaves the verdict on its own say: over
+/// a cap, nested too deep, unreadable or diffed as binary on stdin, a code
+/// or test hunk is logic inside the verdict, its reason naming why.
+#[test]
+fn a_counted_file_shapr_didnt_compare_stays_in_the_verdict() {
+    let renamed = ("lib/a.rb", "def f\n  x = 1\n  x\nend\n");
+    let renamed_after = ("lib/a.rb", "def f\n  y = 1\n  y\nend\n");
+    let big: String = (0..9000).map(|i| format!("def m{i}; end\n")).collect();
+    let deep = format!("x = {}\n", vec!["1"; 50_000].join(" + "));
+    let deep_after = format!("{deep}# c\n");
+    let big_rs = big.replace("def m", "fn m").replace("; end", "() {}");
+    type Files<'a> = Vec<(&'a str, &'a str)>;
+    let cases: [(&str, Files, Files, &str); 4] = [
+        (
+            "added",
+            vec![renamed],
+            vec![renamed_after, ("lib/evil.rb", &big)],
+            "too big",
+        ),
+        (
+            "deleted",
+            vec![renamed, ("spec/evil_spec.rb", &big)],
+            vec![renamed_after],
+            "too big",
+        ),
+        (
+            "deep",
+            vec![renamed, ("lib/deep.rb", &deep)],
+            vec![renamed_after, ("lib/deep.rb", &deep_after)],
+            "nested deeper",
+        ),
+        (
+            "rust",
+            vec![renamed, ("src/lib.rs", "fn f() {}\n")],
+            vec![renamed_after, ("src/lib.rs", &big_rs)],
+            "too big",
+        ),
+    ];
+    for (name, before, after, why) in cases {
+        let dir = repo(&[&before]);
+        for (path, _) in &before {
+            if !after.iter().any(|(p, _)| p == path) {
+                git(dir.path(), &["rm", "-q", path]);
+            }
+        }
+        commit(dir.path(), &after, name);
+        let report = report(&shapr(dir.path(), &["-j", "HEAD"]));
+        assert_eq!(report["summary"]["verdicts"]["unknown"], 0, "{name}");
+        assert_eq!(report["summary"]["verdict"], "mixed", "{name}");
+        let hunk = hunks(&report)
+            .iter()
+            .find(|h| h["parsed"] == false)
+            .unwrap();
+        assert_eq!(hunk["verdict"], "behavior", "{name}");
+        let reason = lead(hunk)["reason"].as_str().unwrap();
+        assert!(reason.contains(why), "{name}: {reason}");
+        let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+        assert!(!text.contains("outside the verdict"), "{name}: {text}");
+    }
+    // On stdin: a diff with no blob ids can't be read.
+    let dir = repo(&[&[renamed]]);
+    let diff = "diff --git a/lib/a.rb b/lib/a.rb\n--- a/lib/a.rb\n+++ b/lib/a.rb\n@@ -2 +2 @@\n-  x = 1\n+  x = 2\n";
+    let report = report(&shapr_stdin(dir.path(), &["-j"], diff));
+    let hunk = &hunks(&report)[0];
+    assert_eq!(hunk["parsed"], false, "{hunk:#}");
+    assert_eq!(hunk["verdict"], "behavior", "{hunk:#}");
 }

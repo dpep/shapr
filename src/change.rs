@@ -46,6 +46,13 @@ impl FileChange {
     pub fn language(&self) -> Option<&'static str> {
         self.trees.as_ref().ok().map(|t| t.language)
     }
+
+    /// Its hunks count toward the verdict, compared or not: a counted
+    /// category, except a test in a language shapr doesn't parse.
+    pub fn counts(&self) -> bool {
+        self.category.counted()
+            && (self.category != Category::Test || frontend::for_path(self.diff.path()).is_some())
+    }
 }
 
 /// Deepest nesting the classification walks; deeper code isn't compared.
