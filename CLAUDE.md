@@ -246,7 +246,8 @@ Each kind gets its own module under `src/classify/`; kind-specific output
 goes in the part's `evidence.values` and `detail`, documented in
 docs/schema.md. report.rs reads parts, the residual and the rollup
 (`Label::kind`, `confidence`, ...); it names a kind only for the summary's
-`move_contexts` and for the code facts claims check (`reorder`, `move`).
+`move_contexts`. claims.rs builds its own code facts from the hunk records
+(`Claims::check`), naming `reorder` and `move` there.
 
 ## Gate
 
