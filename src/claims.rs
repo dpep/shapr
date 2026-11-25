@@ -313,8 +313,11 @@ impl Claims {
             if reorder && !code.hunks.is_empty() && !code.hunks.iter().any(|h| h.reorder) {
                 conflict(Category::Refactor, Finding::NoReorderParts, ids(&|_| true));
             }
+            // Only a test-only claim says nothing outside tests changed: a
+            // test word alone may name what else the change is about.
+            let test_only = self.hints.iter().any(|h| h.hint == HintKind::TestOnly);
             let outside_tests = ids(&|h| h.behavior && !h.test);
-            if tests && !outside_tests.is_empty() {
+            if test_only && !outside_tests.is_empty() {
                 conflict(Category::Test, Finding::NonTestBehaviorHunks, outside_tests);
             }
         }
@@ -447,6 +450,10 @@ const STYLE_FIXES: &[&str] = &["fix", "fixes", "fixed", "fixing"];
 
 /// Phrases saying the change is to test code, matched as `NO_BEHAVIOR_CHANGE`.
 const TEST_ONLY: &[&str] = &["test only", "tests only", "spec only", "specs only"];
+
+/// Clauses saying the change is to test code, matched whole: elsewhere
+/// "only tests" describes code ("a method only tests reach").
+const TEST_ONLY_CLAUSES: &[&str] = &["only tests", "only specs", "just tests", "just specs"];
 
 /// Words before an issue reference that say it was a bug.
 const FIXING: &[&str] = &["fix", "fixes", "fixed"];
@@ -589,6 +596,9 @@ fn hints_in(message: &Message) -> Vec<Hint> {
                     Some(Category::Refactor),
                     field,
                 );
+            }
+            if TEST_ONLY_CLAUSES.contains(&clause.as_str()) {
+                add(HintKind::TestOnly, &clause, Some(Category::Test), field);
             }
         }
         if tokens(text).any(|w| w == "NFC") {
@@ -1061,6 +1071,26 @@ mod tests {
             "This does not change behavior of the migration if you use one.",
         ] {
             assert!(said(body).is_empty(), "{body}: {:?}", said(body));
+        }
+    }
+
+    #[test]
+    fn only_or_just_tests_claims_test_only_as_a_whole_clause() {
+        let only = |body: &str| -> Vec<String> {
+            hints(&format!("Cover the gate\n\n{body}"))
+                .into_iter()
+                .filter(|h| h.0 == HintKind::TestOnly)
+                .map(|h| h.1)
+                .collect()
+        };
+        assert_eq!(only("Just tests."), ["just tests"]);
+        assert_eq!(only("- Only specs"), ["only specs"]);
+        for body in [
+            "A method only tests reach counts as dead.",
+            "Backtraces in normal runs, not just tests.",
+            "It only tests the happy path.",
+        ] {
+            assert!(only(body).is_empty(), "{body}: {:?}", only(body));
         }
     }
 
