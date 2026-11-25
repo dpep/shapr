@@ -726,8 +726,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     if !report.hunks.is_empty() {
         writeln!(out)?;
     }
-    // Uncompared hunks outside the verdict, one line per description, so
-    // they never crowd out the hunks a reviewer reads.
+    // Hunks not classified, one line per description after the rest.
     let mut outside: Vec<(String, Vec<digest::Place>)> = Vec::new();
     let mut listed = Vec::new();
     for hunk in &report.hunks {
@@ -757,7 +756,11 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
                 detail.push(format!("[{}]", facets.join(", ")));
             }
             if !hunk.verdict.counted() && i == 0 {
-                detail.push(format!("({}: outside the verdict)", hunk.category.as_str()));
+                detail.push(format!(
+                    "({}: verdict {})",
+                    hunk.category.as_str(),
+                    hunk.verdict.as_str()
+                ));
             }
             detail.retain(|d| !d.is_empty());
             let line = format!(
@@ -780,10 +783,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         let n = at.len();
         let hunks = if n == 1 { "hunk" } else { "hunks" };
         let at = digest::places(&at);
-        emit(
-            out,
-            &format!("{plain} (outside the verdict), {n} {hunks}: {at}"),
-        )?;
+        emit(out, &format!("not classified ({plain}), {n} {hunks}: {at}"))?;
     }
     Ok(())
 }
@@ -793,7 +793,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
 /// read without the command line.
 fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::Result<()> {
     let s = &report.summary;
-    // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
+    // Parts in hunks the verdict counts; "hunk verdicts" counts the rest.
     let kinds: Vec<String> = (s.kinds.iter())
         .filter(|(_, n)| **n > 0)
         .map(|(k, n)| format!("{n} {k}"))
@@ -830,7 +830,7 @@ fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::
         if outside.is_empty() {
             String::new()
         } else {
-            format!("; outside the verdict: {}", outside.join(", "))
+            format!("; hunk verdicts: {}", outside.join(", "))
         },
         s.lines.review_lines,
         if s.lines.review_lines == 1 { "" } else { "s" },
@@ -1012,13 +1012,18 @@ fn conflicts(report: &Report, refactor: bool) -> Vec<(&'static str, String)> {
     out
 }
 
+/// Shapr compared the hunk's sides: parsed, or line by line.
+fn compared(hunk: &HunkRecord) -> bool {
+    match hunk.parts.as_slice() {
+        [part] => hunk.parsed || part.evidence.comparison != Method::None,
+        _ => true,
+    }
+}
+
 /// A hunk in a file shapr didn't compare, by its category alone: `docs
 /// change`, `unknown file`. `None` for code or tests, whose reason says why.
 fn uncompared(hunk: &HunkRecord) -> Option<String> {
-    let [part] = hunk.parts.as_slice() else {
-        return None;
-    };
-    if hunk.parsed || part.evidence.comparison != Method::None {
+    if compared(hunk) {
         return None;
     }
     Some(match hunk.category {

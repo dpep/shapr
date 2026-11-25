@@ -64,6 +64,10 @@ fn digest_lists_logic_and_counts_structure_to_skip() {
     let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
     assert!(text.contains("read first:\n  a.rb:11 "), "{text}");
     assert!(
+        text.contains("\nnot classified (docs): README.md:1\n"),
+        "{text}"
+    );
+    assert!(
         text.contains("skip, proven structure: 2 changed lines (1 format_only)"),
         "{text}"
     );
@@ -267,7 +271,10 @@ fn text_places_every_hunk_one_file_at_a_time() {
     let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
     let lines: Vec<String> = (1..=20).map(|n| (n * 10).to_string()).collect();
     assert!(
-        text.contains(&format!("docs: README.md:{}\n", lines.join(","))),
+        text.contains(&format!(
+            "not classified (docs): README.md:{}\n",
+            lines.join(",")
+        )),
         "{text}"
     );
 }

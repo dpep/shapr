@@ -1,7 +1,7 @@
 //! `--digest`: the report narrowed to what a reviewer reads first. A view
 //! over the [`Report`]; it computes nothing the full output doesn't hold.
 
-use super::{HunkRecord, Report, Verdict, emit, quote_path, summary_text};
+use super::{HunkRecord, Report, Verdict, compared, emit, quote_path, summary_text};
 use crate::change::Category;
 use crate::classify::{Facet, Kind};
 use crate::norms::Direction;
@@ -103,11 +103,14 @@ struct Unproven<'a> {
     why: Vec<&'static str>,
 }
 
-/// The hunks of one category outside the verdict.
+/// The hunks of one category the verdict doesn't count.
 #[derive(Serialize, Default)]
 struct Outside<'a> {
     review_lines: usize,
     at: Vec<Place<'a>>,
+    /// The verdict of a hunk shapr compared, if any was.
+    #[serde(skip)]
+    compared: Option<Verdict>,
 }
 
 /// Proven structure with no line to read, as counts: what a reviewer can skip.
@@ -146,6 +149,9 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             let group = outside.entry(h.category.as_str()).or_default();
             group.review_lines += h.lines.review_lines;
             group.at.push(place(h));
+            if compared(h) {
+                group.compared = Some(h.verdict);
+            }
             continue;
         }
         for p in h.parts.iter().filter(|p| p.kind != Kind::Logic) {
@@ -417,12 +423,13 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             0 => String::new(),
             n => format!(", {n} review line{}", plural(n)),
         };
+        let what = match group.compared {
+            Some(verdict) => format!("verdict {}", verdict.as_str()),
+            None => "not classified".to_string(),
+        };
         emit(
             out,
-            &format!(
-                "outside the verdict, {category}{lines}: {}",
-                places(&group.at)
-            ),
+            &format!("{what} ({category}){lines}: {}", places(&group.at)),
         )?;
     }
     Ok(())

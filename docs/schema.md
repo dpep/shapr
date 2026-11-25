@@ -1310,7 +1310,9 @@ that line is left out of the text when this one prints; the JSON keeps both.
 *Experimental.* `--digest` narrows the output to what a reviewer reads
 first; it works with every input form. As text, the summary lines come
 first, then the logic to read, ranked, then what shapr couldn't prove, what
-to skip, the style check and the hunks outside the verdict. Under `-j` it is
+to skip, the style check and the hunks the verdict doesn't count, per
+category: `not classified (docs): README.md:1` when shapr compared none of
+them, else the verdict they carry, `verdict unknown (generated): ...`. Under `-j` it is
 one compact `digest` object; `-J` doesn't take it. It holds nothing the full
 output doesn't: a consumer that needs the evidence reads the full JSON.
 A place is a `"file:line"` string, the line a hunk's first or a style
@@ -1335,7 +1337,7 @@ comma or colon is in double quotes there, as is one git quotes.
 | `skip` | object | Proven structure with no line to read (`review_lines` 0), to skip: `hunks` (wholly structure, nothing to read), `changed_lines` in those parts, and `kinds`, part count per kind. |
 | `style_checked` | int | Hunks whose new code was judged against at least one norm (see [Style](#style)). |
 | `style` | array | Each deviation from a diverging norm: `at`, `norm`, `expected`. Empty with `style_checked` above 0: the new code follows the norms around it. |
-| `outside` | object | Per category, the hunks outside the verdict: `review_lines`, summed (a file no frontend parses is still read), and `at`, their places. |
+| `outside` | object | Per category, the hunks the verdict doesn't count (verdict `none` or `unknown`): `review_lines`, summed (a file no frontend parses is still read), and `at`, their places. |
 
 Every review line is placed once: `read_first` and `more`, `unproven_structure`
 and `outside` sum to `review_lines`.

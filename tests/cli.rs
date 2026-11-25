@@ -1385,7 +1385,7 @@ fn the_text_kinds_count_only_hunks_inside_the_verdict() {
     let text = String::from_utf8_lossy(&out.stdout);
     let last = text.lines().next().unwrap_or_default();
     assert!(
-        last.contains("behavior: 2 hunks (1 logic); outside the verdict: 1 none;"),
+        last.contains("behavior: 2 hunks (1 logic); hunk verdicts: 1 none;"),
         "{text}"
     );
 }
@@ -1569,6 +1569,8 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
             ("config/x.yml", "a: 1\n"),
             ("config/y.yml", "b: 1  \n"),
             ("spec/fixtures/f.rb", "X = 1\n"),
+            (".gitattributes", "gen/** linguist-generated\n"),
+            ("gen/g.rb", "Y = 1\n"),
         ],
         &[
             ("README.md", "hello\n"),
@@ -1577,20 +1579,22 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
             ("config/x.yml", "a: 2\n"),
             ("config/y.yml", "b: 1\n"),
             ("spec/fixtures/f.rb", "X = 2\n"),
+            ("gen/g.rb", "Y = 2\n"),
         ],
     ]);
     let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
-    // Outside the verdict, one line per description after the listed hunks,
+    // Not classified, one line per description after the listed hunks,
     // which a long path among them doesn't pad.
     let lines: Vec<&str> = hunk_lines(&text).collect();
     assert_eq!(
         lines,
         [
             "config/x.yml:1  config change",
-            "unknown file (outside the verdict), 1 hunk: Makefile:1",
-            "docs change (outside the verdict), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
-            "config change, whitespace only (outside the verdict), 1 hunk: config/y.yml:1",
-            "fixture change (outside the verdict), 1 hunk: spec/fixtures/f.rb:1",
+            "gen/g.rb:1      logic             1.00  [literal_only] (generated: verdict unknown)",
+            "not classified (unknown file), 1 hunk: Makefile:1",
+            "not classified (docs change), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
+            "not classified (config change, whitespace only), 1 hunk: config/y.yml:1",
+            "not classified (fixture change), 1 hunk: spec/fixtures/f.rb:1",
         ],
         "{text}"
     );
