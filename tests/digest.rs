@@ -117,3 +117,98 @@ fn every_digest_field_is_documented() {
         }
     }
 }
+
+const INVOICE: &str = "\
+class Invoice
+  def total(items, rate)
+    subtotal = items.sum
+    taxed = subtotal * rate
+    rounded = taxed.round(2)
+    puts rounded
+    rounded
+  end
+
+  def filler1
+    1
+  end
+
+  def filler2
+    2
+  end
+
+  def filler3
+    3
+  end
+
+  def filler4
+    4
+  end
+
+end
+";
+
+const INVOICE_EXTRACTED: &str = "\
+class Invoice
+  def total(items, rate)
+    subtotal = items.sum
+    rounded = apply_tax(subtotal, rate)
+    puts rounded
+    rounded
+  end
+
+  def filler1
+    1
+  end
+
+  def filler2
+    2
+  end
+
+  def filler3
+    3
+  end
+
+  def filler4
+    4
+  end
+
+  def apply_tax(amount, rate)
+    taxed = amount * rate
+    taxed.round(2)
+  end
+end
+";
+
+/// The digest's review lines, read_first through outside, against the
+/// summary's: every line to read is placed somewhere.
+fn assert_reconciles(digest: &serde_json::Value) {
+    let sum = |items: &serde_json::Value| -> u64 {
+        (items.as_array().unwrap().iter())
+            .map(|i| i["review_lines"].as_u64().unwrap())
+            .sum()
+    };
+    let outside: u64 = (digest["outside"].as_object().unwrap().values())
+        .map(|g| g["review_lines"].as_u64().unwrap())
+        .sum();
+    let placed = sum(&digest["read_first"])
+        + digest["more"]["review_lines"].as_u64().unwrap()
+        + sum(&digest["unproven_structure"])
+        + outside;
+    assert_eq!(placed, digest["review_lines"].as_u64().unwrap(), "{digest}");
+}
+
+#[test]
+fn structure_with_lines_to_read_is_listed_not_skipped() {
+    let dir = repo(&[&[("a.rb", INVOICE)], &[("a.rb", INVOICE_EXTRACTED)]]);
+    let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
+    let read = digest["read_first"].as_array().unwrap();
+    assert!(!read.is_empty(), "{digest}");
+    assert!(read.iter().all(|i| i["kind"] == "extract"), "{digest}");
+    assert_eq!(digest["skip"]["changed_lines"], 0, "{digest}");
+    assert_eq!(digest["skip"]["hunks"], 0, "{digest}");
+    assert_reconciles(&digest);
+
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(text.contains("proven extract, still read"), "{text}");
+    assert!(!text.contains("skip,"), "{text}");
+}

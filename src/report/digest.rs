@@ -45,10 +45,13 @@ impl Serialize for Place<'_> {
     }
 }
 
-/// Logic to read: one hunk's residual, or the residuals sharing a reason.
+/// Lines to read: one hunk's residual or proven part that still needs
+/// reading, or several of one kind sharing a reason.
 #[derive(Serialize)]
 struct Item<'a> {
     at: Vec<Place<'a>>,
+    /// `logic`, or the structural kind proven but still read (extract).
+    kind: &'static str,
     review_lines: usize,
     facets: Vec<&'static str>,
     /// Changed lines per structural kind proven in the same hunk.
@@ -76,7 +79,7 @@ struct Unproven<'a> {
     why: Vec<&'static str>,
 }
 
-/// Proven structure, as counts: what a reviewer can skip.
+/// Proven structure with no line to read, as counts: what a reviewer can skip.
 #[derive(Serialize, Default)]
 struct Skip {
     hunks: usize,
@@ -119,10 +122,10 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             continue;
         }
         for p in h.parts.iter().filter(|p| p.kind != Kind::Logic) {
-            if p.structure {
+            if p.structure && p.review_lines == 0 {
                 *skip.kinds.entry(p.kind.as_str()).or_insert(0) += 1;
                 skip.changed_lines += p.changed;
-            } else {
+            } else if !p.structure {
                 let mut why: Vec<&'static str> = p.assumptions.iter().map(|a| a.as_str()).collect();
                 why.extend(p.context.iter().map(|c| c.as_str()));
                 unproven_structure.push(Unproven {
@@ -132,7 +135,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 });
             }
         }
-        if h.verdict == Verdict::Structure {
+        if h.verdict == Verdict::Structure && h.lines.review_lines == 0 {
             skip.hunks += 1;
         }
         if let Some(st) = h
@@ -154,46 +157,54 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 }
             }
         }
-        let Some(r) = h.parts.iter().find(|p| p.kind == Kind::Logic) else {
-            continue;
-        };
-        if r.review_lines == 0 {
-            continue;
-        }
-        let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
-        let reason = r
-            .reason
-            .strip_prefix(crate::classify::PLAIN_LOGIC)
-            .map_or(r.reason.as_str(), |rest| rest.trim_start_matches("; "));
-        let note = (!reason.is_empty()).then(|| reason.to_string());
-        // Residuals sharing a reason read as one item, across files.
-        if let Some(item) = items
-            .iter_mut()
-            .find(|i| note.is_some() && i.note == note && i.facets == facets)
+        // Placement follows review_lines: proven structure still read is listed.
+        for r in (h.parts.iter())
+            .filter(|p| p.kind == Kind::Logic || (p.structure && p.review_lines > 0))
         {
-            item.at.push(place(h));
-            item.review_lines += r.review_lines;
-            continue;
-        }
-        let risky = (r.facets.iter())
-            .filter(|f| !matches!(f, Facet::Test | Facet::LiteralOnly))
-            .count();
-        items.push(Item {
-            at: vec![place(h)],
-            review_lines: r.review_lines,
-            facets,
-            with: (h.parts.iter()).filter(|p| p.kind != Kind::Logic).fold(
-                BTreeMap::new(),
-                |mut with, p| {
-                    *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
-                    with
+            if r.review_lines == 0 {
+                continue;
+            }
+            let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
+            let reason = r
+                .reason
+                .strip_prefix(crate::classify::PLAIN_LOGIC)
+                .map_or(r.reason.as_str(), |rest| rest.trim_start_matches("; "));
+            let note = (!reason.is_empty()).then(|| reason.to_string());
+            let kind = r.kind.as_str();
+            // Items sharing a reason read as one, across files.
+            if let Some(item) = items
+                .iter_mut()
+                .find(|i| note.is_some() && i.kind == kind && i.note == note && i.facets == facets)
+            {
+                item.at.push(place(h));
+                item.review_lines += r.review_lines;
+                continue;
+            }
+            let risky = (r.facets.iter())
+                .filter(|f| !matches!(f, Facet::Test | Facet::LiteralOnly))
+                .count();
+            let logic = r.kind == Kind::Logic;
+            items.push(Item {
+                at: vec![place(h)],
+                kind,
+                review_lines: r.review_lines,
+                facets,
+                with: match logic {
+                    true => (h.parts.iter()).filter(|p| p.kind != Kind::Logic).fold(
+                        BTreeMap::new(),
+                        |mut with, p| {
+                            *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
+                            with
+                        },
+                    ),
+                    false => BTreeMap::new(),
                 },
-            ),
-            test: h.category == Category::Test || r.facets.contains(&Facet::Test),
-            relocated: h.relocated_note.clone(),
-            risk: (!r.detail.contains_key("near"), risky),
-            note,
-        });
+                test: h.category == Category::Test || r.facets.contains(&Facet::Test),
+                relocated: h.relocated_note.clone().filter(|_| logic),
+                risk: (!r.detail.contains_key("near"), risky),
+                note,
+            });
+        }
     }
     // A near miss of a structural kind first, then the most lines, then the
     // most facets: a facet alone marks a rewrite as readily as a risk.
@@ -272,6 +283,9 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             i.review_lines,
             plural(i.review_lines)
         );
+        if i.kind != Kind::Logic.as_str() {
+            line.push_str(&format!(", proven {}, still read", i.kind));
+        }
         if !i.facets.is_empty() {
             line.push_str(&format!(" [{}]", i.facets.join(", ")));
         }
