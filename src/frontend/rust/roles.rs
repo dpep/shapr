@@ -272,7 +272,10 @@ impl Walker<'_> {
                 &[],
             ),
             (_, "closure_parameters") => {
-                self.branch(n, attrs, None, Role::Other, Mode::Pattern(Parameter), &[])
+                self.open(&n, attrs, None, Role::Other);
+                self.b.flag(Flags::BLOCK_PARAMETERS);
+                self.children(n, Mode::Pattern(Parameter), &[]);
+                self.b.close();
             }
             (_, "let_condition" | "for_expression") => {
                 self.open(&n, attrs, None, Role::Other);
@@ -887,6 +890,7 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         "if_expression" | "while_expression" | "match_expression" | "match_arm" => {
             Construct::Branch { test: 1 }
         }
+        "match_block" => Construct::Branch { test: 0 },
         "binary_expression"
             if matches!(
                 own().as_str(),

@@ -19,7 +19,7 @@ use super::site::CodeLines;
 use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::frontend::Construct;
-use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
+use crate::tree::{Flags, Hazard, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -352,6 +352,16 @@ fn find(
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
     let blocks = |op: Op, n: NodeId| chunks.node(n).role.hazard().is_some_and(|h| blocks(op, h));
+    // A `next` or `break` whose block or loop moves with it stays bound to it.
+    let jumps = |stmt: NodeId, n: NodeId| {
+        let caught = matches!(
+            chunks.node(n).role.hazard(),
+            Some(Hazard::Next | Hazard::Break | Hazard::Redo)
+        ) && (chunks.ancestors(n))
+            .take_while(|&p| Some(p) != chunks.node(stmt).parent)
+            .any(|p| chunks.node(p).flags.contains(Flags::LOOP));
+        blocks(Op::Extract, n) && !caught
+    };
     // `self` inside a block may be another object (`instance_eval`, a DSL):
     // the chunk and the call must each run with their method's `self`.
     let frontend = crate::frontend::for_path(change.files[file].diff.path());
@@ -362,7 +372,7 @@ fn find(
     let rebound =
         !own_self(calls, call, a_call) || chunk.iter().any(|&s| !own_self(chunks, s, a_chunk));
     let mut wiring = None;
-    let outcome = if in_chunk().any(|n| blocks(Op::Extract, n))
+    let outcome = if (chunk.iter()).any(|&s| chunks.descendants(s).any(|n| jumps(s, n)))
         || chunks
             .descendants(a_chunk)
             .any(|n| blocks(Op::ExtractCaller, n))
@@ -1296,6 +1306,24 @@ struct Flow {
 impl Flow {
     fn of(tree: &Tree, a: NodeId, chunk: &[NodeId]) -> Flow {
         let inside: HashSet<NodeId> = chunk.iter().flat_map(|&s| tree.descendants(s)).collect();
+        // A block's parameters are a local of the block, not of A: a local
+        // is its name and the block declaring it, if any.
+        let blocks: HashMap<NodeId, HashSet<&str>> = tree
+            .descendants(a)
+            .filter(|&d| tree.node(d).flags.contains(Flags::BLOCK_PARAMETERS))
+            .filter_map(|d| {
+                let names = tree.descendants(d).map(|p| tree.node(p));
+                let names = names.filter(|p| p.role.defines().is_some());
+                Some((tree.node(d).parent?, names.filter_map(local_name).collect()))
+            })
+            .collect();
+        let local = |id: NodeId, name: &str| {
+            let block = tree
+                .ancestors(id)
+                .take_while(|&p| p != a)
+                .find(|p| blocks.get(p).is_some_and(|names| names.contains(name)));
+            (name.to_string(), block)
+        };
         let (mut defs_in, mut defs_out, mut reads_in, mut reads_out) = (
             HashSet::new(),
             HashSet::new(),
@@ -1307,7 +1335,7 @@ impl Flow {
             let Some(name) = local_name(node) else {
                 continue;
             };
-            let name = name.to_string();
+            let name = local(id, name);
             let is_in = inside.contains(&id);
             match (node.role, is_in) {
                 (Role::Reference(_), true) => reads_in.insert(name),
@@ -1322,17 +1350,21 @@ impl Flow {
             let Some(name) = node.name.as_deref().filter(|_| node.role == Role::Opaque) else {
                 continue;
             };
-            if defs_in.contains(name) || defs_out.contains(name) {
+            let name = local(id, name);
+            if defs_in.contains(&name) || defs_out.contains(&name) {
                 match inside.contains(&id) {
-                    true => reads_in.insert(name.to_string()),
-                    false => reads_out.insert(name.to_string()),
+                    true => reads_in.insert(name),
+                    false => reads_out.insert(name),
                 };
             }
         }
+        let names = |set: HashSet<&(String, Option<NodeId>)>| {
+            set.into_iter().map(|(name, _)| name.clone()).collect()
+        };
         Flow {
-            free: reads_in.difference(&defs_in).cloned().collect(),
-            clobbers: defs_in.intersection(&defs_out).cloned().collect(),
-            outflow: defs_in.intersection(&reads_out).cloned().collect(),
+            free: names(reads_in.difference(&defs_in).collect()),
+            clobbers: names(defs_in.intersection(&defs_out).collect()),
+            outflow: names(defs_in.intersection(&reads_out).collect()),
         }
     }
 }

@@ -1,0 +1,7 @@
+{
+  "description": "statements holding a whole block extracted into a new method, where the block uses `next`: it leaves the block, which moves with it, not the caller",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

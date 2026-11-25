@@ -1,0 +1,7 @@
+{
+  "description": "statements holding a block extracted into a new method, where a block outside them names its parameters the same: each block's parameters are its own, so nothing the caller assigns is touched",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

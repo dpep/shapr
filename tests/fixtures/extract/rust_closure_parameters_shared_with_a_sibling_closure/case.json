@@ -1,0 +1,7 @@
+{
+  "description": "Rust statements holding a closure extracted into a new method, where a closure outside them names its parameter the same: each closure's parameters are its own, so nothing the caller binds is touched",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -207,7 +207,10 @@ pub enum Surface {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Construct {
     /// A conditional (`if`, `while`, `case`, a `when`, a match arm): its
-    /// first `test` code children are what it tests.
+    /// first `test` code children are what it tests, and the rest are
+    /// alternatives, none running after another. A container of
+    /// alternatives that tests nothing itself (Rust's `match_block`) has
+    /// `test: 0`, which gives it no condition facet.
     Branch { test: usize },
     /// An operator comparing or combining truth values (`>`, `==`, `&&`).
     Comparison,

@@ -1,0 +1,7 @@
+{
+  "description": "the last statements of a Rust match arm become a call to a new method taking an argument: the other arms never run after them, but the caller's statement after the match does, and the argument now drops before it: logic, near an extract",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "drop"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}
