@@ -59,6 +59,7 @@ impl<'a> Repository<'a> {
     fn files(&self) -> Option<&[(String, String)]> {
         self.files
             .get_or_init(|| {
+                let _span = crate::log::span("outside.files");
                 let files = self.git.files(match &self.state {
                     State::Revision(rev) => Some(rev),
                     State::Index | State::Worktree => None,
@@ -98,6 +99,7 @@ impl<'a> Repository<'a> {
     }
 
     fn search(&self, frontend: &dyn Frontend, word: &str, with_computed: bool) -> Search {
+        let _span = crate::log::span("outside.search");
         let Some(files) = self.files() else {
             return Search::Unavailable;
         };
@@ -129,6 +131,7 @@ impl<'a> Repository<'a> {
         if matches!(self.state, State::Revision(_)) {
             let mut prefetched = self.prefetched.borrow_mut();
             let fetched = *prefetched.entry(frontend.language()).or_insert_with(|| {
+                let _span = crate::log::span("outside.prefetch");
                 let ids: BTreeSet<&str> = (candidates.iter().chain(&texts))
                     .map(|(_, id)| id.as_str())
                     .collect();
@@ -142,7 +145,11 @@ impl<'a> Repository<'a> {
                 return Search::Unavailable;
             }
         }
+        crate::log::count("search.candidates", candidates.len() as u64);
         let hits = self.grep(word, globs, &texts);
+        if let Ok((found, _)) = &hits {
+            crate::log::count("search.found", found.len() as u64);
+        }
         if !with_computed {
             return match hits {
                 Ok((found, mentioned)) => Search::Done {
@@ -231,6 +238,7 @@ impl Repository<'_> {
         frontend: &dyn Frontend,
         candidates: &[&(String, String)],
     ) -> Option<Computed> {
+        let _span = crate::log::span("outside.computed");
         // Only a dispatch word reaches a method by a computed name, and its
         // call spells it out. `grep -w` can't end a word on `?` or `!`; the
         // stem still matches the call.
@@ -268,8 +276,11 @@ impl Repository<'_> {
             }
         };
         let mut computed = Computed::new();
+        crate::log::count("computed.files", candidates.len() as u64);
         for ((path, _), source) in candidates.iter().zip(sources) {
-            let tree = frontend.parse(source.unwrap_or_default());
+            let source = source.unwrap_or_default();
+            crate::log::count("computed.bytes", source.len() as u64);
+            let tree = frontend.parse(source);
             let suffixes = tree.semantics.spelling.suffixes;
             let patterns: Vec<String> = (tree.descendants(Tree::ROOT))
                 .map(|id| tree.node(id))
@@ -314,9 +325,13 @@ impl Outside for Repository<'_> {
         if let Some(tree) = self.parsed.borrow().get(path) {
             return tree.clone();
         }
+        let _span = crate::log::span("outside.parse");
         let tree = frontend::for_path(path)
             .zip(self.read(path))
-            .map(|(frontend, source)| Rc::new(frontend.parse(source)));
+            .map(|(frontend, source)| {
+                crate::log::count("parsed.bytes", source.len() as u64);
+                Rc::new(frontend.parse(source))
+            });
         self.parsed
             .borrow_mut()
             .insert(path.to_string(), tree.clone());

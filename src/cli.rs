@@ -126,7 +126,8 @@ struct Cli {
     #[arg(long, conflicts_with = "ndjson")]
     digest: bool,
 
-    /// Log what was read and parsed to stderr.
+    /// Log what was read and parsed to stderr, and a last line on where
+    /// the time went.
     #[arg(short, long)]
     verbose: bool,
 
@@ -204,6 +205,7 @@ pub fn run() -> ExitCode {
         }
     }));
     let code = guarded(dispatch);
+    crate::verbose!("{}", crate::log::profile(started.elapsed()));
     crate::usage::finish(started, flag_names(std::env::args().skip(1)));
     code
 }
@@ -433,6 +435,7 @@ fn dispatch() -> ExitCode {
     };
     let paths = local.is_some_and(|(_, paths)| !paths.is_empty());
     crate::usage::input(form, paths);
+    let span = crate::log::span("diff");
     let text = match &input {
         Input::Local { form, range, paths } => {
             git.diff(range, *form == report::Input::Staged, paths)
@@ -460,6 +463,7 @@ fn dispatch() -> ExitCode {
                 .map_err(|e| anyhow::anyhow!("reading stdin: {e}"))
         }
     };
+    drop(span);
     let text = match text {
         Ok(text) => text,
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
@@ -488,10 +492,12 @@ fn dispatch() -> ExitCode {
         return fail(format, "stdin is not a diff: no file headers", ERROR);
     }
     let source = remote.as_ref().map(|r| r.source.clone());
+    let span = crate::log::span("messages");
     let messages = match messages(&cli, &git, local, stdin_message, remote.as_mut()) {
         Ok(messages) => messages,
         Err(error) => return fail(format, &format!("{error:#}"), ERROR),
     };
+    drop(span);
     // The range git diffed: a GitHub change's own, in its clone.
     let range = remote
         .as_ref()
@@ -504,14 +510,18 @@ fn dispatch() -> ExitCode {
     }
     // The repository as of the change's after side: config and neighbors
     // for norms, uses and library layout for proof.
+    let span = crate::log::span("after_side");
     let after_side = AfterSide::new(&git, form, range.as_deref(), &files);
     // `git diff` never shows untracked files: say so rather than look clean.
     let untracked = match (local, after_side.states()) {
         (Some((_, paths)), [git::State::Worktree]) => git.untracked_in(paths).ok(),
         _ => None,
     };
+    drop(span);
     let before = git.before_revision(range.as_deref());
+    let span = crate::log::span("assemble");
     let change = change::assemble(files, &git, before.as_deref(), after_side.revision());
+    drop(span);
     let snapshot = after_side.snapshot();
     let repositories = after_side.repositories();
     let union = Union(&repositories);
@@ -520,7 +530,9 @@ fn dispatch() -> ExitCode {
         [repository] => repository,
         _ => &union,
     };
+    let span = crate::log::span("classify");
     let labels = classify::classify(&change, outside);
+    drop(span);
     let mut meta = report::Meta::new("classify", source).input(form, paths);
     if let Some((subject, chosen)) = subject(&input, cli.merge_base.as_deref()) {
         meta.subject = Some(subject);
@@ -533,9 +545,13 @@ fn dispatch() -> ExitCode {
     {
         report::note(&note);
     }
+    let span = crate::log::span("report");
     let mut report = report::build(&change, &labels, claims, meta);
+    drop(span);
+    let span = crate::log::span("norms");
     let styles = crate::norms::styles(&change, snapshot, outside, cli.norm_threshold);
     report.summary.config_trajectory = crate::norms::trajectory(&change, snapshot);
+    drop(span);
     for ((hunk, style), label) in report
         .hunks
         .iter_mut()
@@ -556,6 +572,7 @@ fn dispatch() -> ExitCode {
     let conflicts = report.summary.claims.experimental.conflicts.len();
     crate::usage::count("claim_conflicts", &conflicts);
     if !cli.quiet {
+        let _span = crate::log::span("render");
         let written = report::to_stdout(|out| match (cli.digest, format) {
             (true, Format::Json) => report::digest::json(out, &report),
             (true, _) => report::digest::text(out, &report),
