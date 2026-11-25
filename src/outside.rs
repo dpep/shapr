@@ -278,9 +278,10 @@ impl Repository<'_> {
         let mut computed = Computed::new();
         crate::log::count("computed.files", candidates.len() as u64);
         for ((path, _), source) in candidates.iter().zip(sources) {
+            let read = source.is_some();
             let source = source.unwrap_or_default();
             crate::log::count("computed.bytes", source.len() as u64);
-            let tree = frontend.parse(source);
+            let tree = Rc::new(frontend.parse(source));
             let suffixes = tree.semantics.spelling.suffixes;
             let patterns: Vec<String> = (tree.descendants(Tree::ROOT))
                 .map(|id| tree.node(id))
@@ -288,6 +289,13 @@ impl Repository<'_> {
                 .filter_map(|n| n.name.as_deref().filter(|name| name.contains('*')))
                 .map(|name| name.trim_end_matches(|c| suffixes.contains(&c)).to_string())
                 .collect();
+            // A bare `*` spells every name, so every search finds and parses
+            // the file: keep the tree, as `parse` would have built it.
+            let same =
+                frontend::for_path(path).is_some_and(|f| f.language() == frontend.language());
+            if read && same && patterns.iter().any(|p| p == "*") {
+                self.parsed.borrow_mut().insert(path.clone(), Some(tree));
+            }
             if !patterns.is_empty() {
                 computed.push((path.clone(), patterns));
             }
@@ -633,6 +641,37 @@ mod tests {
             assert_eq!(text.as_deref(), read.map(str::as_bytes), "{form:?}");
             assert_eq!(after.repositories().len(), repositories, "{form:?}");
         }
+    }
+
+    /// The working tree's files, each read counted.
+    struct Disk(std::path::PathBuf, RefCell<Vec<String>>);
+    impl Snapshot for Disk {
+        fn read(&self, path: &str) -> Option<Vec<u8>> {
+            self.1.borrow_mut().push(path.to_string());
+            std::fs::read(self.0.join(path)).ok()
+        }
+        fn list(&self, _: &str) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_file_calling_by_any_name_is_parsed_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| git_in(dir.path(), args);
+        git(&["init", "-q"]);
+        std::fs::write(dir.path().join("a.rb"), "def go\nend\n").unwrap();
+        std::fs::write(dir.path().join("b.rb"), "x.send(name)\n").unwrap();
+        git(&["add", "-A"]);
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        let disk = Disk(dir.path().to_path_buf(), RefCell::default());
+        let repo = Repository::new(&shell, State::Worktree, &disk);
+        let Search::Done { found, .. } = repo.uses("a.rb", "go") else {
+            panic!("not searched");
+        };
+        assert_eq!(found, ["a.rb", "b.rb"]);
+        assert!(repo.parse("b.rb").is_some());
+        assert_eq!(*disk.1.borrow(), ["b.rb"]);
     }
 
     #[test]
