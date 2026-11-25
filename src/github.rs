@@ -231,7 +231,7 @@ fn github_remote(url: &str) -> Option<Repo> {
 /// What a remote run analyzed, as `meta.source` reports it.
 #[derive(Clone, Debug, Serialize)]
 pub struct Source {
-    pub kind: &'static str,
+    pub kind: SourceKind,
     pub url: String,
     pub repo: String,
     pub number: Option<u64>,
@@ -241,11 +241,18 @@ pub struct Source {
     pub merge: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceKind {
+    Pr,
+    Commit,
+}
+
 impl Source {
     /// `o/r#12` or `o/r@abc1234`, for the text summary.
     pub fn name(&self) -> String {
         match (self.kind, self.number) {
-            ("pr", Some(n)) => format!("{}#{n}", self.repo),
+            (SourceKind::Pr, Some(n)) => format!("{}#{n}", self.repo),
             _ => format!("{}@{}", self.repo, self.head.short(7)),
         }
     }
@@ -317,7 +324,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
             let compare: CompareJson =
                 api.get(&format!("/repos/{repo}/compare/{base}...{head}"), &what)?;
             let source = Source {
-                kind: "pr",
+                kind: SourceKind::Pr,
                 url: format!("https://{HOST}/{repo}/pull/{number}"),
                 repo: repo.to_string(),
                 number: Some(*number),
@@ -349,7 +356,7 @@ pub fn fetch(target: &Target, cache: &Cache) -> Result<Remote> {
                 None => git::EMPTY_TREE,
             })?;
             let source = Source {
-                kind: "commit",
+                kind: SourceKind::Commit,
                 url: match pull {
                     Some(n) => format!("https://{HOST}/{repo}/pull/{n}/commits/{head}"),
                     None => format!("https://{HOST}/{repo}/commit/{head}"),
