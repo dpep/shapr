@@ -783,8 +783,12 @@ fn scan(tree: &Tree, method: &str) -> Result<Vec<NodeId>, &'static str> {
             continue;
         };
         match node.role {
-            Role::DynamicName if name.contains('*') && spells(name, method) => {
-                return Err("a computed name could spell it");
+            Role::DynamicName if name.contains('*') => {
+                let other =
+                    node.flags.contains(Flags::CONSTANT) || node.flags.contains(Flags::FIELD);
+                if !other && spells(name, method) {
+                    return Err("a computed name could spell it");
+                }
             }
             Role::DynamicName | Role::Opaque | Role::Reference(NameKind::Method)
                 if name == method =>

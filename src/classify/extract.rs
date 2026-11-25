@@ -1004,7 +1004,11 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
     let named = |tree: &Tree, id: NodeId| {
         let node = tree.node(id);
         match node.name.as_deref() {
-            Some(name) if node.role == Role::DynamicName => crate::tree::spells(name, method),
+            Some(name) if node.role == Role::DynamicName && name.contains('*') => {
+                !node.flags.contains(Flags::CONSTANT)
+                    && !node.flags.contains(Flags::FIELD)
+                    && crate::tree::spells(name, method)
+            }
             name => name == Some(method),
         }
     };
