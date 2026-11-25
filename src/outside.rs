@@ -11,7 +11,7 @@ use crate::frontend::{self, Frontend};
 use crate::git::{Git, Linguist, State};
 use crate::norms::{Index, Revision, Snapshot, Worktree};
 use crate::report::Input;
-use crate::tree::{Role, Tree, spells};
+use crate::tree::{Tree, spells};
 use serde::Serialize;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -185,7 +185,7 @@ pub struct Repository<'a> {
     sources: RefCell<HashMap<String, Option<Vec<u8>>>>,
 }
 
-/// Files holding a name computed at runtime ([`Role::DynamicName`] with a
+/// Files holding a name computed at runtime ([`crate::tree::Role::DynamicName`] with a
 /// `*`): such a file may use any name its pattern spells, with no literal
 /// word for `git grep` to find. Each with its patterns, suffixes trimmed.
 type Computed = Vec<(String, Vec<String>)>;
@@ -478,23 +478,15 @@ impl Repository<'_> {
         let mut computed = Computed::new();
         crate::log::count("computed.files", candidates.len() as u64);
         for ((path, _), source) in candidates.iter().zip(sources) {
-            let read = source.is_some();
-            let source = source.unwrap_or_default();
-            crate::log::count("computed.bytes", source.len() as u64);
-            let tree = Rc::new(frontend.parse(source));
-            let suffixes = tree.semantics.spelling.suffixes;
-            let patterns: Vec<String> = (tree.descendants(Tree::ROOT))
-                .map(|id| tree.node(id))
-                .filter(|n| n.role == Role::DynamicName)
-                .filter_map(|n| n.name.as_deref().filter(|name| name.contains('*')))
-                .map(|name| name.trim_end_matches(|c| suffixes.contains(&c)).to_string())
-                .collect();
+            let bytes = source.as_deref().unwrap_or_default();
+            crate::log::count("computed.bytes", bytes.len() as u64);
+            let patterns = frontend.computed_names(bytes);
             // A bare `*` spells every name, so every search finds and parses
-            // the file: keep the tree, as `parse` would have built it.
+            // the file: keep what was read and charged, for `parse`.
             let same =
                 frontend::for_path(path).is_some_and(|f| f.language() == frontend.language());
-            if read && same && patterns.iter().any(|p| p == "*") {
-                self.parsed.borrow_mut().insert(path.clone(), Some(tree));
+            if source.is_some() && same && patterns.iter().any(|p| p == "*") {
+                self.sources.borrow_mut().insert(path.clone(), source);
             }
             if !patterns.is_empty() {
                 computed.push((path.clone(), patterns));

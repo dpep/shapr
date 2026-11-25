@@ -139,6 +139,10 @@ impl Frontend for Rust {
         &[]
     }
 
+    fn computed_names(&self, _: &[u8]) -> Vec<String> {
+        Vec::new()
+    }
+
     fn search_globs(&self) -> &'static [&'static str] {
         &["*.rs"]
     }
