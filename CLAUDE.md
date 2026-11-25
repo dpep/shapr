@@ -56,9 +56,11 @@ never edit an old one, mark it Superseded.
 
 ```
 src/
-  main.rs, lib.rs   entry; lib exposes the modules to the integration tests
+  main.rs, lib.rs   entry; lib's modules are `pub`, but integration tests drive the binary,
+                    never `shapr::`
   cli.rs            clap, input selection (range or stdin, -C), exit codes, after-help
   log.rs            -v telemetry (the verbose! macro)
+  usage.rs          the usage log: one NDJSON line per run, names and counts only, and --usage
   git.rs            the git calls, run in -C's directory or a bare clone: `git diff RANGE`, `git log`
                     messages, blob reads (worktree fallback), linguist attributes, remotes
   github.rs         GitHub input: PR/commit forms, REST metadata (token from env or gh), the cache of
@@ -74,6 +76,7 @@ src/
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
     ruby/signature.rs  a def's parameters and a call's arguments, for default_argument
+    ruby/reserved.rs   method names Ruby reaches without a visible call (Object's, protocol hooks)
     ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
                     ids from here
     ruby/sorbet.rs  Sorbet's annotations (TYPING, TYPE_CAST, UNCHECKED flags) and whether the
@@ -106,6 +109,8 @@ src/
                     callee's literal default, the callee tied to one definition through the search
     moves.rs        the move pass: declarations the alignment left out, paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
+    relocate.rs     after the passes, residual lines relocated verbatim between hunks: a fact,
+                    never a part
     runs.rs         after the passes, a hunk left with logic re-run per run of changed lines;
                     run parts join the whole hunk's
     facets.rs       facets on the residual's lines (condition, signature, ...), from
@@ -115,14 +120,21 @@ src/
   claims.rs         summary.claims: hints read from commit messages and --message, and
                     conflicts with the code's facts; never feeds back into labels
   report.rs         output records, review_lines and summary metrics, text/JSON/NDJSON
+  report/digest.rs  --digest: a view over the report, narrowed to what a reviewer reads first
   norms/            style norms, self-contained: `style` on each hunk and `shapr norms FILE`
     mod.rs          Observation, inference (scopes pooled from the rule of succession, vs
                     --norm-threshold), the skip rule, the Language trait
+    snapshot.rs     the repository state norms read beside the diff: config and neighbors
+    editorconfig.rs a file's .editorconfig properties
+    trajectory.rs   whether a change moves its files toward their config or away
     align.rs        a hunk against its surrounding norm (method, class, file, directory):
                     direction, convergence, restyle, deviations
     edit.rs         a deviation's fix as a unified diff
     command.rs      `shapr norms FILE...`
-    ruby/           prism walk for quoted strings and scopes; .rubocop.yml with inherit_from
+    codebase.rs     for `shapr norms`: each norm pooled over the files, deviations, hotspots
+    plan.rs         for `shapr norms`: a cleanup plan, one step per norm, by risk tier
+    ruby/           prism walk for scopes, one module per norm family; config.rs reads
+                    .rubocop.yml with inherit_from
 tests/              end to end against throwaway git repos: cli.rs (input, output,
                     size measures), one file per detector, rust_lang.rs (Rust end to end), github.rs (offline:
                     a canned API on 127.0.0.1 and a file:// remote); common/ the shared helpers
@@ -173,27 +185,10 @@ text, or transparency to its only child) in a named variant family;
 `Node::canon` hashes trees through those forms, and `restyle` compares it.
 A canonical form must hold everything the node means.
 
-`Node::flags` carries per-node facts that aren't a role: `SCOPE` (the node
-bounds the locals inside it: a method, class, module, impl or other namespace;
-`Tree::scope` reads it), `RECEIVER` (a `def self.x`, whose first child is the
-receiver), `ARGUMENTS` (a call's positional argument list), `PUBLIC` (a
-definition visible outside its package where definitions are private by
-default: Rust's plain `pub`), `MEMBER` (an identifier, or the node holding
-it, naming a member as well as a local: Rust's `S { a }`, Ruby's `{x:}`; no
-rename of that name passes through it),
-`SPELLS` (a macro call that may spell its tokens out as text: `stringify!`,
-`dbg!`, a message-less `assert!`, a macro outside std; also an item under an
-attribute macro, which reads its tokens; no rename passes into it),
-`CLASS_VALUE` (a constant whose value is a new class: `Point = Struct.new(:x)`),
-`CONSTANT` and `FIELD` (a computed `DynamicName` that reaches a constant,
-`const_get(n)`, or a field, `instance_variable_get(n)`, rather than a
-method; rename blocks only that family's names by it), `TYPING` (a statement that only
-declares types: Sorbet's `sig`, `extend T::Sig`), `TYPE_CAST` (a call returning its first
-positional argument: `T.let`, `T.must`), `UNCHECKED` (an annotation no runtime checks once its
-type library is loaded: `T.unsafe`, `checked: false`), `HEADER` (a statement in a namespace's body
-that qualifies the namespace, part of its owner key: Rust's `#![cfg(unix)]`) and `DIRECTIVE` (set by the builder for
-`directive`). The core never reads a node's `kind`
-string or source text to learn what the language means.
+`Node::flags` carries per-node facts that aren't a role (scope boundaries,
+a `def self.x` receiver, Rust's `pub`, Sorbet annotations, ...); `tree::Flags`
+documents each flag. The core never reads a node's `kind` string or source
+text to learn what the language means.
 
 | Role | Ruby | Rust | For |
 |---|---|---|---|
@@ -248,8 +243,9 @@ claiming: uses found make it logic, and what the search can't settle becomes
 the part's `assumptions`, so it isn't structure.
 Each kind gets its own module under `src/classify/`; kind-specific output
 goes in the part's `evidence.values` and `detail`, documented in
-docs/schema.md. report.rs knows no kind: it reads parts, the residual and the
-rollup (`Label::kind`, `confidence`, ...).
+docs/schema.md. report.rs reads parts, the residual and the rollup
+(`Label::kind`, `confidence`, ...); it names a kind only for the summary's
+`move_contexts` and for the code facts claims check (`reorder`, `move`).
 
 ## Gate
 

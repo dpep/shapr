@@ -65,6 +65,9 @@ pub struct Scope {
     pub kind: ScopeKind,
     /// As the source spells it: `Cart`, `Shop::Cart`, `total`.
     pub name: String,
+    /// A class scope whose methods are its owner's singleton methods
+    /// (Ruby's `class << self`).
+    pub singleton: bool,
     pub first: usize,
     pub last: usize,
 }

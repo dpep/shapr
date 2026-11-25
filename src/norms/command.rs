@@ -2,9 +2,9 @@
 //! plan, no diff needed.
 
 use super::codebase::{
-    Collected, ConfigRecord, FileRecord, Hotspot, collect, hotspots, pool, share,
+    Agreement, Collected, ConfigRecord, FileRecord, Hotspot, collect, hotspots, pool, share,
 };
-use super::plan::{Step, plan};
+use super::plan::{Step, Unplanned, plan};
 use super::{Counts, DEFAULT_THRESHOLD, Worktree};
 use crate::report::Format;
 use clap::Parser;
@@ -105,7 +105,7 @@ struct NormRecord {
     judged: usize,
     config: Option<ConfigRecord>,
     step: Option<usize>,
-    unplanned: Option<&'static str>,
+    unplanned: Option<Unplanned>,
     deviations: Vec<Deviation>,
 }
 
@@ -408,7 +408,7 @@ fn text(
         write!(out, "  {:width$}  {style}", n.norm)?;
         if let (Some(c), Some(configured), Some(_)) = (&n.config, &n.configured, &n.inferred) {
             match c.adherence {
-                Some(a) if c.agreement == "disagrees" => write!(
+                Some(a) if c.agreement == Agreement::Disagrees => write!(
                     out,
                     "; config says {configured}: {:.0}% ({}/{})",
                     a * 100.0,
@@ -513,9 +513,9 @@ fn text(
     let unplanned: Vec<String> = (report.norms.iter())
         .filter_map(|n| {
             let why = match n.unplanned? {
-                "config_disagrees" => "config disagrees with the code: change one",
-                "withheld" => "config doesn't check where it deviates",
-                _ => "no mechanical edit, or none that keeps the program",
+                Unplanned::ConfigDisagrees => "config disagrees with the code: change one",
+                Unplanned::Withheld => "config doesn't check where it deviates",
+                Unplanned::NoEdit => "no mechanical edit, or none that keeps the program",
             };
             Some(format!("{} ({why})", n.norm))
         })

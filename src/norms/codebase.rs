@@ -291,9 +291,17 @@ pub struct ConfigRecord {
     pub withheld: usize,
     /// The project's `.rubocop_todo.yml` lists the cop.
     pub todo: bool,
-    /// `agrees` or `disagrees` with the inferred style; `config_only` when
-    /// none is inferred.
-    pub agreement: &'static str,
+    pub agreement: Agreement,
+}
+
+/// How the configured style compares with the inferred one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agreement {
+    Agrees,
+    Disagrees,
+    /// Nothing is inferred.
+    ConfigOnly,
 }
 
 /// Each norm of the sources' languages, pooled over every file.
@@ -351,9 +359,9 @@ pub fn pool<'a>(sources: &'a [Source], threshold: f64) -> Vec<Pooled<'a>> {
                     withheld,
                     todo: sources.iter().any(|s| s.configured.todo.contains(def.id)),
                     agreement: match &inferred {
-                        None => "config_only",
-                        Some(n) if n.style == *style => "agrees",
-                        Some(_) => "disagrees",
+                        None => Agreement::ConfigOnly,
+                        Some(n) if n.style == *style => Agreement::Agrees,
+                        Some(_) => Agreement::Disagrees,
                     },
                 }
             });
@@ -521,11 +529,7 @@ fn owner(analysis: &Analysis, line: usize) -> Option<(String, bool)> {
         .filter(|s| s.kind == ScopeKind::Class && s.first <= line && line <= s.last)
         .collect();
     around.sort_by_key(|s| s.last - s.first);
-    let singleton = around
-        .first()
-        .is_some_and(|s| s.name.starts_with("class << "));
-    let named = around
-        .into_iter()
-        .find(|s| !s.name.starts_with("class << "))?;
+    let singleton = around.first().is_some_and(|s| s.singleton);
+    let named = around.into_iter().find(|s| !s.singleton)?;
     Some((named.name.clone(), singleton))
 }

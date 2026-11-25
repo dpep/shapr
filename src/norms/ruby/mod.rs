@@ -505,6 +505,7 @@ impl Walker<'_> {
             self.scopes.push(Scope {
                 kind,
                 name,
+                singleton: node.as_singleton_class_node().is_some(),
                 first: self.index.line(loc.start_offset()),
                 last: self.last_line(&loc),
             });

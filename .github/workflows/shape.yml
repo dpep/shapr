@@ -67,8 +67,18 @@ jobs:
           cp "$RUNNER_TEMP/build/target/release/shapr" "$RUNNER_TEMP/bin/shapr"
 
       - name: shape of the change
+        env:
+          # Read through env, never interpolated into the script.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           shapr="$RUNNER_TEMP/bin/shapr"
+          # A pull request's description is read for claims, like its commits.
+          message=()
+          if [ -n "$BASE_SHA" ]; then
+            printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr.md"
+            message=(--message "$RUNNER_TEMP/pr.md")
+          fi
           # A pushed merge commit is refused against both parents: take the first.
           if [ -n "$BASE_SHA" ]; then
             RANGE="$BASE_SHA...HEAD"
@@ -77,8 +87,8 @@ jobs:
           else
             RANGE="HEAD^!"
           fi
-          "$shapr" -J "$RANGE" > shape.ndjson
-          text=$("$shapr" "$RANGE" | head -n 200)
+          "$shapr" -J "${message[@]}" "$RANGE" > shape.ndjson
+          text=$("$shapr" "${message[@]}" "$RANGE" | head -n 200)
           verdict=$(tail -n1 shape.ndjson | jq -r .verdict)
           echo "$text"
           {

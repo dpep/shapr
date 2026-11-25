@@ -52,18 +52,6 @@ pub enum Direction {
     Diverging,
 }
 
-impl Direction {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Direction::None => "none",
-            Direction::Abstain => "abstain",
-            Direction::Aligned => "aligned",
-            Direction::Converging => "converging",
-            Direction::Diverging => "diverging",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Convergence {

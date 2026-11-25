@@ -4,7 +4,7 @@
 //! file is the same program (`edit::keeps`), and written against the file
 //! as the steps before it leave it, so applied in order they all apply.
 
-use super::codebase::{Pooled, Source, checked};
+use super::codebase::{Agreement, Pooled, Source, checked};
 use super::{Replace, edit};
 use crate::classify::proof::Outside;
 use crate::tree::Tree;
@@ -57,11 +57,22 @@ pub struct Edit {
     pub diff: String,
 }
 
-/// Why a norm with deviations has no step.
 pub struct Plan {
     pub steps: Vec<Step>,
     /// Per pooled norm: its step number, or why it has none.
-    pub planned: Vec<Result<usize, Option<&'static str>>>,
+    pub planned: Vec<Result<usize, Option<Unplanned>>>,
+}
+
+/// Why a norm with deviations has no step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unplanned {
+    /// Config sets a style the code disagrees with.
+    ConfigDisagrees,
+    /// Config doesn't check any deviation.
+    Withheld,
+    /// No deviation has a mechanical edit that keeps the program.
+    NoEdit,
 }
 
 /// Per file, the fixes kept for one norm: each deviation's replacements.
@@ -90,7 +101,7 @@ pub fn plan(sources: &[Source], pooled: &[Pooled], outside: &dyn Outside) -> Pla
             })
             .as_ref()
     };
-    let mut planned: Vec<Result<usize, Option<&'static str>>> = vec![Err(None); pooled.len()];
+    let mut planned: Vec<Result<usize, Option<Unplanned>>> = vec![Err(None); pooled.len()];
     let mut drafts: Vec<Draft> = Vec::new();
     for (n, p) in pooled.iter().enumerate() {
         let Some(tier) = tier(p.def.id) else { continue };
@@ -100,9 +111,9 @@ pub fn plan(sources: &[Source], pooled: &[Pooled], outside: &dyn Outside) -> Pla
         let disagrees = p
             .config
             .as_ref()
-            .is_some_and(|c| c.agreement == "disagrees");
+            .is_some_and(|c| c.agreement == Agreement::Disagrees);
         let Some(style) = p.expected().filter(|_| !disagrees) else {
-            planned[n] = Err(Some("config_disagrees"));
+            planned[n] = Err(Some(Unplanned::ConfigDisagrees));
             continue;
         };
         let (mut unfixed, mut withheld, mut total) = (0, 0, 0);
@@ -162,9 +173,9 @@ pub fn plan(sources: &[Source], pooled: &[Pooled], outside: &dyn Outside) -> Pla
         let fixed: usize = kept.iter().map(Vec::len).sum();
         if fixed == 0 {
             planned[n] = Err(Some(if withheld == total {
-                "withheld"
+                Unplanned::Withheld
             } else {
-                "no_edit"
+                Unplanned::NoEdit
             }));
             continue;
         }
@@ -235,7 +246,7 @@ pub fn plan(sources: &[Source], pooled: &[Pooled], outside: &dyn Outside) -> Pla
             });
         }
         if fixes == 0 {
-            planned[draft.norm] = Err(Some("no_edit"));
+            planned[draft.norm] = Err(Some(Unplanned::NoEdit));
             continue;
         }
         let (matching, judged) = p.adherence();

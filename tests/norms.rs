@@ -174,6 +174,19 @@ fn hotspots_rank_the_least_consistent_code_first() {
     );
 }
 
+/// A method in `class << self`, like a `def self.x`, is its owner's
+/// singleton method.
+#[test]
+fn a_singleton_class_method_is_named_for_its_owner() {
+    let singleton = "class Cart\n  class << self\n    def kind\n      { :k => \"kind\" }\n    end\n  end\n\n  def label\n    'cart'\n  end\nend\n";
+    let dir = repo(&[&[("lib/a.rb", CLEAN), ("lib/b.rb", singleton)]]);
+    let report = norms_json(dir.path(), &["lib"]);
+    let methods: Vec<&Value> = (report["hotspots"].as_array().unwrap().iter())
+        .filter(|h| h["kind"] == "method")
+        .collect();
+    assert_eq!(methods[0]["name"], "Cart.kind", "{methods:?}");
+}
+
 /// The plan's steps, applied tier by tier and committed, are what shapr's
 /// own classifier calls them: layout is `format_only`, lexical `restyle`.
 /// Applied in full, they leave nothing to plan.

@@ -2,6 +2,8 @@
 name = "shapr"
 version = "0.1.0"
 edition = "2024"
+# tree-sitter 0.27 needs 1.90; std File::lock needs 1.89.
+rust-version = "1.90"
 description = "Classify the shape of a code change: format, comment, rename, move, extract, or logic."
 license = "MIT"
 repository = "https://github.com/dpep/shapr"
@@ -28,3 +30,7 @@ tempfile = "3"
 undocumented_unsafe_blocks = "deny"
 dbg_macro = "deny"
 todo = "deny"
+
+[profile.release]
+# An arithmetic overflow panics (exit 2) instead of wrapping into a wrong report.
+overflow-checks = true

@@ -138,8 +138,10 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
                 }
                 lines.next();
             }
-            if let Some(file) = files.last_mut() {
-                file.hunks.push(hunk(old_start, new_start, &body));
+            // A body whose line numbers pass usize is malformed: dropped.
+            if let (Some(file), Some(hunk)) = (files.last_mut(), hunk(old_start, new_start, &body))
+            {
+                file.hunks.push(hunk);
             }
         } else if let Some(file) = files.last_mut().filter(|_| in_header) {
             header_line(file, line);
@@ -168,13 +170,13 @@ fn header_line(file: &mut FileDiff, line: &str) {
     }
 }
 
-fn hunk(old_start: usize, new_start: usize, body: &[&str]) -> Hunk {
+fn hunk(old_start: usize, new_start: usize, body: &[&str]) -> Option<Hunk> {
     let changed = |l: &&str| !l.starts_with(' ');
     let (Some(first), Some(last)) = (
         body.iter().position(changed),
         body.iter().rposition(changed),
     ) else {
-        return Hunk::default();
+        return Some(Hunk::default());
     };
     let mut old = old_start;
     let mut new = new_start;
@@ -188,12 +190,12 @@ fn hunk(old_start: usize, new_start: usize, body: &[&str]) -> Hunk {
         match line.as_bytes()[0] {
             b'-' => {
                 out.removed.push(old);
-                old += 1;
+                old = old.checked_add(1)?;
                 out.before.count += 1;
             }
             b'+' => {
                 out.added.push(new);
-                new += 1;
+                new = new.checked_add(1)?;
                 out.after.count += 1;
             }
             _ => {
@@ -201,12 +203,12 @@ fn hunk(old_start: usize, new_start: usize, body: &[&str]) -> Hunk {
                     out.before.count += 1;
                     out.after.count += 1;
                 }
-                old += 1;
-                new += 1;
+                old = old.checked_add(1)?;
+                new = new.checked_add(1)?;
             }
         }
     }
-    out
+    Some(out)
 }
 
 /// `@@ -a[,b] +c[,d] @@` → the first line number of each side's hunk body.
@@ -218,7 +220,11 @@ fn parse_range_header(line: &str) -> Option<(usize, usize)> {
         let (start, count) = spec.split_once(',').unwrap_or((spec, "1"));
         let start: usize = start.parse().ok()?;
         let count: usize = count.parse().ok()?;
-        Some(if count == 0 { start + 1 } else { start })
+        if count == 0 {
+            start.checked_add(1)
+        } else {
+            Some(start)
+        }
     };
     Some((side(parts.next(), '-')?, side(parts.next(), '+')?))
 }
@@ -291,10 +297,18 @@ fn unquote(s: &str) -> String {
             b'b' => out.push(0x08),
             b'f' => out.push(0x0c),
             b'v' => out.push(0x0b),
+            // Up to three octal digits, read as bytes: a path's next
+            // character may be multibyte.
             b'0'..=b'7' => {
-                let digits = &inner[i - 1..(i + 2).min(inner.len())];
-                out.push(u8::from_str_radix(digits, 8).unwrap_or(b'?'));
-                i += 2;
+                let mut value = u32::from(escaped - b'0');
+                for _ in 0..2 {
+                    match bytes.get(i) {
+                        Some(&d @ b'0'..=b'7') => value = value * 8 + u32::from(d - b'0'),
+                        _ => break,
+                    }
+                    i += 1;
+                }
+                out.push(u8::try_from(value).unwrap_or(b'?'));
             }
             other => out.push(other),
         }
@@ -411,5 +425,51 @@ Binary files a/img.png and b/img.png differ
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path(), "späce.rb");
         assert_eq!(files[0].hunks[0].removed, [1]);
+    }
+
+    #[test]
+    fn hostile_headers_and_paths_parse_without_panicking() {
+        let max = usize::MAX;
+        // (diff, the file's path, its hunks' first after-side lines)
+        let cases: &[(String, &str, &[usize])] = &[
+            // Line numbers past usize: the hunk is dropped, like any header
+            // that doesn't parse.
+            (format!("@@ -{max},0 +1 @@\n+a\n"), "a.rb", &[]),
+            (format!("@@ -1 +{max} @@\n-a\n+b\n+c\n"), "a.rb", &[]),
+            (format!("@@ -{max} +1 @@\n a\n-b\n"), "a.rb", &[]),
+            (
+                "@@ -99999999999999999999999 +1 @@\n-a\n".into(),
+                "a.rb",
+                &[],
+            ),
+            (format!("@@ -1,{max} +1,{max} @@\n-a\n+b\n"), "a.rb", &[1]),
+            (
+                format!("@@ -1 +{} @@\n-a\n+b\n", max - 1),
+                "a.rb",
+                &[max - 1],
+            ),
+        ];
+        for (body, path, starts) in cases {
+            let text = format!("--- a/a.rb\n+++ b/a.rb\n{body}");
+            let files = parse(&text);
+            assert_eq!(files[0].path(), *path, "{text}");
+            let got: Vec<usize> = files[0].hunks.iter().map(|h| h.after.start).collect();
+            assert_eq!(got, *starts, "{text}");
+        }
+        // Quoted paths: escapes are bytes, so a short octal run before a
+        // multibyte character, or a stray backslash, decodes in place.
+        let paths = [
+            ("\"a/\\12\u{e9}.rb\"", "\n\u{e9}.rb"),
+            ("\"a/\\7\"", "\u{7}"),
+            ("\"a/x\\\u{e9}\"", "x\u{e9}"),
+            ("\"a/\\777\"", "?"),
+            ("\"a/\\303\\251\"", "\u{e9}"),
+        ];
+        for (quoted, path) in paths {
+            let text = format!("--- {quoted}\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n");
+            assert_eq!(parse(&text)[0].path(), path, "{text}");
+            let git = format!("diff --git {quoted} {quoted}\n");
+            assert_eq!(parse(&git)[0].old_path.as_deref(), Some(path), "{git}");
+        }
     }
 }
