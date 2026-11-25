@@ -1,0 +1,12 @@
+{
+  "description": "\"No change to any error's hash\" claims no behavior change: what a consumer reads stays the same",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "summary": {
+      "claims": {
+        "hints": [{"hint": "no_behavior_change", "value": "no change to any error's hash", "category": "refactor", "field": "body"}],
+        "experimental": {"conflicts": [{"claim": "refactor", "finding": "behavior_hunks", "count": 1, "hunks": [0]}]}
+      }
+    }
+  }
+}

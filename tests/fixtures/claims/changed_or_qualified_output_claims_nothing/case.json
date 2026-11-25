@@ -1,0 +1,12 @@
+{
+  "description": "output said to change, no longer unchanged, or unchanged only under a condition, on one platform, for one value or for a default claims no behavior change",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "summary": {
+      "claims": {
+        "hints": [],
+        "experimental": {"conflicts": []}
+      }
+    }
+  }
+}

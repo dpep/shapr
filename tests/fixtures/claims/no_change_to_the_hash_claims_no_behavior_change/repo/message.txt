@@ -1,0 +1,3 @@
+Build the gate hash in one place
+
+No change to any error's hash; the specs pass.

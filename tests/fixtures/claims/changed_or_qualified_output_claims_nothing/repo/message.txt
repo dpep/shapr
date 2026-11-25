@@ -1,0 +1,3 @@
+Count the gate from one
+
+This changes output: the output is no longer unchanged. Without the index the behavior is unchanged. Unix behavior is unchanged, and behavior is the same for nil. No change to the default of 5.

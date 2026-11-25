@@ -1,0 +1,13 @@
+{
+  "description": "a description saying \"Output is unchanged.\" as its own sentence claims no behavior change, which the changed condition doesn't bear out",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {
+      "claims": {
+        "hints": [{"hint": "no_behavior_change", "value": "output is unchanged", "category": "refactor", "field": "body"}],
+        "experimental": {"conflicts": [{"claim": "refactor", "finding": "behavior_hunks", "count": 1, "hunks": [0]}]}
+      }
+    }
+  }
+}
