@@ -238,6 +238,9 @@ pub struct HunkRecord<'a> {
     /// The text output's note on its relocated lines.
     #[serde(skip)]
     relocated_note: Option<String>,
+    /// Its file counts toward the verdict ([`FileChange::counts`]).
+    #[serde(skip)]
+    counted_file: bool,
 }
 
 /// A part of a hunk, or its residual (kind `logic`).
@@ -387,6 +390,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 style: None,
                 test_review_lines,
                 relocated_note: relocated_note(lines.relocated_lines, &label.residual),
+                counted_file: file.counts(),
             });
         }
         files.push(FileRecord {
@@ -1002,7 +1006,7 @@ fn uncompared(hunk: &HunkRecord) -> Option<String> {
         Category::Code | Category::Test => return None,
         Category::Unknown | Category::Binary => format!("{} file", hunk.category.as_str()),
         // A counted file outside the verdict changed only in whitespace.
-        category if category.counted() && hunk.verdict == Verdict::None => {
+        category if hunk.counted_file && hunk.verdict == Verdict::None => {
             format!("{} change, whitespace only", category.as_str())
         }
         category => format!("{} change", category.as_str()),
