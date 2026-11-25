@@ -1,0 +1,7 @@
+{
+  "description": "a method inlined while its caller drops the memoization around the call and the body loses its final read (the shape of faraday ac661139fe8e): an inline that isn't structure (context caller and body); the statements are only located by similarity, so how locals flow around them isn't read as a wiring near miss",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "inline", "structure": false, "detail": {"context": ["caller", "body"]}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

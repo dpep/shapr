@@ -338,6 +338,10 @@ fn find(
     let arg_set: HashSet<&str> = args.iter().flatten().map(String::as_str).collect();
     let free: HashSet<&str> = flow.free.iter().map(String::as_str).collect();
     let assigned_set: HashSet<&str> = assigned.iter().map(String::as_str).collect();
+    // The locals' flow is evidence only about code known to have moved: a
+    // chunk the caller splices around, or one the body matches. A run
+    // located by similarity under a changed body is a guess.
+    let pinned = shared.is_none() || !context.contains(&Context::Caller);
     let block_params: HashSet<&str> = chunks
         .descendants(a_chunk)
         .map(|n| chunks.node(n))
@@ -374,16 +378,15 @@ fn find(
         Err(Risk::BlockParameter)
     } else if rebound {
         Err(Risk::Jump)
-    } else if let Some(why) = shared
-        .is_none()
-        .then(|| {
+    } else if let Some(why) = pinned
+        .then(|| misflowed(&flow, &assigned_set))
+        .flatten()
+        .or_else(|| {
             // Only a body that matched pairs each parameter with an argument;
             // a body that differs leaves the call's line logic instead.
             let paired = exact.is_some() && free == arg_set;
-            misflowed(&flow, &assigned_set)
-                .or_else(|| (!paired).then(|| Risk::Wiring.reason().to_string()))
+            (shared.is_none() && !paired).then(|| Risk::Wiring.reason().to_string())
         })
-        .flatten()
     {
         wiring = Some(why);
         Err(Risk::Wiring)

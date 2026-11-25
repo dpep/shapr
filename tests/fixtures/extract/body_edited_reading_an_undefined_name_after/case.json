@@ -1,0 +1,7 @@
+{
+  "description": "statements extracted into a new method that also gains a guard, where the caller reads a local they set and the call doesn't return it: in Ruby the read now parses as a method call, so the caller changed beyond the call and the statements are only located; an extract that isn't structure (context caller and body), the read logic beside it",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "extract", "structure": false, "detail": {"context": ["caller", "body"]}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}
