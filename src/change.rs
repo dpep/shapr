@@ -262,6 +262,7 @@ fn file_change(
                 }
                 let size = lines.max(bytes.div_ceil(LINE_BYTES));
                 *spent += size * size;
+                let _span = crate::log::span("parse");
                 let before = frontend.parse(before);
                 let after = frontend.parse(after);
                 if before.depth.max(after.depth) > MAX_DEPTH {

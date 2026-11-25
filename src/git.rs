@@ -608,6 +608,7 @@ impl Git {
                 *batch = Batch::spawn(self.command()).ok();
             }
             if let Some(reader) = batch.as_mut() {
+                let _span = crate::log::span("git.cat-file");
                 match reader.read(name) {
                     Ok(found) => return found,
                     // A batch that broke is dropped; the next read starts another.
@@ -911,6 +912,7 @@ impl Git {
         pathspecs: &[String],
         binary: bool,
     ) -> Result<Vec<String>> {
+        let _span = crate::log::span("git.grep");
         let mut cmd = self.command();
         cmd.env("GIT_NO_LAZY_FETCH", "1")
             .args(["grep", "--no-color", "-l", "-z", "-w", "-F", "--full-name"])
@@ -1244,10 +1246,12 @@ pub struct Linguist {
 }
 
 pub(crate) fn run(cmd: &mut Command) -> Result<Vec<u8>> {
+    let _span = crate::log::span("git.run");
     check(cmd.output().context("could not run git")?)
 }
 
 fn run_with_input(cmd: &mut Command, input: &[u8]) -> Result<Vec<u8>> {
+    let _span = crate::log::span("git.batch");
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

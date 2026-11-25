@@ -112,6 +112,7 @@ impl<'a> Revision<'a> {
 
 impl Snapshot for Revision<'_> {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
+        let _span = crate::log::span("snapshot.read");
         let mut read = self.read.borrow_mut();
         read.entry(path.to_string())
             .or_insert_with(|| self.git.show(&self.rev, path))
@@ -119,12 +120,14 @@ impl Snapshot for Revision<'_> {
     }
 
     fn list(&self, dir: &str) -> Vec<String> {
+        let _span = crate::log::span("snapshot.list");
         self.git.ls(&self.rev, dir)
     }
 
     /// Through git's object reader; in a partial clone, one `git cat-file
     /// --batch` after the blobs it lacks are fetched in one request.
     fn read_all(&self, paths: &[String]) -> Vec<Option<Vec<u8>>> {
+        let _span = crate::log::span("snapshot.read_all");
         if !self.git.partial() {
             return paths.iter().map(|p| self.git.show(&self.rev, p)).collect();
         }

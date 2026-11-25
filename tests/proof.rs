@@ -435,3 +435,73 @@ fn a_use_in_a_file_with_an_odd_name_is_found() {
     assert!(text.contains(r"lib/a\nb.rb"), "{text}");
     assert!(!text.lines().any(|l| l.starts_with("b.rb")), "{text}");
 }
+
+/// A private method renamed in `a.rb`, its old name in a comment of
+/// `b.rb`, so the search finds a file to parse; a run under `SHAPR_BOUNDS`
+/// set to BOUNDS, with the usage log at LOG.
+fn bounded(bounds: &str, log: &std::path::Path, args: &[&str]) -> std::process::Output {
+    let before =
+        "class A\n  def run\n    tally\n  end\n\n  private\n\n  def tally\n    1\n  end\nend\n";
+    let after = before.replace("tally", "count");
+    let dir = based_repo(
+        &[("b.rb", "# tally up\nclass B\nend\n")],
+        &[("a.rb", before)],
+        &[("a.rb", &after)],
+    );
+    command(env!("CARGO_BIN_EXE_shapr"), dir.path())
+        .args(args)
+        .arg("HEAD~1..HEAD")
+        .env("SHAPR_BOUNDS", bounds)
+        .env("SHAPR_USAGE", log)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn a_search_past_a_bound_leaves_its_part_capped_and_says_so() {
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("usage.jsonl");
+    let unbounded = report(&bounded("", &log, &["-j"]));
+    assert!(assumptions(any_part(&unbounded, "rename")).is_empty());
+    assert_eq!(unbounded["summary"]["bounds_hit"], serde_json::json!([]));
+    for (bound, limit) in [
+        ("language_files", 1),
+        ("searched_files", 1),
+        ("parsed_bytes", 1),
+    ] {
+        let setting = format!("{bound}={limit}");
+        let out = report(&bounded(&setting, &log, &["-j"]));
+        let rename = any_part(&out, "rename");
+        assert_eq!(assumptions(rename), ["search_capped"], "{bound}");
+        assert_eq!(rename["structure"], false, "{bound}");
+        let hits = out["summary"]["bounds_hit"].as_array().unwrap();
+        assert_eq!(hits.len(), 1, "{bound}: {hits:?}");
+        assert_eq!(hits[0]["bound"], bound);
+        assert_eq!(hits[0]["limit"], limit);
+        assert!(hits[0]["refused"].as_u64().unwrap() >= 1, "{hits:?}");
+        assert!(hits[0]["needed"].as_u64().unwrap() > limit, "{hits:?}");
+        let text = bounded(&setting, &log, &[]);
+        let text = String::from_utf8_lossy(&text.stdout);
+        let line = format!("bounds hit: {bound} (");
+        assert_eq!(
+            text.lines().filter(|l| l.starts_with(&line)).count(),
+            1,
+            "{text}"
+        );
+    }
+    // Every run logs each bound's distance, hit or not.
+    let log = std::fs::read_to_string(&log).unwrap();
+    let runs: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(runs.len(), 7);
+    let first = &runs[0]["counts"]["bounds"];
+    for bound in ["language_files", "searched_files", "parsed_bytes"] {
+        let budget = &first[bound];
+        assert_eq!(budget["refused"], 0, "{first}");
+        assert!(budget["used"].as_u64().unwrap() > 0, "{first}");
+        assert!(budget["limit"].as_u64().unwrap() > budget["used"].as_u64().unwrap());
+    }
+    assert_ne!(runs[1]["counts"]["bounds"]["language_files"]["refused"], 0);
+}

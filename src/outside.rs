@@ -12,28 +12,177 @@ use crate::git::{Git, Linguist, State};
 use crate::norms::{Index, Revision, Snapshot, Worktree};
 use crate::report::Input;
 use crate::tree::{Role, Tree, spells};
+use serde::Serialize;
 use std::cell::{OnceCell, RefCell};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 
 /// Most files of one language searched. Beyond it, a partial clone would
 /// fetch too much to answer one change; the part keeps `search_capped`.
 const CAP: usize = 20_000;
 
+/// Most files one run's searches read, each search counting every file it
+/// greps: a search reads the whole repository, so its cost grows with it.
+const MAX_SEARCHED_FILES: usize = 4_000_000;
+
+/// Most bytes of files outside the change one run reads to parse for
+/// proof: the files that call by a computed name, then each search's files
+/// found. Parsing costs time, and kept trees memory, in proportion.
+const MAX_PARSED_BYTES: usize = 128 << 20;
+
+/// What bounds the search of the repository outside the change. A search
+/// past one isn't run, and the parts it would settle keep `search_capped`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Bound {
+    /// Files of the language searched, per search ([`CAP`]).
+    LanguageFiles,
+    /// Files read by the run's searches ([`MAX_SEARCHED_FILES`]).
+    SearchedFiles,
+    /// Bytes read to parse for proof ([`MAX_PARSED_BYTES`]).
+    ParsedBytes,
+}
+
+/// A bound over one run: how much of `limit` was `used` (for
+/// `LanguageFiles`, the most one search asked for), the most a refused
+/// search would have brought it to (`needed`, else `used`), and how many
+/// searches it `refused`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Budget {
+    pub used: usize,
+    pub needed: usize,
+    pub limit: usize,
+    pub refused: usize,
+}
+
+/// A bound some search of the run hit, for `summary.bounds_hit`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Hit {
+    pub bound: Bound,
+    #[serde(flatten)]
+    pub budget: Budget,
+}
+
+impl Bound {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Bound::LanguageFiles => "language_files",
+            Bound::SearchedFiles => "searched_files",
+            Bound::ParsedBytes => "parsed_bytes",
+        }
+    }
+}
+
+/// Each bound's limit: its default, or as `SHAPR_BOUNDS` sets it
+/// (`parsed_bytes=1000000,searched_files=50000`), to try a tighter one.
+fn limits() -> BTreeMap<Bound, usize> {
+    let mut limits = BTreeMap::from([
+        (Bound::LanguageFiles, CAP),
+        (Bound::SearchedFiles, MAX_SEARCHED_FILES),
+        (Bound::ParsedBytes, MAX_PARSED_BYTES),
+    ]);
+    let setting = std::env::var("SHAPR_BOUNDS").unwrap_or_default();
+    for entry in setting.split(',').filter(|e| !e.is_empty()) {
+        let parsed = entry.split_once('=').and_then(|(name, value)| {
+            let bound = *limits.keys().find(|b| b.as_str() == name)?;
+            Some((bound, value.parse().ok()?))
+        });
+        match parsed {
+            Some((bound, limit)) => {
+                limits.insert(bound, limit);
+            }
+            None => crate::report::note(&format!("SHAPR_BOUNDS: `{entry}` isn't BOUND=N, ignored")),
+        }
+    }
+    limits
+}
+
+/// Every repository's budgets as one: the most any used, the searches all refused.
+pub fn budgets(repositories: &[Repository]) -> BTreeMap<Bound, Budget> {
+    let mut all = BTreeMap::new();
+    for (bound, budget) in repositories.iter().flat_map(Repository::budgets) {
+        all.entry(bound)
+            .and_modify(|b: &mut Budget| {
+                b.used = b.used.max(budget.used);
+                b.needed = b.needed.max(budget.needed);
+                b.refused += budget.refused;
+            })
+            .or_insert(budget);
+    }
+    all
+}
+
+/// The bounds that refused a search.
+pub fn hits(budgets: &BTreeMap<Bound, Budget>) -> Vec<Hit> {
+    (budgets.iter())
+        .filter(|(_, b)| b.refused > 0)
+        .map(|(&bound, &budget)| Hit { bound, budget })
+        .collect()
+}
+
+/// `bounds hit: parsed_bytes (2 searches past 134217728); their parts keep
+/// search_capped`, when any was.
+pub fn text(hits: &[Hit]) -> Option<String> {
+    let each: Vec<String> = (hits.iter())
+        .map(|h| {
+            let n = h.budget.refused;
+            let s = if n == 1 { "" } else { "es" };
+            format!(
+                "{} ({n} search{s} past {})",
+                h.bound.as_str(),
+                h.budget.limit
+            )
+        })
+        .collect();
+    (!each.is_empty()).then(|| {
+        format!(
+            "bounds hit: {}; their parts keep search_capped",
+            each.join(", ")
+        )
+    })
+}
+
+impl Budget {
+    fn new(limit: usize) -> Self {
+        Budget {
+            used: 0,
+            needed: 0,
+            limit,
+            refused: 0,
+        }
+    }
+
+    /// Spends N, or refuses when it would pass the limit.
+    fn spend(&mut self, n: usize) -> bool {
+        let total = self.used.saturating_add(n);
+        self.needed = self.needed.max(total);
+        if total > self.limit {
+            self.refused += 1;
+            return false;
+        }
+        self.used = total;
+        true
+    }
+}
+
 pub struct Repository<'a> {
     git: &'a Git,
     state: State,
     snapshot: &'a dyn Snapshot,
-    cap: usize,
+    budgets: RefCell<BTreeMap<Bound, Budget>>,
     files: OnceCell<Option<Vec<(String, String)>>>,
     /// Languages whose blobs are fetched (or failed to).
     prefetched: RefCell<HashMap<&'static str, bool>>,
     /// By language, word, and whether computed names count.
     searches: RefCell<HashMap<(&'static str, String, bool), Search>>,
-    /// Per language, the files that name a method computed at runtime.
-    computed: RefCell<HashMap<&'static str, Option<Computed>>>,
+    /// Per language, the files that name a method computed at runtime, or
+    /// why there are none to read (`Unavailable`, `Capped`).
+    computed: RefCell<HashMap<&'static str, Result<Computed, Search>>>,
     /// Files parsed for a proof, each once however many names it's read for.
     parsed: RefCell<HashMap<String, Option<Rc<Tree>>>>,
+    /// Files a search found, read and charged to [`Bound::ParsedBytes`],
+    /// until parsed.
+    sources: RefCell<HashMap<String, Option<Vec<u8>>>>,
 }
 
 /// Files holding a name computed at runtime ([`Role::DynamicName`] with a
@@ -47,18 +196,48 @@ impl<'a> Repository<'a> {
             git,
             state,
             snapshot,
-            cap: CAP,
+            budgets: RefCell::new(
+                (limits().into_iter())
+                    .map(|(bound, limit)| (bound, Budget::new(limit)))
+                    .collect(),
+            ),
             files: OnceCell::new(),
             prefetched: RefCell::default(),
             searches: RefCell::default(),
             computed: RefCell::default(),
             parsed: RefCell::default(),
+            sources: RefCell::default(),
         }
+    }
+
+    /// Each bound with what the run spent of it.
+    pub fn budgets(&self) -> BTreeMap<Bound, Budget> {
+        self.budgets.borrow().clone()
+    }
+
+    #[cfg(test)]
+    fn limit(&mut self, bound: Bound, limit: usize) {
+        self.budgets.get_mut().insert(bound, Budget::new(limit));
+    }
+
+    fn spend(&self, bound: Bound, n: usize) -> bool {
+        let mut budgets = self.budgets.borrow_mut();
+        let budget = budgets.get_mut(&bound).expect("every bound has a budget");
+        if bound == Bound::LanguageFiles {
+            // Per search: the most any one asked for.
+            let fits = n <= budget.limit;
+            budget.used = budget.used.max(n);
+            budget.needed = budget.used;
+            budget.refused += usize::from(!fits);
+            return fits;
+        }
+        budget.spend(n)
     }
 
     fn files(&self) -> Option<&[(String, String)]> {
         self.files
             .get_or_init(|| {
+                let _span = crate::log::span("outside.files");
                 let files = self.git.files(match &self.state {
                     State::Revision(rev) => Some(rev),
                     State::Index | State::Worktree => None,
@@ -98,18 +277,19 @@ impl<'a> Repository<'a> {
     }
 
     fn search(&self, frontend: &dyn Frontend, word: &str, with_computed: bool) -> Search {
+        let _span = crate::log::span("outside.search");
         let Some(files) = self.files() else {
             return Search::Unavailable;
         };
         let globs = frontend.search_globs();
         let candidates: Vec<&(String, String)> =
             files.iter().filter(|(p, _)| matches(globs, p)).collect();
-        if candidates.len() > self.cap {
+        if !self.spend(Bound::LanguageFiles, candidates.len()) {
             crate::verbose!(
                 "{} {} files: more than {} to search",
                 candidates.len(),
                 frontend.language(),
-                self.cap
+                CAP
             );
             return Search::Capped;
         }
@@ -126,9 +306,14 @@ impl<'a> Repository<'a> {
                 )
             })
             .collect();
+        if !self.spend(Bound::SearchedFiles, candidates.len() + texts.len()) {
+            crate::verbose!("{word}: not searched, the run's searches read too many files");
+            return Search::Capped;
+        }
         if matches!(self.state, State::Revision(_)) {
             let mut prefetched = self.prefetched.borrow_mut();
             let fetched = *prefetched.entry(frontend.language()).or_insert_with(|| {
+                let _span = crate::log::span("outside.prefetch");
                 let ids: BTreeSet<&str> = (candidates.iter().chain(&texts))
                     .map(|(_, id)| id.as_str())
                     .collect();
@@ -142,45 +327,62 @@ impl<'a> Repository<'a> {
                 return Search::Unavailable;
             }
         }
+        crate::log::count("search.candidates", candidates.len() as u64);
         let hits = self.grep(word, globs, &texts);
-        if !with_computed {
-            return match hits {
-                Ok((found, mentioned)) => Search::Done {
-                    searched: candidates.len(),
-                    found,
-                    mentioned,
-                },
-                Err(error) => {
-                    crate::verbose!("can't search for {word}: {error:#}");
-                    Search::Unavailable
-                }
-            };
+        if let Ok((found, _)) = &hits {
+            crate::log::count("search.found", found.len() as u64);
         }
-        let mut computed = self.computed.borrow_mut();
-        let computed = computed
-            .entry(frontend.language())
-            .or_insert_with(|| self.computed_names(frontend, &candidates));
-        match (hits, &*computed) {
-            (Ok((mut found, mentioned)), Some(computed)) => {
-                found.extend(
+        let (mut found, mentioned) = match hits {
+            Ok(hits) => hits,
+            Err(error) => {
+                crate::verbose!("can't search for {word}: {error:#}");
+                return Search::Unavailable;
+            }
+        };
+        if with_computed {
+            let mut computed = self.computed.borrow_mut();
+            let computed = computed
+                .entry(frontend.language())
+                .or_insert_with(|| self.computed_names(frontend, &candidates));
+            match computed {
+                Ok(computed) => found.extend(
                     (computed.iter())
                         .filter(|(_, patterns)| patterns.iter().any(|p| spells(p, word)))
                         .map(|(path, _)| path.clone()),
-                );
-                found.sort();
-                found.dedup();
-                Search::Done {
-                    searched: candidates.len(),
-                    found,
-                    mentioned,
-                }
+                ),
+                Err(open) => return open.clone(),
             }
-            (Ok(_), None) => Search::Unavailable,
-            (Err(error), _) => {
-                crate::verbose!("can't search for {word}: {error:#}");
-                Search::Unavailable
-            }
+            found.sort();
+            found.dedup();
         }
+        if !self.read_ahead(&found) {
+            crate::verbose!("{word}: not settled, its files found pass the run's bytes to parse");
+            return Search::Capped;
+        }
+        Search::Done {
+            searched: candidates.len(),
+            found,
+            mentioned,
+        }
+    }
+
+    /// Reads the files in FOUND a caller may parse and that aren't read yet,
+    /// charging their bytes to [`Bound::ParsedBytes`]; false, reading
+    /// nothing, when they don't fit.
+    fn read_ahead(&self, found: &[String]) -> bool {
+        let fresh: Vec<&String> = (found.iter())
+            .filter(|p| frontend::for_path(p).is_some())
+            .filter(|p| !self.parsed.borrow().contains_key(*p))
+            .filter(|p| !self.sources.borrow().contains_key(*p))
+            .collect();
+        let read: Vec<Option<Vec<u8>>> = fresh.iter().map(|p| self.read(p)).collect();
+        let bytes = read.iter().flatten().map(Vec::len).sum();
+        if !self.spend(Bound::ParsedBytes, bytes) {
+            return false;
+        }
+        let mut sources = self.sources.borrow_mut();
+        sources.extend(fresh.into_iter().cloned().zip(read));
+        true
     }
 }
 
@@ -230,7 +432,8 @@ impl Repository<'_> {
         &self,
         frontend: &dyn Frontend,
         candidates: &[&(String, String)],
-    ) -> Option<Computed> {
+    ) -> Result<Computed, Search> {
+        let _span = crate::log::span("outside.computed");
         // Only a dispatch word reaches a method by a computed name, and its
         // call spells it out. `grep -w` can't end a word on `?` or `!`; the
         // stem still matches the call.
@@ -238,14 +441,14 @@ impl Repository<'_> {
             .map(|w| w.trim_end_matches(['?', '!']))
             .collect();
         if words.is_empty() {
-            return Some(Computed::new());
+            return Ok(Computed::new());
         }
         let globs = pathspecs(frontend.search_globs());
         let callers: BTreeSet<String> = match self.git.grep(&self.state, &words, &globs, true) {
             Ok(found) => found.into_iter().collect(),
             Err(error) => {
                 crate::verbose!("can't find files that call by a computed name: {error:#}");
-                return None;
+                return Err(Search::Unavailable);
             }
         };
         let candidates: Vec<&(String, String)> = (candidates.iter().copied())
@@ -262,14 +465,23 @@ impl Repository<'_> {
                     Ok(sources) => sources,
                     Err(error) => {
                         crate::verbose!("can't read files for computed names: {error:#}");
-                        return None;
+                        return Err(Search::Unavailable);
                     }
                 }
             }
         };
+        let bytes = sources.iter().flatten().map(Vec::len).sum();
+        if !self.spend(Bound::ParsedBytes, bytes) {
+            crate::verbose!("{bytes} bytes call by a computed name: past the run's bytes to parse");
+            return Err(Search::Capped);
+        }
         let mut computed = Computed::new();
+        crate::log::count("computed.files", candidates.len() as u64);
         for ((path, _), source) in candidates.iter().zip(sources) {
-            let tree = frontend.parse(source.unwrap_or_default());
+            let read = source.is_some();
+            let source = source.unwrap_or_default();
+            crate::log::count("computed.bytes", source.len() as u64);
+            let tree = Rc::new(frontend.parse(source));
             let suffixes = tree.semantics.spelling.suffixes;
             let patterns: Vec<String> = (tree.descendants(Tree::ROOT))
                 .map(|id| tree.node(id))
@@ -277,11 +489,18 @@ impl Repository<'_> {
                 .filter_map(|n| n.name.as_deref().filter(|name| name.contains('*')))
                 .map(|name| name.trim_end_matches(|c| suffixes.contains(&c)).to_string())
                 .collect();
+            // A bare `*` spells every name, so every search finds and parses
+            // the file: keep the tree, as `parse` would have built it.
+            let same =
+                frontend::for_path(path).is_some_and(|f| f.language() == frontend.language());
+            if read && same && patterns.iter().any(|p| p == "*") {
+                self.parsed.borrow_mut().insert(path.clone(), Some(tree));
+            }
             if !patterns.is_empty() {
                 computed.push((path.clone(), patterns));
             }
         }
-        Some(computed)
+        Ok(computed)
     }
 }
 
@@ -314,9 +533,17 @@ impl Outside for Repository<'_> {
         if let Some(tree) = self.parsed.borrow().get(path) {
             return tree.clone();
         }
+        let _span = crate::log::span("outside.parse");
+        let read = match self.sources.borrow_mut().remove(path) {
+            Some(read) => read,
+            None => self.read(path),
+        };
         let tree = frontend::for_path(path)
-            .zip(self.read(path))
-            .map(|(frontend, source)| Rc::new(frontend.parse(source)));
+            .zip(read)
+            .map(|(frontend, source)| {
+                crate::log::count("parsed.bytes", source.len() as u64);
+                Rc::new(frontend.parse(source))
+            });
         self.parsed
             .borrow_mut()
             .insert(path.to_string(), tree.clone());
@@ -620,6 +847,114 @@ mod tests {
         }
     }
 
+    /// The working tree's files, each read counted.
+    struct Disk(std::path::PathBuf, RefCell<Vec<String>>);
+    impl Snapshot for Disk {
+        fn read(&self, path: &str) -> Option<Vec<u8>> {
+            self.1.borrow_mut().push(path.to_string());
+            std::fs::read(self.0.join(path)).ok()
+        }
+        fn list(&self, _: &str) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_file_calling_by_any_name_is_parsed_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| git_in(dir.path(), args);
+        git(&["init", "-q"]);
+        std::fs::write(dir.path().join("a.rb"), "def go\nend\n").unwrap();
+        std::fs::write(dir.path().join("b.rb"), "x.send(name)\n").unwrap();
+        git(&["add", "-A"]);
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        let disk = Disk(dir.path().to_path_buf(), RefCell::default());
+        let repo = Repository::new(&shell, State::Worktree, &disk);
+        let Search::Done { found, .. } = repo.uses("a.rb", "go") else {
+            panic!("not searched");
+        };
+        assert_eq!(found, ["a.rb", "b.rb"]);
+        assert!(repo.parse("b.rb").is_some());
+        let reads = disk.1.borrow();
+        assert_eq!(
+            reads.iter().filter(|p| *p == "b.rb").count(),
+            1,
+            "{reads:?}"
+        );
+    }
+
+    /// A repository of `a.rb` defining `go` and `b.rb` calling it (and,
+    /// with `computed`, calling anything by a computed name).
+    fn caller(computed: bool) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| git_in(dir.path(), args);
+        git(&["init", "-q"]);
+        std::fs::write(dir.path().join("a.rb"), "def go\nend\n").unwrap();
+        let b = if computed {
+            "go\nx.send(name)\n"
+        } else {
+            "go\n"
+        };
+        std::fs::write(dir.path().join("b.rb"), b).unwrap();
+        git(&["add", "-A"]);
+        dir
+    }
+
+    #[test]
+    fn searches_past_the_runs_files_are_not_run() {
+        let dir = caller(false);
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        let mut repo = Repository::new(&shell, State::Worktree, &Empty);
+        // Two files a search: the first fits, the second doesn't.
+        repo.limit(Bound::SearchedFiles, 3);
+        assert!(matches!(repo.uses("a.rb", "go"), Search::Done { .. }));
+        assert_eq!(repo.uses("a.rb", "other"), Search::Capped);
+        // A search already run is answered from the cache, at no cost.
+        assert!(matches!(repo.uses("a.rb", "go"), Search::Done { .. }));
+        let budget = repo.budgets()[&Bound::SearchedFiles];
+        assert_eq!((budget.used, budget.refused), (2, 1));
+    }
+
+    #[test]
+    fn files_found_past_the_runs_bytes_are_not_parsed() {
+        let dir = caller(false);
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        let disk = Disk(dir.path().to_path_buf(), RefCell::default());
+        let mut repo = Repository::new(&shell, State::Worktree, &disk);
+        // `def go\nend\n` and `go\n`: 14 bytes found.
+        repo.limit(Bound::ParsedBytes, 13);
+        assert_eq!(repo.uses("a.rb", "go"), Search::Capped);
+        let budget = repo.budgets()[&Bound::ParsedBytes];
+        assert_eq!((budget.used, budget.needed, budget.refused), (0, 14, 1));
+        let mut repo = Repository::new(&shell, State::Worktree, &disk);
+        repo.limit(Bound::ParsedBytes, 14);
+        assert!(matches!(repo.uses("a.rb", "go"), Search::Done { .. }));
+        // What the search read is what `parse` parses, read once.
+        disk.1.borrow_mut().clear();
+        assert!(repo.parse("b.rb").is_some());
+        assert!(disk.1.borrow().is_empty());
+        assert_eq!(repo.budgets()[&Bound::ParsedBytes].used, 14);
+    }
+
+    #[test]
+    fn computed_names_past_the_runs_bytes_leave_the_search_capped() {
+        let dir = caller(true);
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        let disk = Disk(dir.path().to_path_buf(), RefCell::default());
+        let mut repo = Repository::new(&shell, State::Worktree, &disk);
+        repo.limit(Bound::ParsedBytes, 5);
+        assert_eq!(repo.uses("a.rb", "go"), Search::Capped);
+        // Without computed names nothing more is parsed than the files found.
+        assert_eq!(
+            repo.literal("a.rb", "nothing"),
+            Search::Done {
+                searched: 2,
+                found: Vec::new(),
+                mentioned: Vec::new(),
+            }
+        );
+    }
+
     #[test]
     fn a_repository_beyond_the_cap_is_not_searched() {
         let dir = tempfile::tempdir().unwrap();
@@ -640,7 +975,16 @@ mod tests {
             }
         );
         repo = Repository::new(&shell, State::Worktree, &Empty);
-        repo.cap = 1;
+        repo.limit(Bound::LanguageFiles, 1);
         assert_eq!(repo.uses("a.rb", "go"), Search::Capped);
+        assert_eq!(
+            repo.budgets()[&Bound::LanguageFiles],
+            Budget {
+                used: 2,
+                needed: 2,
+                limit: 1,
+                refused: 1
+            }
+        );
     }
 }
