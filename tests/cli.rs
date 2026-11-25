@@ -1796,3 +1796,17 @@ fn long_lines_wide_bodies_and_large_files_are_not_compared() {
         );
     }
 }
+
+#[test]
+fn help_keeps_its_line_breaks() {
+    let dir = tempfile::tempdir().unwrap();
+    for args in [&["--help"][..], &["norms", "--help"], &["-h"]] {
+        let out = shapr(dir.path(), args);
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !text.contains("\\n"),
+            "{args:?}: literal \\n in help: {text}"
+        );
+        assert!(text.lines().count() > 10, "{args:?}: {text}");
+    }
+}
