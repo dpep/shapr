@@ -235,33 +235,81 @@ fn internal_error(message: &dyn std::fmt::Display, at: Option<&str>) -> String {
     format!("internal error: {message}{at}, please report it")
 }
 
+/// Every flag either command knows.
+fn known_flags() -> Vec<clap::Arg> {
+    let commands = [Cli::command(), crate::norms::command::NormsCli::command()];
+    commands
+        .iter()
+        .flat_map(|c| c.get_arguments().filter(|a| !a.is_positional()).cloned())
+        .collect()
+}
+
+/// The flags both commands take: the ones that may come before `norms`.
+fn global_flags() -> Vec<clap::Arg> {
+    let norms = crate::norms::command::NormsCli::command();
+    Cli::command()
+        .get_arguments()
+        .filter(|a| !a.is_positional())
+        .filter(|a| norms.get_arguments().any(|n| n.get_id() == a.get_id()))
+        .cloned()
+        .collect()
+}
+
+/// A short-flag cluster (`qjC` of `-qjC`) read as clap reads it: each
+/// letter's flag in KNOWN (`None` for a letter it lacks), up to and including
+/// the first that takes a value, and whether that value is the next word
+/// (`-C DIR`) rather than the rest of the cluster (`-CDIR`).
+fn cluster<'k>(letters: &str, known: &'k [clap::Arg]) -> (Vec<Option<&'k clap::Arg>>, bool) {
+    let mut flags = Vec::new();
+    for (at, letter) in letters.char_indices() {
+        let flag = known.iter().find(|a| a.get_short() == Some(letter));
+        flags.push(flag);
+        if flag.is_some_and(|a| a.get_action().takes_values()) {
+            return (flags, at + letter.len_utf8() == letters.len());
+        }
+    }
+    (flags, false)
+}
+
+/// How many of ARGS are global flags (with their values) before the first
+/// word that isn't one.
+fn leading_globals(args: &[String]) -> usize {
+    let globals = global_flags();
+    let mut at = 0;
+    while let Some(word) = args.get(at) {
+        if let Some(long) = word.strip_prefix("--") {
+            let switch =
+                |a: &clap::Arg| a.get_long() == Some(long) && !a.get_action().takes_values();
+            if !globals.iter().any(switch) {
+                break;
+            }
+            at += 1;
+        } else if let Some(letters) = word.strip_prefix('-').filter(|l| !l.is_empty()) {
+            let (flags, takes_next) = cluster(letters, &globals);
+            if flags.contains(&None) {
+                break;
+            }
+            at += if takes_next { 2 } else { 1 };
+        } else {
+            break;
+        }
+    }
+    at
+}
+
 /// The canonical names of the flags in ARGS (`json` for `-j`), never their
 /// values, as either command knows them; sorted, once each.
 fn flag_names(args: impl Iterator<Item = String>) -> Vec<String> {
-    let commands = [Cli::command(), crate::norms::command::NormsCli::command()];
-    let known: Vec<&clap::Arg> = commands.iter().flat_map(|c| c.get_arguments()).collect();
+    let known = known_flags();
     let name = |arg: &clap::Arg| arg.get_long().unwrap_or(arg.get_id().as_str()).to_string();
     let mut names = std::collections::BTreeSet::new();
     for word in args.take_while(|a| a != "--") {
         if let Some(long) = word.strip_prefix("--") {
             let long = long.split('=').next().unwrap_or_default();
-            names.extend(
-                known
-                    .iter()
-                    .find(|a| a.get_long() == Some(long))
-                    .map(|a| name(a)),
-            );
-        } else if let Some(shorts) = word.strip_prefix('-') {
-            for short in shorts.chars() {
-                let Some(arg) = known.iter().find(|a| a.get_short() == Some(short)) else {
-                    break;
-                };
-                names.insert(name(arg));
-                // The rest of the cluster is this flag's value (`-Capp`).
-                if arg.get_action().takes_values() {
-                    break;
-                }
-            }
+            names.extend(known.iter().find(|a| a.get_long() == Some(long)).map(name));
+        } else if let Some(letters) = word.strip_prefix('-') {
+            let (flags, _) = cluster(letters, &known);
+            names.extend(flags.into_iter().map_while(|f| f.map(name)));
         }
     }
     names.into_iter().collect()
@@ -271,23 +319,7 @@ fn dispatch() -> ExitCode {
     // A subcommand beside free revisions and paths: `norms` is never read as
     // either, and the global flags (format, -C) may come before it.
     let mut args: Vec<String> = std::env::args().collect();
-    let mut at = 1;
-    while let Some(arg) = args.get(at) {
-        let switches = |s: &str| s.chars().all(|c| "jJvq".contains(c));
-        match arg.as_str() {
-            "--json" | "--ndjson" | "--verbose" | "--quiet" => at += 1,
-            // A cluster of switches, perhaps ending in -C and its value.
-            short if short.starts_with('-') && !short.starts_with("--") => {
-                match short[1..].split_once('C') {
-                    Some((before, "")) if switches(before) => at += 2,
-                    Some((before, _)) if switches(before) => at += 1,
-                    None if short.len() > 1 && switches(&short[1..]) => at += 1,
-                    _ => break,
-                }
-            }
-            _ => break,
-        }
-    }
+    let at = 1 + leading_globals(&args[1..]);
     if args.get(at).is_some_and(|a| a == "norms") {
         args.remove(at);
         args[0] = "shapr norms".to_string();
@@ -986,33 +1018,35 @@ pub(crate) fn emit_error(format: Format, message: &str, code: u8) {
 }
 
 /// The format argv asks for, read before clap has parsed it, so a usage
-/// error reaches a JSON caller as JSON (and a `-q` caller as nothing). Every short flag but `-C` is a
-/// switch, so a cluster like `-qJ` reads letter by letter up to a `C`, whose
-/// value is the rest of the cluster or the next argument.
+/// error reaches a JSON caller as JSON (and a `-q` caller as nothing).
 pub(crate) fn requested_format() -> Format {
+    let known = known_flags();
     let mut format = Format::Text;
     let mut args = std::env::args().skip(1).take_while(|a| a != "--");
     while let Some(arg) = args.next() {
-        let (json, ndjson) = match arg.strip_prefix("--") {
-            Some("quiet") => return Format::Text,
-            Some(long) => (long == "json", long == "ndjson"),
+        let ids: Vec<&str> = match arg.strip_prefix("--") {
+            Some(long) => vec![long],
             None => match arg.strip_prefix('-') {
-                Some(short) => {
-                    let (switches, dir) = short.split_once('C').unwrap_or((short, "x"));
-                    if dir.is_empty() {
+                Some(letters) => {
+                    let (flags, takes_next) = cluster(letters, &known);
+                    if takes_next {
                         args.next();
                     }
-                    if switches.contains('q') {
-                        return Format::Text;
-                    }
-                    (switches.contains('j'), switches.contains('J'))
+                    flags
+                        .into_iter()
+                        .flatten()
+                        .map(|a| a.get_id().as_str())
+                        .collect()
                 }
-                None => (false, false),
+                None => Vec::new(),
             },
         };
-        if ndjson {
+        if ids.contains(&"quiet") {
+            return Format::Text;
+        }
+        if ids.contains(&"ndjson") {
             format = Format::Ndjson;
-        } else if json {
+        } else if ids.contains(&"json") {
             format = Format::Json;
         }
     }
@@ -1022,6 +1056,37 @@ pub(crate) fn requested_format() -> Format {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn words(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn every_global_flag_may_precede_norms() {
+        let globals = global_flags();
+        assert!(globals.iter().any(|a| a.get_short() == Some('C')));
+        for flag in &globals {
+            let value = flag.get_action().takes_values();
+            let mut forms = Vec::new();
+            if let Some(short) = flag.get_short() {
+                forms.push(match value {
+                    true => vec![format!("-{short}"), "x".to_string()],
+                    false => vec![format!("-{short}")],
+                });
+            }
+            if let (Some(long), false) = (flag.get_long(), value) {
+                forms.push(vec![format!("--{long}")]);
+            }
+            for mut args in forms {
+                let leading = args.len();
+                args.push("norms".to_string());
+                assert_eq!(leading_globals(&args), leading, "{args:?}");
+            }
+        }
+        assert_eq!(leading_globals(&words(&["-qjCdir", "norms"])), 1);
+        assert_eq!(leading_globals(&words(&["-jx", "norms"])), 0);
+        assert_eq!(leading_globals(&words(&["--staged", "norms"])), 0);
+    }
 
     /// The example lines of --help and of the README's Usage block.
     fn examples() -> Vec<String> {
