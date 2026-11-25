@@ -357,6 +357,10 @@ pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     relocate::run(change, &mut labels);
     facets::run(change, &mut labels);
     debug_assert!(aligned(change, &labels), "per-hunk lists out of step");
+    debug_assert!(
+        reformats_keep_code(change, &labels),
+        "a format_only or comment_only hunk changed code"
+    );
     labels
 }
 
@@ -371,6 +375,44 @@ fn aligned(change: &Change, labels: &Labels) -> bool {
                 && file.whitespace_only.len() == n
                 && (file.trees.as_ref().ok()).is_none_or(|t| t.sites.len() == n)
         })
+}
+
+/// The hunks of a file that hold only `format_only` and `comment_only`
+/// parts, applied alone to its before side, leave its code as it was. The
+/// whole file is reparsed, so the check sees code no cover held.
+fn reformats_keep_code(change: &Change, labels: &Labels) -> bool {
+    let reformat = |label: &Label| {
+        !label.parts.is_empty()
+            && label.unclaimed().is_empty()
+            && (label.parts.iter()).all(|p| matches!(p.kind, Kind::FormatOnly | Kind::CommentOnly))
+    };
+    change.files.iter().zip(labels).all(|(file, labels)| {
+        let Ok(trees) = file.trees.as_ref() else {
+            return true;
+        };
+        let hunks: Vec<&Hunk> = (file.diff.hunks.iter().zip(labels))
+            .filter(|(_, label)| reformat(label))
+            .map(|(hunk, _)| hunk)
+            .collect();
+        let frontend = crate::frontend::for_path(file.diff.path());
+        let (Some(frontend), false, true) = (frontend, hunks.is_empty(), trees.clean()) else {
+            return true;
+        };
+        let (before, after) = (&trees.before, &trees.after);
+        let mut applied = Vec::new();
+        let mut next = 1;
+        for hunk in hunks {
+            applied.extend_from_slice(before.text(&before.line_span(next, hunk.before.start - 1)));
+            if let Some(last) = hunk.after.last() {
+                applied.extend_from_slice(after.text(&after.line_span(hunk.after.start, last)));
+            }
+            next = hunk.before.start + hunk.before.count;
+        }
+        applied.extend_from_slice(&before.source[before.line_start(next)..]);
+        let applied = frontend.parse(applied);
+        let root = |tree: &crate::tree::Tree| tree.node(crate::tree::Tree::ROOT).hash;
+        !applied.errors.is_empty() || root(&applied) == root(before)
+    })
 }
 
 /// Every pass over every hunk; each residual is what no part claims.
