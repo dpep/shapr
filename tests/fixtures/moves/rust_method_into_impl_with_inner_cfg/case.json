@@ -1,0 +1,4 @@
+{
+  "description": "a method moved into an impl of the same type whose inner #![cfg(feature)] can compile it out, a trait default answering the call instead: another owner, never structure",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}}, "summary": {"verdict": {"$not": "structure"}}}
+}

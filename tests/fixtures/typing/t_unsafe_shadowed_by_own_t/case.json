@@ -1,0 +1,4 @@
+{
+  "description": "a file that defines its own T: T.unsafe there is that module's method, not Sorbet's, so the call is logic",
+  "expect": {"hunks": [{"kind": "logic", "verdict": "behavior"}]}
+}

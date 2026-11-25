@@ -19,7 +19,7 @@
 
 use super::site::Site;
 use crate::change::{Change, Trees};
-use crate::tree::{NameKind, NodeId, Role, Span, Tree};
+use crate::tree::{Flags, NameKind, NodeId, Role, Span, Tree};
 use std::collections::{BTreeSet, HashMap};
 use std::ops::RangeInclusive;
 
@@ -202,21 +202,25 @@ pub(super) fn key(tree: &Tree, id: NodeId) -> Key<'_> {
 /// `C::B`); one without a name stands by its first child (a Rust `impl`'s
 /// header). With `context`, any code before the name counts too: a Rust
 /// attribute (`#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`),
-/// though not an annotation (visibility). Alignment pairs namespaces by name,
+/// though not an annotation (visibility), and its [`qualifiers`]. Alignment pairs namespaces by name,
 /// so one whose attributes were edited still aligns; owners compare with
 /// context.
 pub(super) fn namespace_name(tree: &Tree, id: NodeId, context: bool) -> Option<u64> {
     let code: Vec<NodeId> = tree.code_children(id).collect();
-    let Some(name) = tree.name_child(id) else {
-        return code.first().map(|&c| tree.node(c).hash);
+    let mut ids: Vec<NodeId> = match tree.name_child(id) {
+        None => vec![*code.first()?],
+        Some(name) => code
+            .iter()
+            .copied()
+            .take_while(|&c| context && c != name)
+            .filter(|&c| tree.node(c).role != Role::Annotation)
+            .chain([name])
+            .collect(),
     };
-    let ids: Vec<u64> = code
-        .iter()
-        .take_while(|&&c| context && c != name)
-        .filter(|&&c| tree.node(c).role != Role::Annotation)
-        .chain([&name])
-        .map(|&c| tree.node(c).hash)
-        .collect();
+    if context {
+        ids.extend(qualifiers(tree, id));
+    }
+    let ids: Vec<u64> = ids.iter().map(|&c| tree.node(c).hash).collect();
     match ids[..] {
         [only] => Some(only),
         _ => {
@@ -225,6 +229,15 @@ pub(super) fn namespace_name(tree: &Tree, id: NodeId, context: bool) -> Option<u
             Some(std::hash::Hasher::finish(&h))
         }
     }
+}
+
+/// The statements of a namespace's body that qualify the namespace itself
+/// ([`Flags::HEADER`]).
+pub(super) fn qualifiers(tree: &Tree, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
+    tree.code_children(id)
+        .filter(|&c| transparent(tree, c))
+        .flat_map(|body| tree.code_children(body))
+        .filter(|&c| tree.node(c).flags.contains(Flags::HEADER))
 }
 
 /// A node that means nothing beyond its children: no role, and no syntax

@@ -20,7 +20,7 @@
 //! unchanged (git may slide a removal across identical lines), except the
 //! unit's lines that changed in the move, which stay logic.
 
-use super::align::{Alignments, Side, key, lcs, namespace_name, size, transparent};
+use super::align::{Alignments, Side, key, lcs, namespace_name, qualifiers, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
 use super::proof::Search;
@@ -646,10 +646,12 @@ fn members(tree: &Tree, node: NodeId) -> impl Iterator<Item = NodeId> + '_ {
 }
 
 /// A namespace's header: its code beside the body (the name, a superclass,
-/// a Rust attribute), as hashes.
+/// a Rust attribute) and its qualifiers (an inner attribute), as hashes.
 fn header(tree: &Tree, node: NodeId) -> Vec<u64> {
     let code = tree.code_children(node).filter(|&c| !transparent(tree, c));
-    code.map(|c| tree.node(c).hash).collect()
+    code.chain(qualifiers(tree, node))
+        .map(|c| tree.node(c).hash)
+        .collect()
 }
 
 /// The namespaces enclosing `node`, outermost first.
@@ -1213,6 +1215,24 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
         if needs.by(tree, sibling) {
             out.push((tree.node(sibling).hash, before));
         }
+    }
+    // The statement lists enclosing its container count too: a method
+    // moved between two `impl`s crosses what stands between them (a
+    // `macro_rules!` redefinition its body expands).
+    let mut path = parent;
+    for outer in tree.ancestors(parent) {
+        if outer == Tree::ROOT || transparent(tree, outer) {
+            let at = tree.node(path).span.start;
+            for &sibling in &tree.node(outer).children {
+                if sibling == path || tree.node(sibling).comment {
+                    continue;
+                }
+                if needs.by(tree, sibling) {
+                    out.push((tree.node(sibling).hash, tree.node(sibling).span.start < at));
+                }
+            }
+        }
+        path = outer;
     }
     out.sort_unstable();
     out

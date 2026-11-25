@@ -219,6 +219,9 @@ impl Flags {
     /// (`T.unsafe(x)`, `T::Sig::WithoutRuntime.sig`), once its type library
     /// is loaded ([`Frontend::types_loaded`](crate::frontend::Frontend::types_loaded)).
     pub const UNCHECKED: Flags = Flags(1 << 12);
+    /// A statement in a namespace's body that qualifies the namespace itself
+    /// (Rust's inner attribute `#![cfg(unix)]`): part of its owner's key.
+    pub const HEADER: Flags = Flags(1 << 13);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
@@ -695,7 +698,7 @@ impl Tree {
         self.comments.get(i).is_some_and(|s| s.contains(&at))
     }
 
-    fn verbatim(&self, at: usize) -> bool {
+    pub fn verbatim(&self, at: usize) -> bool {
         let i = self.verbatim.partition_point(|s| s.end <= at);
         self.verbatim.get(i).is_some_and(|s| s.contains(&at))
     }

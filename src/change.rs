@@ -372,7 +372,7 @@ impl Category {
 
     /// A fixture directory, then a type declaration, wins over the name
     /// rules, but not over a binary, a vendored file or a set linguist
-    /// attribute; a type directory's prose stays docs.
+    /// attribute.
     pub fn of(path: &str, binary: bool, linguist: Linguist) -> Category {
         let category = Category::by_name(path, binary, linguist);
         match category {
@@ -494,14 +494,10 @@ fn fixture(path: &str) -> bool {
         .any(|d| matches!(d, "fixtures" | "__fixtures__" | "testdata"))
 }
 
-/// Type declarations: an `.rbi` or `.rbs` file, or under an `rbi/`
-/// directory at any depth (`sorbet/rbi/`) or a top-level `sig/` (RBS).
+/// Type declarations: an `.rbi` or `.rbs` file. A directory never makes
+/// one: `lib/rbi/` and `sig/` also hold ordinary code.
 fn types(path: &str) -> bool {
-    let dirs = path.rsplit_once('/').map_or("", |(d, _)| d);
-    path.ends_with(".rbi")
-        || path.ends_with(".rbs")
-        || dirs.split('/').any(|d| d == "rbi")
-        || path.starts_with("sig/")
+    path.ends_with(".rbi") || path.ends_with(".rbs")
 }
 
 /// A test file: under a `spec`, `test`, `tests` or `__tests__` directory, or
@@ -660,11 +656,12 @@ mod tests {
             ("Makefile", "unknown"),
             ("lib/a.rbi", "types"),
             ("sorbet/rbi/gems/x@1.rbi", "types"),
-            ("sorbet/rbi/todo.rb", "types"),
+            ("sorbet/rbi/todo.rb", "code"),
+            ("lib/rbi/printer.rb", "code"),
+            ("sig/src/lib.rs", "code"),
             ("spec/a.rbi", "types"),
             ("sig/a.rbs", "types"),
             ("lib/sig/a.rb", "code"),
-            ("sorbet/rbi/README.md", "docs"),
             ("spec/fixtures/a.rbi", "fixture"),
         ] {
             assert_eq!(category(path), want, "{path}");

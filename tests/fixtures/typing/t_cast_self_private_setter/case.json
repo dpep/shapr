@@ -1,0 +1,4 @@
+{
+  "description": "an unchecked cast of self, directly or through another cast, as the receiver of a private setter: Ruby raises where self. didn't, never structure",
+  "expect": {"hunks": [{"verdict": {"$not": "structure"}, "parts": {"$every": {"structure": false}}}]}
+}

@@ -200,6 +200,9 @@ impl Walker<'_> {
                 let exposes = n.kind() == "attribute_item" && names_observed(&[n], self.src);
                 let role = if exposes { Role::Exposes } else { Role::Other };
                 self.open(&n, &[], None, role);
+                if n.kind() == "inner_attribute_item" {
+                    self.b.flag(Flags::HEADER);
+                }
                 self.children(n, Mode::Tokens, &[]);
                 self.b.close();
             }

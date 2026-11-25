@@ -1,0 +1,7 @@
+{
+  "description": "offset -1 (a call with -1) moved as offset - 1 (a subtraction): Ruby parses them differently, so the lines aren't relocated verbatim",
+  "expect": {
+    "hunks": {"$every": {"relocated_lines": 0}},
+    "summary": {"relocated_lines": 0}
+  }
+}

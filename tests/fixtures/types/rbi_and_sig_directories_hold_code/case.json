@@ -1,0 +1,11 @@
+{
+  "description": "Ruby under lib/rbi/ and Rust under a sig/ crate or src/rbi/ are code: only an .rbi or .rbs extension makes a file types",
+  "expect": {
+    "hunks": [
+      {"category": "code", "verdict": "behavior"},
+      {"category": "code", "verdict": "behavior"},
+      {"category": "code", "verdict": "behavior"}
+    ],
+    "summary": {"verdict": "behavior"}
+  }
+}

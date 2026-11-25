@@ -1,5 +1,5 @@
 {
-  "description": "RBI and RBS files are category types: not classified, outside the verdict, no lines to review",
+  "description": "RBI and RBS files are category types: not classified, outside the verdict, no lines to review; a .rb under sorbet/rbi/ is code",
   "expect": {
     "files": {
       "$every": {
@@ -22,14 +22,14 @@
     "summary": {
       "verdict": "behavior",
       "categories": {
-        "types": 5,
-        "code": 1
+        "types": 4,
+        "code": 2
       },
       "verdicts": {
-        "none": 5,
-        "behavior": 1
+        "none": 4,
+        "behavior": 2
       },
-      "review_lines": 2
+      "review_lines": 4
     }
   }
 }

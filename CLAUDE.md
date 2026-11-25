@@ -77,7 +77,7 @@ src/
     ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
                     ids from here
     ruby/sorbet.rs  Sorbet's annotations (TYPING, TYPE_CAST, UNCHECKED flags) and whether the
-                    nearest lockfile names sorbet-runtime, for typing
+                    nearest lockfile depends on sorbet-runtime, for typing
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
     rust/mod.rs     tree-sitter → TreeBuilder: own text, folded `;`/braces, attributes into their item,
                     macro token trees as leaves, trailing commas ignored
@@ -141,7 +141,7 @@ calls a file's public methods by name, given the repository's paths (a Rails roo
 `app/controllers/`); `load`: how a statement loads another file, for moves into new files;
 `rebinds_self`: a node whose code may run with another `self`, for `default_argument` and
 extract; `types_loaded`: whether the library behind a file's type annotations is known loaded
-at runtime (Ruby: the nearest lockfile names sorbet-runtime), for `typing`; and for `default_argument`, `signature`, `arguments` and `plain_literal`: a def's
+at runtime (Ruby: the nearest lockfile depends on sorbet-runtime), for `typing`; and for `default_argument`, `signature`, `arguments` and `plain_literal`: a def's
 parameters, a call's arguments, a literal with no shared identity) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
@@ -190,7 +190,8 @@ attribute macro, which reads its tokens; no rename passes into it),
 method; rename blocks only that family's names by it), `TYPING` (a statement that only
 declares types: Sorbet's `sig`, `extend T::Sig`), `TYPE_CAST` (a call returning its first
 positional argument: `T.let`, `T.must`), `UNCHECKED` (an annotation no runtime checks once its
-type library is loaded: `T.unsafe`, `checked: false`) and `DIRECTIVE` (set by the builder for
+type library is loaded: `T.unsafe`, `checked: false`), `HEADER` (a statement in a namespace's body
+that qualifies the namespace, part of its owner key: Rust's `#![cfg(unix)]`) and `DIRECTIVE` (set by the builder for
 `directive`). The core never reads a node's `kind`
 string or source text to learn what the language means.
 

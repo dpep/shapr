@@ -4,7 +4,7 @@
 mod common;
 use common::*;
 
-const LOCK: &str = "GEM\n  specs:\n    sorbet-runtime (0.5.1)\n";
+const LOCK: &str = "GEM\n  specs:\n    sorbet-runtime (0.5.1)\n\nDEPENDENCIES\n  sorbet-runtime\n";
 const BEFORE: &str =
     "# typed: true\nclass A\n  extend T::Sig\n\n  def run(x)\n    x.go\n  end\nend\n";
 

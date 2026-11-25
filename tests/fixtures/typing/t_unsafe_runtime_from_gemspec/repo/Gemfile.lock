@@ -1,0 +1,18 @@
+PATH
+  remote: .
+  specs:
+    widget (0.1.0)
+      sorbet-runtime (>= 0.5)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    rake (13.0.6)
+    sorbet-runtime (0.5.11000)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  rake
+  widget!
