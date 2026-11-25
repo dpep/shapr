@@ -1,0 +1,21 @@
+{
+  "description": "T.cast with checked: false returns its value unchecked: structure where sorbet-runtime is the T",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "typing",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": true,
+            "assumptions": []
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}

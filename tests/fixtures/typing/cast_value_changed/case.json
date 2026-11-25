@@ -1,0 +1,15 @@
+{
+  "description": "a T.must whose value changes is logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -61,6 +61,7 @@ nothing proven is one `logic` part.
 | `format_only` | yes | Same syntax tree before and after, ignoring whitespace and comments, and the same comment text in the same places. Beside logic, only changed code lines whose code is unchanged form this part (a reformat); changed comments and blank lines are read with the logic unless they are a run of their own (see [Runs](#runs)). |
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `restyle` | yes | The same program spelled another way: the code differs only in spellings the language's frontend proves equivalent (quote style, hash syntax, block delimiters, redundant parentheses, ...). See [Restyle](#restyle). |
+| `typing` | yes, unless it has `assumptions` | Only Sorbet type annotations change: the code is the same once they are stripped. See [Typing](#typing). |
 | `reorder` | yes, unless its `detail.context` is non-empty | The hunk's elements of one container are the same subtrees, with the same comments leading them, in another order; lines of elements that also changed are `logic` beside it. Structure where order can't be observed: Rust items and separate `use` declarations in a module, `impl`, trait or block with no `macro_rules!`, `#[macro_use]` item, item-level macro invocation or attribute macro among them (whichever element moved), and a struct literal's fields whose values are literals and names. Otherwise `detail.context` names what observes the order: `load_order` for `require`s, Gemfile `gem` lines and gemspec dependencies (Bundler requires gems in order), and for Rust items beside a `macro_rules!`, a `#[macro_use]` item, an item-level macro invocation or an attribute macro; `iteration_order` for Ruby hash entries and keyword arguments (every key a distinct plain literal); `element_order` for array elements and Rust struct field declarations and enum variants; `evaluation_order` for other statements, a struct literal's fields with a value that runs code, and beside the others where a moved element calls a method. Method definitions are a `move`; positional arguments and `match` arms are never a reorder. `evidence`: `elements` (the container's elements in the hunk found on both sides) and `moved` (those out of order). `review_lines`: 0 when structure, else each moved element's lines on the after side. |
 | `default_argument` | yes, unless it has `assumptions` | A call drops or adds an argument that restates its parameter's literal default, and the method it calls is the only one the call can reach. See [Default arguments](#default-arguments). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
@@ -171,6 +172,7 @@ What the search can't settle stays on the part:
 | `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), or holds the name in a file shapr can't parse for a use (YAML, JavaScript; see below), so code outside the change may still use the name. |
 | `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
 | `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. Also a definition moved from a gem's `lib/` into a new file that other files load after the old one: another package may load the old file alone ([New files](#new-files)). |
+| `runtime_check` | A `typing` part holds a type annotation a runtime may check: sorbet-runtime checks a `sig`, `T.let`, `T.cast` and `T.bind`, raises on a `nil` in `T.must`, and enforces `abstract!` and its kin, so a value the new types reject raises where the old code ran. See [Typing](#typing). |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
 
 A part with assumptions is reported with `structure: false` and its lines
@@ -253,6 +255,51 @@ lambda delimiters, and Rust `use` trees, derive order and literal suffixes.
 `detail.variants` lists the variants of the respelled syntax on either side
 of the part's code, sorted; `evidence.respelled` counts its respelled
 subtrees.
+
+## Typing
+
+A `typing` part holds changed lines where only Sorbet's type annotations
+differ. The frontend marks two kinds of annotation in Ruby:
+
+- Statements that only declare types, left out when comparing: a `sig { … }`
+  or `sig do … end` block (also `sig(:final)`) and
+  `T::Sig::WithoutRuntime.sig { … }`; `extend T::Sig`, `include T::Sig`,
+  `extend T::Helpers`; `abstract!`, `interface!`, `sealed!` and `final!` in a
+  file naming `T::Helpers` (Rails defines an `abstract!` of its own); and
+  `T.bind(self, Type)` as a statement.
+- Calls that return their argument, replaced by it when comparing:
+  `T.let(x, Type)`, `T.cast(x, Type)`, `T.bind(x, Type)` (a literal
+  `checked:` allowed), `T.must(x)` and `T.unsafe(x)`.
+
+A bare `sig` counts only in a file that has a `# typed:` sigil or names
+`T`, so a method of one's own named `sig` stays `logic`. Two subtrees whose
+hashes agree once annotations are stripped are the same code but for types;
+the hunk's covers are compared this way, statements matched in order, and a
+changed line touched only by annotations in such code (or, where one side
+has none, by the code they wrap) is the part's. A line also holding code
+that differs otherwise is `logic`, so a `sig` edit beside a body edit is a
+`typing` part and a residual. A declaration above a statement the change
+adds, removes or replaces whole (the `sig` of a new method) is new code
+with it: `logic`.
+
+Types only is not structure while a runtime may check them, so the part
+carries `runtime_check` and its lines are read. It is structure only when
+every annotation on its lines is one sorbet-runtime never checks
+(`T.unsafe(x)`, `T.let`/`T.cast`/`T.bind` with `checked: false`,
+`T::Sig::WithoutRuntime.sig`) and the nearest `Gemfile.lock` or
+`gems.locked` above the file names `sorbet-runtime` or
+`sorbet-static-and-runtime`, so `T` is its module. A repository whose
+lockfile names neither isn't taken as unchecked: whatever defines `T` there
+(a stub gem, a shim of its own) isn't seen. `T.cast` checks its value at
+runtime unless `checked: false`. `review_lines`: every code line of the
+part, structure or not; a type is a claim about the code a reviewer judges,
+and Sorbet checks it against the code, not against intent.
+
+`evidence.annotations` counts the annotations on the part's lines, both
+sides, and `evidence.unchecked` those no runtime checks.
+
+Files holding only type declarations (RBI, RBS) are the `types`
+[category](#categories), not classified.
 
 ## Default arguments
 
@@ -657,6 +704,8 @@ Each part:
 | `code_similarity` | number 0–1 | `comparison` `"ast"` and the code differs | Dice coefficient over the subtrees of the two sides' changed code: 1 when they share every subtree, 0 when none. |
 | `respelled` | int | a `restyle` part | Aligned subtrees the part respells. |
 | `restated` | int | a `default_argument` part | Arguments restating a default the part drops or adds. |
+| `annotations` | int | a `typing` part | Type annotations on the part's lines, both sides. |
+| `unchecked` | int | a `typing` part | Of `annotations`, those no runtime checks. |
 
 ## Extract and inline
 

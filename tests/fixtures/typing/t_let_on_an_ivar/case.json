@@ -1,0 +1,18 @@
+{
+  "description": "an instance variable's value wrapped in T.let is typing",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

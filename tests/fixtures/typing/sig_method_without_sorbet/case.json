@@ -1,0 +1,15 @@
+{
+  "description": "a method named sig in a file with no Sorbet in sight is an ordinary call: logic",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic"
+          }
+        ]
+      }
+    ]
+  }
+}

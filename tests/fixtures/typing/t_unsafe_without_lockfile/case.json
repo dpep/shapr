@@ -1,0 +1,19 @@
+{
+  "description": "with no lockfile naming sorbet-runtime, what T is isn't known: T.unsafe is typing, not structure",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

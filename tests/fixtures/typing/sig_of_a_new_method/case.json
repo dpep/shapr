@@ -1,0 +1,15 @@
+{
+  "description": "the sig of a method the change adds is new code with it: logic, not typing",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic"
+          }
+        ]
+      }
+    ]
+  }
+}
