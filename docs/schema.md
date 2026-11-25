@@ -769,7 +769,7 @@ Such a part claims only lines no earlier part holds, so two methods extracted fr
 
 Confidence is `size × (1 + verbatim) / 2 × similarity`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
 
-A hunk that matches this shape but would change behavior stays `logic`, and its residual says why in `detail`, beside `method`, `caller` and `hunks`:
+A hunk that matches this shape but would change behavior stays `logic`, and its residual says why in `detail`, beside `method`, `caller` and `hunks`. Its `confidence` is the one the part would have had, as for a part refused for moving a read of its own position: how surely the comparison found the near match, not how surely the code changes behavior (a 4-node chunk holding `return` is 0.25).
 
 | key | type | meaning |
 |---|---|---|
@@ -864,7 +864,9 @@ where to look.
 Each part's confidence is computed from the evidence, not assigned per kind.
 
 - `comparison` `"ast"`: 1 for `format_only`, `comment_only` and `logic`. Tree
-  comparison is exact, so it settles those three. `rename`, `move`,
+  comparison is exact, so it settles those three. A `logic` residual with
+  `detail.near` instead carries the confidence of the near match it refused
+  (see [Extract and inline](#extract-and-inline)). `rename`, `move`,
   `extract` and `inline` compute their own score: see
   [Renames](#renames), [Moves](#moves) and
   [Extract and inline](#extract-and-inline).

@@ -143,6 +143,9 @@ struct Found {
     /// Where the refactoring's hunks may change code, before and after.
     regions: [Region; 2],
     outcome: Result<Stats, Risk>,
+    /// How sure the comparison that found it is; a near miss's residual
+    /// carries it, as a refused part's does.
+    confidence: Confidence,
     /// Which value doesn't flow, for a [`Risk::Wiring`] refusal's reason.
     wiring: Option<String>,
     /// Files outside the change that already use the method's name.
@@ -195,16 +198,24 @@ struct Stats {
 impl Stats {
     /// Share of the chunk's nodes matched without renaming a parameter.
     fn verbatim(&self) -> f64 {
-        super::rounded(1.0 - self.renamed as f64 / self.nodes as f64)
+        verbatim(self.nodes, self.renamed)
     }
 
-    /// Size saturates at twice the floor; a renamed node is an inferred
-    /// correspondence, so it counts half; a changed body scales by how much
-    /// of it the statements share.
     fn confidence(&self) -> Confidence {
-        let size = (self.nodes as f64 / (2 * FLOOR) as f64).min(1.0);
-        Confidence::new(size * (1.0 + self.verbatim()) / 2.0 * self.similarity)
+        score(self.nodes, self.renamed, self.similarity)
     }
+}
+
+fn verbatim(nodes: usize, renamed: usize) -> f64 {
+    super::rounded(1.0 - renamed as f64 / nodes.max(1) as f64)
+}
+
+/// Size saturates at twice the floor; a renamed node is an inferred
+/// correspondence, so it counts half; a changed body scales by how much of
+/// it the statements share.
+fn score(nodes: usize, renamed: usize, similarity: f64) -> Confidence {
+    let size = (nodes as f64 / (2 * FLOOR) as f64).min(1.0);
+    Confidence::new(size * (1.0 + verbatim(nodes, renamed)) / 2.0 * similarity)
 }
 
 /// A candidate, or the first test it fails (for `-v`).
@@ -412,6 +423,7 @@ fn find(
             .to_string(),
         regions,
         outcome,
+        confidence: score(nodes, renamed, similarity),
         wiring,
         used_in: Vec::new(),
     })
@@ -835,6 +847,7 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
                     residual.reason += &format!(" in {}", proof::listing(&found.used_in));
                 }
                 residual.detail = detail.clone();
+                residual.confidence = found.confidence;
             }
         }
     }
