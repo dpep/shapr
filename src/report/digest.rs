@@ -33,13 +33,26 @@ pub struct Digest<'a> {
     outside: BTreeMap<&'static str, Vec<Place<'a>>>,
 }
 
-/// `file:line`.
+/// `file:line`, its line on the before side when DELETED: the hunk only deletes.
 #[derive(Clone, Copy, PartialEq)]
-struct Place<'a>(&'a str, usize);
+struct Place<'a>(&'a str, usize, bool);
 
 impl Serialize for Place<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&format!("{}:{}", self.0, self.1))
+        s.serialize_str(&format!("{}:{}{}", self.0, self.1, deleted(self.2)))
+    }
+}
+
+fn deleted(deleted: bool) -> &'static str {
+    if deleted { " (deleted)" } else { "" }
+}
+
+/// PATH in text: as git quotes it, and quoted too where it holds a
+/// separator places use, so `a b.rb:3` can't read as two places.
+fn text_path(path: &str) -> std::borrow::Cow<'_, str> {
+    match quote_path(path) {
+        std::borrow::Cow::Borrowed(p) if p.contains([' ', ',', ':']) => format!("\"{p}\"").into(),
+        quoted => quoted,
     }
 }
 
@@ -96,13 +109,10 @@ struct Style<'a> {
 
 /// The hunk's first line, on the after side unless it only deletes.
 fn place<'a>(h: &HunkRecord<'a>) -> Place<'a> {
-    Place(
-        h.file,
-        match h.after.count {
-            0 => h.before.start,
-            _ => h.after.start,
-        },
-    )
+    match h.after.count {
+        0 => Place(h.file, h.before.start, true),
+        _ => Place(h.file, h.after.start, false),
+    }
 }
 
 pub fn build<'a>(report: &'a Report) -> Digest<'a> {
@@ -150,7 +160,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 };
                 for d in &e.deviations {
                     style.push(Style {
-                        at: Place(h.file, d.line),
+                        at: Place(h.file, d.line, false),
                         norm: e.norm,
                         expected: expected.clone(),
                     });
@@ -252,17 +262,20 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
 }
 
 /// Places as text, every one, each file's lines together in the order the
-/// files first appear: `a.rb:3,9 b.rb:1`.
+/// files first appear, deletions apart: `a.rb:3,9 a.rb:20 (deleted) b.rb:1`.
 fn places(at: &[Place]) -> String {
-    let mut files: Vec<(&str, Vec<String>)> = Vec::new();
+    let mut files: Vec<(&str, bool, Vec<String>)> = Vec::new();
     for p in at {
-        match files.iter_mut().find(|(file, _)| *file == p.0) {
-            Some((_, lines)) => lines.push(p.1.to_string()),
-            None => files.push((p.0, vec![p.1.to_string()])),
+        match files
+            .iter_mut()
+            .find(|(file, d, _)| (*file, *d) == (p.0, p.2))
+        {
+            Some((.., lines)) => lines.push(p.1.to_string()),
+            None => files.push((p.0, p.2, vec![p.1.to_string()])),
         }
     }
     (files.iter())
-        .map(|(file, lines)| format!("{}:{}", quote_path(file), lines.join(",")))
+        .map(|(file, d, lines)| format!("{}:{}{}", text_path(file), lines.join(","), deleted(*d)))
         .collect::<Vec<_>>()
         .join(" ")
 }

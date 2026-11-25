@@ -261,3 +261,27 @@ fn text_places_every_hunk_one_file_at_a_time() {
         "{text}"
     );
 }
+
+#[test]
+fn places_mark_deletions_and_quote_paths_with_separators() {
+    let dir = tempfile::tempdir().unwrap();
+    init(dir.path());
+    let def = |name: &str, n: u32| format!("def {name}\n  {n}\nend\n");
+    commit(
+        dir.path(),
+        &[("gone.rb", &def("gone", 1)), ("a b,c:d.rb", &def("a", 1))],
+        "init",
+    );
+    git(dir.path(), &["rm", "-q", "gone.rb"]);
+    commit(dir.path(), &[("a b,c:d.rb", &def("a", 2))], "change");
+    let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
+    let at: Vec<&serde_json::Value> = (digest["read_first"].as_array().unwrap().iter())
+        .flat_map(|i| i["at"].as_array().unwrap())
+        .collect();
+    assert!(at.contains(&&"gone.rb:1 (deleted)".into()), "{digest}");
+    assert!(at.contains(&&"a b,c:d.rb:2".into()), "{digest}");
+
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(text.contains("  gone.rb:1 (deleted)  "), "{text}");
+    assert!(text.contains("  \"a b,c:d.rb\":2  "), "{text}");
+}
