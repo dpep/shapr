@@ -780,6 +780,9 @@ fn scan(tree: &Tree, method: &str) -> Result<Vec<NodeId>, &'static str> {
             if super::rename::literal_names(tree, id, &bare) {
                 return Err("a literal names it");
             }
+            if super::rename::directive_names(tree, id, method) {
+                return Err("a directive names it");
+            }
             continue;
         };
         match node.role {

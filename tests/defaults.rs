@@ -110,3 +110,20 @@ fn what_else_names_the_method_says_where() {
         "{why}"
     );
 }
+
+#[test]
+fn a_directive_naming_the_method_stops_it() {
+    let file = |call: &str| {
+        format!(
+            "# rubocop:disable Naming/fetch\n{}",
+            FETCHER.replace("CALL", call)
+        )
+    };
+    assert_eq!(
+        reason_of(
+            &[("a.rb", &file("fetch(x, retries: 3)"))],
+            &[("a.rb", &file("fetch(x)"))]
+        ),
+        "drops `retries: 3`, not shown to restate a default: a directive names it in a.rb"
+    );
+}
