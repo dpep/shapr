@@ -324,6 +324,22 @@ fn text_output_quotes_control_characters_in_names() {
     let out = shapr(dir.path(), &["-J", "--", missing]);
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.lines().all(|l| !l.starts_with("::")), "{text}");
+    // So does an argument clap quotes in a usage error, keeping clap's own lines.
+    for args in [
+        &["--x\n::error::x"][..],
+        &["-J", "--x\n::error::x"],
+        &["norms", "--x\n::error::x"],
+        &["--norm-threshold=1\n::error::x"],
+    ] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(64), "{out:?}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            text.lines().all(|l| !l.starts_with("::")),
+            "{args:?}: {text}"
+        );
+        assert!(text.contains("\\n::error::x"), "{args:?}: {text}");
+    }
 }
 
 /// A partial clone fetches missing blobs from its remote, running the

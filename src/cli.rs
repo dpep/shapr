@@ -175,7 +175,7 @@ const NO_INPUT: &str = "no input: name a change (shapr HEAD, shapr main..HEAD, s
 /// A clap error's message as one line: its first paragraph, which may
 /// continue onto indented lines (the missing arguments), without the tips.
 pub(crate) fn usage_message(error: &clap::Error) -> String {
-    let text = error.to_string();
+    let text = report::clap_text(error);
     let message: Vec<&str> = text
         .lines()
         .take_while(|l| !l.trim().is_empty())

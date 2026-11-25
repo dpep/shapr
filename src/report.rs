@@ -899,12 +899,27 @@ pub(crate) fn to_stdout(
 /// A clap message (help, version, a usage error) on clap's stream, each
 /// line escaped: argv quoted back may hold anything.
 pub(crate) fn clap(error: &clap::Error) {
-    let text = error.render().to_string();
+    let text = clap_text(error);
     if error.use_stderr() {
         text.lines().for_each(|line| eprintln!("{}", escape(line)));
     } else {
         let _ = to_stdout(|out| emit_text(out, &text));
     }
+}
+
+/// A clap error rendered with the arguments it quotes escaped, so its only
+/// line breaks are clap's own.
+pub(crate) fn clap_text(error: &clap::Error) -> String {
+    let mut text = error.render().to_string();
+    for arg in std::env::args_os().skip(1) {
+        let arg = arg.to_string_lossy();
+        // clap may quote an argument whole or only its value after `=`.
+        let values = std::iter::once(&*arg).chain(arg.split_once('=').map(|(_, v)| v));
+        for value in values.filter(|v| v.chars().any(char::is_control)) {
+            text = text.replace(value, &escape(value));
+        }
+    }
+    text
 }
 
 /// TEXT with each control character (C0, DEL, C1) escaped C-style, as git
