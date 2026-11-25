@@ -350,7 +350,7 @@ fn find(
         && outlives(chunks, &chunk, expression, assigned.as_deref(), &params)
     {
         Err(Risk::Drop)
-    } else if mentioned(change, &method, dir, calls, b) {
+    } else if mentioned(change, &method, dir, calls, b) == Some(Mention::Named) {
         Err(Risk::Collision)
     } else if shared.as_ref().map_or(nodes, |s| s.nodes) < FLOOR {
         Err(Risk::Tiny)
@@ -364,7 +364,10 @@ fn find(
             returns: assigned.is_some(),
             expression,
             context: context.clone(),
-            assumptions: Vec::new(),
+            assumptions: match mentioned(change, &method, dir, calls, b) {
+                Some(Mention::Computed) => vec![Assumption::ComputedName],
+                _ => Vec::new(),
+            },
             searched: None,
         })
     };
@@ -688,8 +691,13 @@ fn reach(
     let suffixes = calls.semantics.spelling.suffixes;
     let word = found.method.trim_end_matches(|c| suffixes.contains(&c));
     let method = found.method.clone();
-    let uses = |tree: &Tree| proof::mentions_method(tree, &method);
-    match proof::verify(outside, path, word, &covered, &uses) {
+    let naming = |tree: &Tree, computed: bool| {
+        (tree.descendants(Tree::ROOT)).any(|id| {
+            proof::names_method(tree, id, &method)
+                .is_some_and(|n| (n == Naming::Computed) == computed)
+        })
+    };
+    match proof::verify(outside, path, word, &covered, &|t| naming(t, false)) {
         Verified::Used(files) => {
             found.used_in = files;
             found.outcome = Err(Risk::Collision);
@@ -697,6 +705,12 @@ fn reach(
         }
         Verified::Open(assumption) => stats.assumptions.push(assumption),
         Verified::Clear { searched } => stats.searched = Some(searched),
+    }
+    let computed = proof::verify(outside, path, word, &covered, &|t| naming(t, true));
+    if matches!(computed, Verified::Used(_))
+        && !stats.assumptions.contains(&Assumption::ComputedName)
+    {
+        stats.assumptions.push(Assumption::ComputedName);
     }
     if found.dir == Dir::Inline && outside.library(path) && proof::public(calls, b) {
         stats.assumptions.push(Assumption::PublicApi);
@@ -757,6 +771,8 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
             }
             if stats.assumptions.contains(&Assumption::PublicApi) {
                 reason = format!("public API removed: {reason}");
+            } else if stats.assumptions.contains(&Assumption::ComputedName) {
+                reason = format!("{reason}; a name computed at runtime could reach it");
             } else if !stats.assumptions.is_empty() {
                 reason = format!("{reason}; uses outside the change weren't checked");
             }
@@ -1296,26 +1312,44 @@ fn statement_value(tree: &Tree, stmt: NodeId, v: &str) -> Option<NodeId> {
     (node.role == Role::Bind && local_name(node) == Some(v) && kids.len() == 1).then(|| kids[0])
 }
 
+/// How B's name is already used.
+#[derive(Clone, Copy, PartialEq)]
+enum Mention {
+    /// Defined, called or spelled out: defining or removing B reaches it.
+    Named,
+    /// Only a name computed at runtime (`send(n)`) could spell it.
+    Computed,
+}
+
 /// B's name already means something: one the language reserves (an
 /// inherited, protocol or entry-point name), or used on the side where B doesn't
 /// exist, in any file of the change (a def, a call or a dynamic reference
 /// that defining B would capture, or that removing it would break), or
 /// defined again beside B, so B takes part in dispatch beyond its one call.
 /// New calls to the new method are not collisions.
-fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) -> bool {
-    ours.semantics.reserves(method)
-        || change
-            .files
-            .iter()
-            .filter_map(|f| f.trees.as_ref().ok())
-            .any(|trees| {
-                let (calls, chunks) = dir.sides(trees);
-                ids(chunks).any(|id| proof::names_method(chunks, id, method).is_some())
-                    || ids(calls).any(|id| {
-                        proof::names_method(calls, id, method) == Some(Naming::Definition)
-                            && !(std::ptr::eq(calls, ours) && id == b)
-                    })
-            })
+fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) -> Option<Mention> {
+    if ours.semantics.reserves(method) {
+        return Some(Mention::Named);
+    }
+    let mut found = None;
+    for trees in change.files.iter().filter_map(|f| f.trees.as_ref().ok()) {
+        let (calls, chunks) = dir.sides(trees);
+        for id in ids(chunks) {
+            match proof::names_method(chunks, id, method) {
+                Some(Naming::Computed) => found = Some(Mention::Computed),
+                Some(_) => return Some(Mention::Named),
+                None => {}
+            }
+        }
+        let redefined = ids(calls).any(|id| {
+            proof::names_method(calls, id, method) == Some(Naming::Definition)
+                && !(std::ptr::eq(calls, ours) && id == b)
+        });
+        if redefined {
+            return Some(Mention::Named);
+        }
+    }
+    found
 }
 
 /// What the tree's hash reads of a node's own text ([`Tree::own_text`]). A

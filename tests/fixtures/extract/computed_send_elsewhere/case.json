@@ -1,0 +1,7 @@
+{
+  "description": "a clean extract beside a send whose name is computed: the send could reach the new method, so the extract assumes computed_name and isn't structure",
+  "expect": {
+    "hunks": {"$every": {"parts": [{"kind": "extract", "structure": false, "assumptions": ["computed_name"]}]}},
+    "summary": {"verdict": "behavior"}
+  }
+}
