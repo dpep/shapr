@@ -1,7 +1,7 @@
 //! Which prism nodes play which [`Role`], and the names prism doesn't record
 //! on the node itself.
 
-use crate::frontend::{Construct, Pattern};
+use crate::frontend::{Construct, Pattern, Surface};
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree, Visibility};
 use ruby_prism::Node;
 use std::collections::{HashMap, HashSet};
@@ -542,6 +542,45 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         _ => return None,
     })
 }
+
+/// Ruby's printed, logged and raised text, and the hashes `to_h` and its
+/// kin return.
+pub(super) fn surface(tree: &Tree, id: NodeId) -> Option<Surface> {
+    let node = tree.node(id);
+    let Some(name) = node.name.as_deref() else {
+        return hash_key(tree, id);
+    };
+    match (node.kind, node.role) {
+        ("call", Role::Call(Receiver::Implicit)) if TEXT.contains(&name) => Some(Surface::Text),
+        ("call", Role::Call(Receiver::Explicit)) if matches!(name, "puts" | "print" | "printf") => {
+            Some(Surface::Text)
+        }
+        ("call", Role::Call(Receiver::Explicit)) if LOG_LEVELS.contains(&name) => {
+            let receiver = tree.node(*node.children.first()?);
+            let named = receiver.name.as_deref()?.trim_start_matches('@');
+            named.ends_with("logger").then_some(Surface::Text)
+        }
+        ("def", _) if SERIALIZERS.contains(&name) => Some(Surface::Serialized),
+        _ => None,
+    }
+}
+
+/// A pair's key in a hash literal (not a call's keyword arguments).
+fn hash_key(tree: &Tree, id: NodeId) -> Option<Surface> {
+    let node = tree.node(id);
+    let parent = tree.node(node.parent?);
+    (node.kind == "assoc" && parent.kind == "hash")
+        .then(|| Surface::Key(tree.code_children(id).take(1).collect()))
+}
+
+/// Methods with no receiver that print or raise their arguments.
+const TEXT: &[&str] = &["puts", "print", "printf", "warn", "abort", "raise", "fail"];
+
+/// A logger's methods, called on a receiver named `logger`.
+const LOG_LEVELS: &[&str] = &["debug", "info", "warn", "error", "fatal", "unknown"];
+
+/// Methods whose returned hash is serialized by convention.
+const SERIALIZERS: &[&str] = &["to_h", "to_hash", "as_json", "to_json", "serializable_hash"];
 
 /// A regexp literal's pattern: `/body/flags` or `%r{body}flags`, an escaped
 /// delimiter unescaped (`\/` is `/` either way). Interpolated ones are

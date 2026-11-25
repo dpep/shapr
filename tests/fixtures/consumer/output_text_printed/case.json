@@ -1,0 +1,17 @@
+{
+  "description": "a string a println! prints changes, its arguments the same: output_text",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "output_text"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

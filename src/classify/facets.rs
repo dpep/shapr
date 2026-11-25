@@ -10,7 +10,7 @@ mod regex;
 use super::{Label, Labels, Method, Relocation};
 use crate::change::{Category, Change, Trees};
 use crate::diff::{Hunk, Lines};
-use crate::frontend::{self, Construct, Frontend, Pattern};
+use crate::frontend::{self, Construct, Frontend, Pattern, Surface};
 use crate::tree::{NameKind, NodeId, Role, Span, Tree};
 use serde::Serialize;
 use serde_json::json;
@@ -44,10 +44,14 @@ pub enum Facet {
     RegexWidened,
     /// A literal regular expression changed, not shown to widen.
     RegexChanged,
+    /// A literal in printed, logged or raised text changed, the call the same.
+    OutputText,
+    /// A key a serialized definition writes was added, removed or renamed.
+    SerializedKey,
 }
 
 impl Facet {
-    pub const ALL: [Facet; 10] = [
+    pub const ALL: [Facet; 12] = [
         Facet::Test,
         Facet::AddsDefinition,
         Facet::RemovesDefinition,
@@ -58,6 +62,8 @@ impl Facet {
         Facet::RemovesAssertions,
         Facet::RegexWidened,
         Facet::RegexChanged,
+        Facet::OutputText,
+        Facet::SerializedKey,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -72,6 +78,8 @@ impl Facet {
             Facet::RemovesAssertions => "removes_assertions",
             Facet::RegexWidened => "regex_widened",
             Facet::RegexChanged => "regex_changed",
+            Facet::OutputText => "output_text",
+            Facet::SerializedKey => "serialized_key",
         }
     }
 }
@@ -354,13 +362,21 @@ impl<'a> Parsed<'a> {
         }) {
             facets.insert(Facet::Condition);
         }
-        let condition = self.condition_changes(
-            (&before, &skips(&before, &removed)),
-            (&after, &skips(&after, &added)),
+        let (skip_before, skip_after) = (skips(&before, &removed), skips(&after, &added));
+        let (b_ids, a_ids) = (
+            self.touched(&before, &skip_before),
+            self.touched(&after, &skip_after),
         );
+        let condition = self.condition_changes((&before, &b_ids), (&after, &a_ids));
         // A computed flag is a branch moved into the callee.
         if !condition.is_empty() {
             facets.insert(Facet::Condition);
+        }
+        if self.output_text((&before, &b_ids), (&after, &a_ids)) {
+            facets.insert(Facet::OutputText);
+        }
+        if self.keys_written(&before, &b_ids) != self.keys_written(&after, &a_ids) {
+            facets.insert(Facet::SerializedKey);
         }
         if differs(|c| *c == Construct::Error) {
             facets.insert(Facet::ErrorHandling);
@@ -374,6 +390,54 @@ impl<'a> Parsed<'a> {
             None => false,
         };
         condition
+    }
+
+    /// Text surfaces whose literals changed while the rest stayed: a surface
+    /// on each side, unequal, with equal hashes once literals are masked.
+    fn output_text(&self, (before, b): (&Side, &[NodeId]), (after, a): (&Side, &[NodeId])) -> bool {
+        let surfaces = |t: &Tree, ids: &[NodeId]| -> Vec<(u64, u64)> {
+            (ids.iter().copied())
+                .filter(|&id| self.frontend.surface(t, id) == Some(Surface::Text))
+                .map(|id| (self.masked(t, id, id), t.node(id).hash))
+                .collect()
+        };
+        let (old, new) = (surfaces(before.tree(), b), surfaces(after.tree(), a));
+        old.iter().any(|&(mask, hash)| {
+            new.iter().any(|&(m, h)| m == mask && h != hash) && !new.iter().any(|&(_, h)| h == hash)
+        })
+    }
+
+    /// `id`'s hash with every literal under `surface` masked, except under
+    /// another call, whose result is what's printed.
+    fn masked(&self, tree: &Tree, surface: NodeId, id: NodeId) -> u64 {
+        tree.hash_with(id, |c| {
+            let node = tree.node(c);
+            Some(match self.frontend.construct(tree, c) {
+                Some(Construct::Literal | Construct::Flag) if node.role != Role::DynamicName => 0,
+                _ if c != surface && matches!(node.role, Role::Call(_)) => node.hash,
+                _ => self.masked(tree, surface, c),
+            })
+        })
+    }
+
+    /// The keys serialized definitions write, of those the side's changed
+    /// lines touch, as their naming nodes' hashes, sorted.
+    fn keys_written(&self, side: &Side, ids: &[NodeId]) -> Vec<Vec<u64>> {
+        let tree = side.tree();
+        let mut keys: Vec<Vec<u64>> = (ids.iter().copied())
+            .filter_map(|id| match self.frontend.surface(tree, id) {
+                Some(Surface::Key(names)) => Some((id, names)),
+                _ => None,
+            })
+            .filter(|(_, names)| (names.iter()).any(|&n| side.touches_span(&tree.node(n).extent)))
+            .filter(|&(id, _)| {
+                (tree.ancestors(id))
+                    .any(|p| self.frontend.surface(tree, p) == Some(Surface::Serialized))
+            })
+            .map(|(_, names)| names.iter().map(|&n| tree.node(n).hash).collect())
+            .collect();
+        keys.sort_unstable();
+        keys
     }
 
     /// Nodes on the side whose extent touches its changed lines, outside `skip`.
@@ -401,13 +465,10 @@ impl<'a> Parsed<'a> {
 
     fn condition_changes(
         &self,
-        (before, skip_before): (&Side, &[Span]),
-        (after, skip_after): (&Side, &[Span]),
+        (before, b): (&Side, &[NodeId]),
+        (after, a): (&Side, &[NodeId]),
     ) -> BTreeSet<ConditionChange> {
-        let (b, a) = (
-            self.touched(before, skip_before),
-            self.touched(after, skip_after),
-        );
+        let (b, a) = (b.to_vec(), a.to_vec());
         let mut out = BTreeSet::new();
         let picked = |side: &Side, ids: &[NodeId], want: Construct| -> Vec<NodeId> {
             (ids.iter().copied())
@@ -833,8 +894,10 @@ mod tests {
                 | Facet::ErrorHandling
                 | Facet::LiteralOnly
                 | Facet::RemovesAssertions
-                | Facet::RegexWidened => {}
-                Facet::RegexChanged => {
+                | Facet::RegexWidened
+                | Facet::RegexChanged
+                | Facet::OutputText => {}
+                Facet::SerializedKey => {
                     assert_eq!(i, Facet::ALL.len() - 1, "the last variant")
                 }
             }

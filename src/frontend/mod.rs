@@ -66,6 +66,10 @@ pub trait Frontend: Sync {
     /// `true`, `false`, or an empty collection.
     fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool;
 
+    /// How a reader outside the program sees `id`: printed, logged or raised
+    /// text, or serialized keys. For `output_text` and `serialized_key`.
+    fn surface(&self, tree: &Tree, id: NodeId) -> Option<Surface>;
+
     /// The regular expression `id` writes out, when it is a literal one: a
     /// Ruby regexp literal, a string Rust passes to `Regex::new`. For
     /// `regex_widened`.
@@ -180,6 +184,23 @@ pub struct Pattern {
     /// Whitespace and `#` comments in the body are insignificant (Ruby's
     /// `/x`), so the body can't be read as written.
     pub extended: bool,
+}
+
+/// Where code meets a reader outside the program, as [`Frontend::surface`]
+/// reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Surface {
+    /// A call, macro or attribute whose literal arguments are printed,
+    /// logged or raised as a message (`puts`, `raise`, `logger.info`;
+    /// `println!`, `panic!`, `.expect`, `#[error]`).
+    Text,
+    /// A definition whose keys are serialized: a Rust struct or enum
+    /// deriving `Serialize` or `Deserialize`, a Ruby `to_h` or `as_json`.
+    Serialized,
+    /// A key a serialized definition writes: these nodes name it (a hash
+    /// pair's key; a field's or variant's name and attributes, its type aside;
+    /// a container's `#[serde]` attribute).
+    Key(Vec<NodeId>),
 }
 
 /// A language construct that tells one kind of logic change from another.

@@ -1,0 +1,17 @@
+{
+  "description": "a Ruby raise's message changes: output_text beside the literal change",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "output_text"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

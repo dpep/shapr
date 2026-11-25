@@ -1,0 +1,18 @@
+{
+  "description": "puts prints a call's result, and the string changed is that call's argument: no output_text",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "parts": {
+          "$every": {
+            "facets": {
+              "$every": {
+                "$not": "output_text"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

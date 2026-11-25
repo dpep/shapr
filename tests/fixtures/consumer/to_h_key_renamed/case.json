@@ -1,0 +1,17 @@
+{
+  "description": "a key in the hash a Ruby to_h returns is renamed: serialized_key",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "serialized_key"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
