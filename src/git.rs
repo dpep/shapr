@@ -712,7 +712,10 @@ impl Git {
         let missing: Vec<&str> = std::str::from_utf8(&out)
             .unwrap_or_default()
             .lines()
-            .filter_map(|line| line.strip_suffix(" missing"))
+            .filter_map(|line| match header(line) {
+                Header::Missing(name) => Some(name),
+                _ => None,
+            })
             .collect();
         if missing.is_empty() {
             return Ok(());
@@ -766,7 +769,6 @@ impl Git {
         cmd.env("GIT_NO_LAZY_FETCH", "1")
             .args(["cat-file", "--batch"]);
         let out = run_with_input(&mut cmd, &input)?;
-        // Each `<id> blob <size>\n<contents>\n`, or `<id> missing\n`.
         let mut rest = out.as_slice();
         let mut found = Vec::with_capacity(ids.len());
         for _ in ids {
@@ -774,13 +776,10 @@ impl Git {
                 .iter()
                 .position(|&b| b == b'\n')
                 .context("git cat-file: short output")?;
-            let header = String::from_utf8_lossy(&rest[..end]).into_owned();
+            let line = String::from_utf8_lossy(&rest[..end]).into_owned();
             rest = &rest[end + 1..];
-            match header
-                .rsplit_once(' ')
-                .and_then(|(_, n)| n.parse::<usize>().ok())
-            {
-                Some(size) if !header.ends_with(" missing") && rest.len() > size => {
+            match header(&line) {
+                Header::Object { size, .. } if rest.len() > size => {
                     found.push(Some(rest[..size].to_vec()));
                     rest = &rest[size + 1..];
                 }
@@ -1279,6 +1278,29 @@ fn check(output: Output) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+/// A `git cat-file --batch` or `--batch-check` header line, without its newline.
+#[derive(Debug, PartialEq)]
+enum Header<'a> {
+    /// `<id> <type> <size>`; `--batch` follows it with the contents and a newline.
+    Object { kind: &'a str, size: usize },
+    /// `<name> missing`
+    Missing(&'a str),
+    /// `<name> ambiguous`, or anything else.
+    Other,
+}
+
+fn header(line: &str) -> Header<'_> {
+    if let Some(name) = line.strip_suffix(" missing") {
+        return Header::Missing(name);
+    }
+    match line.rsplitn(3, ' ').collect::<Vec<_>>()[..] {
+        [size, kind, _] => size
+            .parse()
+            .map_or(Header::Other, |size| Header::Object { kind, size }),
+        _ => Header::Other,
+    }
+}
+
 /// A running `git cat-file --batch`: each name written gets its object back.
 struct Batch {
     child: Child,
@@ -1310,16 +1332,11 @@ impl Batch {
         let stdin = self.stdin.as_mut().context("git stdin closed")?;
         writeln!(stdin, "{name}")?;
         stdin.flush()?;
-        // `<id> <type> <size>`, else `<name> missing` or `<name> ambiguous`.
-        let mut header = String::new();
-        if self.stdout.read_line(&mut header)? == 0 {
+        let mut line = String::new();
+        if self.stdout.read_line(&mut line)? == 0 {
             bail!("git cat-file exited");
         }
-        let fields: Vec<&str> = header.trim_end().rsplitn(3, ' ').collect();
-        let [size, kind, _] = fields[..] else {
-            return Ok(None);
-        };
-        let Ok(size) = size.parse::<usize>() else {
+        let Header::Object { kind, size } = header(line.trim_end()) else {
             return Ok(None);
         };
         let mut contents = vec![0; size + 1];
@@ -1378,6 +1395,18 @@ impl<'a> Blobs<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cat_file_headers_name_an_object_or_say_why_not() {
+        let object = |kind, size| Header::Object { kind, size };
+        assert_eq!(header("e69de29 blob 12"), object("blob", 12));
+        assert_eq!(header("e69de29 tree 0"), object("tree", 0));
+        assert_eq!(header("e69de29 missing"), Header::Missing("e69de29"));
+        assert_eq!(header("HEAD:a b missing"), Header::Missing("HEAD:a b"));
+        assert_eq!(header("abc ambiguous"), Header::Other);
+        assert_eq!(header("e69de29 blob x"), Header::Other);
+        assert_eq!(header(""), Header::Other);
+    }
 
     fn repo() -> (tempfile::TempDir, Git) {
         let dir = tempfile::tempdir().unwrap();
