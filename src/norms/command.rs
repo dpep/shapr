@@ -169,6 +169,9 @@ pub fn run(args: Vec<String>) -> ExitCode {
     } else {
         Format::Text
     };
+    if let Err(error) = crate::git::check_version() {
+        return crate::cli::fail(format, &format!("{error:#}"), crate::cli::ERROR);
+    }
     // The format asked for, though -q renders none.
     crate::usage::format(match (cli.ndjson, cli.json) {
         (true, _) => Format::Ndjson,

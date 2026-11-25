@@ -45,7 +45,7 @@ A config or manifest edit is `behavior`. A README edit or a lockfile beside a re
 
 ## Usage
 
-Every form is a git command: `shapr X` classifies what `git show X` or `git diff X` shows.
+Every form is a git command: `shapr X` classifies what `git show X` or `git diff X` shows. shapr needs git 2.24 or later (2.44 in a partial clone), and says so when it's older.
 
 ```sh
 shapr HEAD                   # the last commit (git show HEAD)
@@ -203,7 +203,7 @@ esac
 - Gate on verdicts, not on lists of kinds: the summary's `verdict`, a hunk's `verdict`, or a part's `structure`. A kind with `structure: false` (a public API rename) is behavior, and new kinds may appear.
 - Only Ruby and Rust are parsed. Hunks shapr didn't judge (other languages, generated, vendored and binary files, a file too big to compare) are `unknown` and outside the verdict, and so are `none` hunks (docs, fixtures); `summary.verdicts` counts them, and `summary.unparsed_hunks` counts every hunk not compared as trees. The script warns on them; fail on them instead if your repository is mostly another language. A file a pull request adds under `vendor/` or `fixtures/` is outside the verdict by its path; the script warns on those too.
 - The exit code is 0 whatever the verdict, 2 when shapr couldn't run (including a shallow clone missing the base commit, and an internal error), 64 for a usage error. The policy (failing on `mixed`) is the script's.
-- shapr is safe to run on a fork's pull request: it runs no program the repository's config names, its text output escapes control characters (a file name can't start a `::error::` command), and `.gitattributes` in the pull request can't take its own files out of the verdict. Keep the job's token read-only (`permissions: contents: read`).
+- shapr is safe to run on a fork's pull request: it runs no program the repository's config names and fetches nothing into the checkout (check out without `filter:`, or a blob the diff needs is an error), its text output escapes control characters (a file name can't start a `::error::` command), and `.gitattributes` in the pull request can't take its own files out of the verdict. Keep the job's token read-only (`permissions: contents: read`).
 
 ## Development
 

@@ -100,6 +100,14 @@ impl Git {
     /// rename detection and three lines of context whatever the user's
     /// config says.
     pub fn diff(&self, range: &str, cached: bool, paths: &[String]) -> Result<String> {
+        if self.bare.is_none() && self.partial() && version().is_some_and(|v| v < NO_LAZY_FETCH_GIT)
+        {
+            bail!(
+                "{PARTIAL}; git before {}.{} would fetch anyway",
+                NO_LAZY_FETCH_GIT.0,
+                NO_LAZY_FETCH_GIT.1
+            );
+        }
         self.verify_range(range)?;
         // Against all its parents a merge diffs as a combined diff, or nothing.
         if let Some(rev) = range.strip_suffix("^!")
@@ -977,6 +985,39 @@ pub fn command() -> Command {
 /// Why a range past a shallow clone's history isn't diffed, and the fix.
 pub const SHALLOW: &str =
     "shallow clone: the base commit isn't fetched (set fetch-depth: 0, or git fetch --unshallow)";
+
+/// The oldest git shapr runs: `--end-of-options` came in 2.24.
+const MIN_GIT: (u32, u32) = (2, 24);
+
+/// The oldest git that honors `GIT_NO_LAZY_FETCH`: an older one would fetch
+/// into a partial clone.
+const NO_LAZY_FETCH_GIT: (u32, u32) = (2, 44);
+
+/// The installed git's version, asked once; `None` when it doesn't run or
+/// says something else.
+fn version() -> Option<(u32, u32)> {
+    static VERSION: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
+    *VERSION.get_or_init(|| {
+        let out = run(command().arg("--version")).ok()?;
+        let text = String::from_utf8_lossy(&out);
+        let mut numbers = text.strip_prefix("git version ")?.split(['.', ' ']);
+        Some((numbers.next()?.parse().ok()?, numbers.next()?.parse().ok()?))
+    })
+}
+
+/// Fails when the installed git is older than shapr needs.
+pub fn check_version() -> Result<()> {
+    match version() {
+        Some(v) if v < MIN_GIT => bail!(
+            "git {}.{} is too old: shapr needs git {}.{} or later",
+            v.0,
+            v.1,
+            MIN_GIT.0,
+            MIN_GIT.1
+        ),
+        _ => Ok(()),
+    }
+}
 
 /// Why a partial clone's missing objects stay missing, and the fix.
 pub const PARTIAL: &str = "a partial clone: shapr fetches nothing into a repository it didn't clone (check out without a filter, or fetch the blobs first)";

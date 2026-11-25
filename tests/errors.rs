@@ -360,6 +360,63 @@ fn a_partial_clone_fetches_nothing() {
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let message = report(&out)["error"].as_str().unwrap().to_string();
     assert!(message.contains("partial clone"), "{message}");
+    // git before 2.44 ignores GIT_NO_LAZY_FETCH, so shapr doesn't start.
+    let old = fake_git("2.43.0");
+    let message = error(&shapr_with(old.path(), clone.path(), &["-J", "HEAD"]), 2);
+    assert!(!marker.exists(), "ran the repository's uploadpack");
+    assert!(message.contains("2.44"), "{message}");
+}
+
+/// A directory holding a `git` that reports VERSION and runs the real one.
+fn fake_git(version: &str) -> tempfile::TempDir {
+    let real = std::process::Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real = String::from_utf8(real.stdout).unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let script = bin.path().join("git");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nfor a; do last=$a; done\n\
+             [ \"$last\" = --version ] && {{ echo 'git version {version}'; exit 0; }}\n\
+             exec '{}' \"$@\"\n",
+            real.trim()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+/// shapr with BIN first on PATH.
+fn shapr_with(bin: &std::path::Path, dir: &std::path::Path, args: &[&str]) -> Output {
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    command(env!("CARGO_BIN_EXE_shapr"), dir)
+        .args(args)
+        .env("PATH", path)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// git before 2.24 has no `--end-of-options`: said once, plainly.
+#[test]
+fn a_git_too_old_is_an_error_naming_the_version() {
+    let dir = repo(&[&[("a.rb", METHOD)], &[("a.rb", "def greet\nend\n")]]);
+    let old = fake_git("2.20.1");
+    for args in [&["-J", "HEAD"][..], &["-J", "norms", "a.rb"]] {
+        let message = error(&shapr_with(old.path(), dir.path(), args), 2);
+        assert!(
+            message.contains("2.20") && message.contains("2.24"),
+            "{args:?}: {message}"
+        );
+    }
+    let apple = fake_git("2.39.5 (Apple Git-154)");
+    let out = shapr_with(apple.path(), dir.path(), &["-J", "HEAD"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
 }
 
 /// A clone of a three-commit repository, DEPTH commits deep.

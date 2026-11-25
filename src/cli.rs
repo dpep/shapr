@@ -345,6 +345,9 @@ fn dispatch() -> ExitCode {
         (_, true) => Format::Json,
         _ => Format::Text,
     });
+    if let Err(error) = git::check_version() {
+        return fail(format, &format!("{error:#}"), ERROR);
+    }
     let mut git = git::Git::new(cli.dir.clone());
     let dashdash = std::env::args().skip(1).any(|a| a == "--");
     let input = match input(&cli, dashdash, &git) {
