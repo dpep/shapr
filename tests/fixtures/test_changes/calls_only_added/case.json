@@ -1,0 +1,21 @@
+{
+  "description": "a spec adds a call and removes none: nothing left, so no detail.calls",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "calls": {
+                  "$not": null
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

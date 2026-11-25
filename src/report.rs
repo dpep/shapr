@@ -773,6 +773,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             if !facets.is_empty() {
                 detail.push(format!("[{}]", facets.join(", ")));
             }
+            detail.extend(calls_text(part));
             if !hunk.verdict.counted() && i == 0 {
                 detail.push(format!(
                     "({}: verdict {})",
@@ -1054,6 +1055,23 @@ pub(crate) fn facet_labels(part: &PartRecord) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// A test residual's calls removed and added, `calls -where -first +find_by`.
+pub(crate) fn calls_text(part: &PartRecord) -> Option<String> {
+    let calls = part.detail.get("calls")?;
+    let names = |key: &str, sign: char| -> Vec<String> {
+        (calls
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten())
+        .filter_map(Value::as_str)
+        .map(|n| format!("{sign}{n}"))
+        .collect()
+    };
+    let all = [names("removed", '-'), names("added", '+')].concat();
+    Some(format!("calls {}", all.join(" ")))
 }
 
 /// The text column's confidence: blank for a residual the tree comparison

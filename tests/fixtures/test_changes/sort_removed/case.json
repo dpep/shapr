@@ -1,0 +1,22 @@
+{
+  "description": "a spec stops sorting before it compares: detail.calls names sort removed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "calls": {
+                "removed": [
+                  "sort"
+                ],
+                "added": []
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

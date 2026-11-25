@@ -230,6 +230,8 @@ pub enum Construct {
     /// A test's assertion (`expect`, `assert_equal`, `assert_eq!`), counted
     /// once per call or macro.
     Assertion,
+    /// A test's stub or hook (`stub_const`, `allow`, `before`).
+    Setup,
 }
 
 static FRONTENDS: &[&dyn Frontend] = &[&Ruby, &Rust];

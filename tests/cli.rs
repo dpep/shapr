@@ -1657,6 +1657,25 @@ fn text_says_what_a_condition_change_did() {
 }
 
 #[test]
+fn text_says_which_calls_a_test_stopped_making() {
+    let spec = |lookup: &str| {
+        format!(
+            "RSpec.describe U do\n  it \"finds\" do\n    stub_const(\"K\", 1)\n    expect({lookup}).to eq(a)\n  end\nend\n"
+        )
+    };
+    let after = "RSpec.describe U do\n  it \"finds\" do\n    expect(U.find_by(k: 1)).to eq(a)\n  end\nend\n";
+    let dir = repo(&[
+        &[("spec/u_spec.rb", &spec("U.where(k: 1).first"))],
+        &[("spec/u_spec.rb", after)],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("[removes_setup (stub_const)] calls -first -stub_const -where +find_by"),
+        "{text}"
+    );
+}
+
+#[test]
 fn text_shows_a_residual_confidence_only_where_evidence_grades_it() {
     // A near miss carries the refused part's confidence; a plain residual's 1 ranks nothing.
     let before = "class A\n  def a\n    1\n  end\n\n  def b\n    __LINE__\n  end\nend\n";

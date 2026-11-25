@@ -1,7 +1,9 @@
 //! `--digest`: the report narrowed to what a reviewer reads first. A view
 //! over the [`Report`]; it computes nothing the full output doesn't hold.
 
-use super::{HunkRecord, Report, Verdict, compared, emit, facet_labels, quote_path, summary_text};
+use super::{
+    HunkRecord, Report, Verdict, calls_text, compared, emit, facet_labels, quote_path, summary_text,
+};
 use crate::change::Category;
 use crate::classify::{Facet, Kind};
 use crate::norms::Direction;
@@ -199,7 +201,8 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             .filter(|p| p.review_lines > 0 && (p.kind == Kind::Logic || p.structure))
         {
             let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
-            let labels = facet_labels(r);
+            let mut labels = facet_labels(r);
+            labels.extend(calls_text(r));
             let reason = r
                 .reason
                 .strip_prefix(crate::classify::PLAIN_LOGIC)

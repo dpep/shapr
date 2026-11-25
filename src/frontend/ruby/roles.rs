@@ -530,6 +530,12 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         "rescue" | "rescue_modifier" | "ensure" => Construct::Error,
         "call" if matches!(name, Some(n) if assertion(n, node.role)) => Construct::Assertion,
         "call"
+            if matches!(name, Some(n) if SETUP.contains(&n))
+                && node.role == Role::Call(Receiver::Implicit) =>
+        {
+            Construct::Setup
+        }
+        "call"
             if matches!(name, Some("nil?" | "empty?" | "blank?" | "present?"))
                 && matches!(node.role, Role::Call(Receiver::Explicit)) =>
         {
@@ -572,6 +578,28 @@ fn hash_key(tree: &Tree, id: NodeId) -> Option<Surface> {
     (node.kind == "assoc" && parent.kind == "hash")
         .then(|| Surface::Key(tree.code_children(id).take(1).collect()))
 }
+
+/// RSpec, rspec-mocks, WebMock and Rails time helpers that stub or set up
+/// what a test runs against, called with no receiver.
+const SETUP: &[&str] = &[
+    "before",
+    "around",
+    "prepend_before",
+    "append_before",
+    "allow",
+    "allow_any_instance_of",
+    "stub_const",
+    "hide_const",
+    "double",
+    "instance_double",
+    "class_double",
+    "object_double",
+    "spy",
+    "instance_spy",
+    "stub_request",
+    "travel_to",
+    "freeze_time",
+];
 
 /// Methods with no receiver that print or raise their arguments.
 const TEXT: &[&str] = &["puts", "print", "printf", "warn", "abort", "raise", "fail"];
