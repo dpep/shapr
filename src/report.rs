@@ -12,6 +12,8 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
+pub mod digest;
+
 /// Bumped on any breaking change to a record's fields.
 pub const SCHEMA: u32 = 1;
 
@@ -848,7 +850,7 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     if let Some(line) = &refactor {
         emit(out, line)?;
     }
-    claims(out, &s.claims, refactor.is_some())?;
+    claims(out, report, refactor.is_some())?;
     Ok(())
 }
 
@@ -872,29 +874,39 @@ fn refactor_text(report: &Report) -> Option<String> {
         return None;
     }
     let lines: usize = inside.iter().map(|(_, n)| n).sum();
-    // A hunk's first line, on the after side unless it only deletes.
+    let hunks: Vec<&HunkRecord> = inside.iter().map(|(h, _)| *h).collect();
+    Some(format!(
+        "refactor: {:.0}% of changed lines; {lines} logic line{} inside{}",
+        s.refactor_share * 100.0,
+        if lines == 1 { "" } else { "s" },
+        places(&hunks),
+    ))
+}
+
+/// ` (lib/a.rb:12, lib/b.rb:40, 2 more)`: the first three hunks' first
+/// lines, on the after side unless a hunk only deletes. Empty for none.
+fn places(hunks: &[&HunkRecord]) -> String {
+    if hunks.is_empty() {
+        return String::new();
+    }
     let start = |h: &HunkRecord| match h.after.count {
         0 => h.before.start,
         _ => h.after.start,
     };
-    let mut places: Vec<String> = (inside.iter().take(3))
-        .map(|(h, _)| format!("{}:{}", quote_path(h.file), start(h)))
+    let mut places: Vec<String> = (hunks.iter().take(3))
+        .map(|h| format!("{}:{}", quote_path(h.file), start(h)))
         .collect();
-    if inside.len() > 3 {
-        places.push(format!("{} more", inside.len() - 3));
+    if hunks.len() > 3 {
+        places.push(format!("{} more", hunks.len() - 3));
     }
-    Some(format!(
-        "refactor: {:.0}% of changed lines; {lines} logic line{} inside ({})",
-        s.refactor_share * 100.0,
-        if lines == 1 { "" } else { "s" },
-        places.join(", "),
-    ))
+    format!(" ({})", places.join(", "))
 }
 
 /// What the messages claim, and where the code doesn't bear a claim out.
 /// With REFACTOR, the refactor line already names the hunks an unproven
 /// refactor or style claim would count.
-fn claims(out: &mut impl Write, claims: &Claims, refactor: bool) -> io::Result<()> {
+fn claims(out: &mut impl Write, report: &Report, refactor: bool) -> io::Result<()> {
+    let claims = &report.summary.claims;
     if claims.messages == 0 {
         return Ok(());
     }
@@ -916,6 +928,19 @@ fn claims(out: &mut impl Write, claims: &Claims, refactor: bool) -> io::Result<(
         [one] => emit(out, &format!("claims: {one} of {of}"))?,
         many => emit(out, &format!("claims: {} (of {of})", many.join(", ")))?,
     }
+    for (label, finding) in conflicts(report, refactor) {
+        emit(out, &format!("{label}: {finding}"))?;
+    }
+    Ok(())
+}
+
+/// Each claim the code doesn't bear out, as a label (`unproven`,
+/// `conflict`) and its line, naming the first hunks behind it. With
+/// REFACTOR, the refactor line already names the hunks an unproven refactor
+/// or style claim would count.
+fn conflicts(report: &Report, refactor: bool) -> Vec<(&'static str, String)> {
+    let claims = &report.summary.claims;
+    let mut out = Vec::new();
     for conflict in &claims.experimental.conflicts {
         let unproven = matches!(
             conflict.finding,
@@ -962,9 +987,15 @@ fn claims(out: &mut impl Write, claims: &Claims, refactor: bool) -> io::Result<(
             Finding::NoReorderParts => "reorder",
             _ => conflict.claim.as_str(),
         };
-        emit(out, &format!("{label}: claims {claim}; {finding}"))?;
+        let hunks: Vec<&HunkRecord> = (conflict.hunks.iter())
+            .filter_map(|&id| report.hunks.get(id))
+            .collect();
+        out.push((
+            label,
+            format!("claims {claim}; {finding}{}", places(&hunks)),
+        ));
     }
-    Ok(())
+    out
 }
 
 /// A hunk in a file shapr didn't compare, by its category alone: `docs

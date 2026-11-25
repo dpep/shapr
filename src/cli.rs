@@ -23,6 +23,7 @@ EXAMPLES                          each is a git command: shapr X is git show/dif
   git diff --staged | shapr       a diff on stdin (needs `git diff` index lines)
   shapr -J main..HEAD             JSON lines: a meta record, each file and hunk, then a summary
   shapr -C app main..HEAD         run in another repository, like git -C
+  shapr --digest main...          only what a reviewer reads first (experimental)
   shapr --message pr.md main...   also read claims from a PR description
   shapr acme/widgets#12           a GitHub pull request: the diff its Files tab shows
   shapr acme/widgets@1a2b3c4      a GitHub commit, against its (first) parent
@@ -118,6 +119,12 @@ struct Cli {
     /// hunks, then one summary line.
     #[arg(short = 'J', long, conflicts_with = "json")]
     ndjson: bool,
+
+    /// Experimental. Narrow the output to what a reviewer reads first: the
+    /// logic hunks ranked, unproven structure, what to skip, style
+    /// divergences. One compact JSON object under -j.
+    #[arg(long, conflicts_with = "ndjson")]
+    digest: bool,
 
     /// Log what was read and parsed to stderr.
     #[arg(short, long)]
@@ -519,7 +526,11 @@ fn dispatch() -> ExitCode {
     }
     crate::usage::counts(&report.summary, &["files", "hunks", "kinds", "verdict"]);
     if !cli.quiet {
-        let written = report::to_stdout(|out| report::render(out, format, &report));
+        let written = report::to_stdout(|out| match (cli.digest, format) {
+            (true, Format::Json) => report::digest::json(out, &report),
+            (true, _) => report::digest::text(out, &report),
+            (false, _) => report::render(out, format, &report),
+        });
         // A closed pipe (`shapr … | head`) is the reader's choice, not an error.
         if let Err(error) = written.filter_broken_pipe() {
             report::note(&format!("writing output: {error}"));

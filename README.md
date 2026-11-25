@@ -59,6 +59,7 @@ shapr main..HEAD -- lib      # any form, limited to paths
 git diff --staged | shapr    # a diff on stdin (it needs git's `index` lines)
 shapr -J main..HEAD          # NDJSON: a meta line, a line per file and hunk, then a summary
 shapr -j main..HEAD          # one pretty JSON object
+shapr --digest main...       # only what a reviewer reads first (-j for compact JSON)
 shapr -C app main..HEAD      # in another repository, like git -C
 shapr --message pr.md main...   # also read claims from a PR description
 shapr https://github.com/acme/widgets/pull/12   # a GitHub pull request, as its Files tab shows it
@@ -93,14 +94,14 @@ Text output, for a commit that reformats one method's signature and changes anot
 ```
 mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
 claims: refactor in 1 of 1 message
-unproven: claims refactor; 1 hunk not shown structural
+unproven: claims refactor; 1 hunk not shown structural (lib/greeter.rb:11)
 
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
 lib/greeter.rb:11  logic             1.00  [literal_only]
                    style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
 ```
 
-Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
+Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
 
 `shapr norms` text output, for a directory where one method breaks the quote style:
 
@@ -125,6 +126,8 @@ shapr norms -j lib | jq -r '.steps[].edits[].diff' | git apply
 ```
 
 Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a file of unknown category, or a test in a language shapr doesn't parse, they are outside the verdict (`unknown`). Code shapr parses but didn't compare (too big, nested too deep) stays inside the verdict as `logic`. Text output names them by category instead: `README.md:1  docs change (outside the verdict)`, `config/app.yml:3  config change`, `spec/fixtures/cart.rb:1  fixture change (outside the verdict)`, `Makefile:1  unknown file (outside the verdict)`.
+
+Experimental: `--digest` keeps the summary lines and narrows the rest to what a reviewer reads first: the logic hunks ranked (near misses of a structural kind first, then size and facets), hunks sharing a reason as one line, structure shapr couldn't prove and why, proven structure as counts to skip, style divergences (or that there are none), and where the hunks outside the verdict are. Under `-j` it is one compact object ([docs/schema.md](docs/schema.md#--digest)), a small fraction of the full JSON.
 
 ## Usage log
 
