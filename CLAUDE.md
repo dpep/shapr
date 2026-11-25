@@ -96,7 +96,8 @@ src/
                     CodeLines says which changed lines a part's bytes explain
     hazard.rs       blocks(op, hazard): which hazards stop which operations, one exhaustive table
     format.rs       the format_only / comment_only passes: a whole hunk first (tree or line
-                    method), and last, the reformatted lines the other passes left
+                    method), and last, the reformatted lines the other passes left; a comment
+                    reaching unchanged lines that switch between code and comment is logic
     restyle.rs      the restyle pass: aligned subtrees whose canons agree (Node::canon, from
                     the frontend's TreeBuilder::respell), their changed lines where nothing else differs
     typing.rs       the typing pass: covers equal once type annotations are stripped (TYPING

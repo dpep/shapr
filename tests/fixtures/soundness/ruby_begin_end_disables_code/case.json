@@ -1,0 +1,7 @@
+{
+  "description": "=begin and =end added around an unchanged method disable it: the method is gone, so the hunk is not structure",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

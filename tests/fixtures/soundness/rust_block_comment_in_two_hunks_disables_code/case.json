@@ -1,0 +1,7 @@
+{
+  "description": "a block comment opened and closed in two hunks disables the unchanged impl between them: neither hunk is structure",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic", "verdict": "behavior"}},
+    "summary": {"verdict": "behavior"}
+  }
+}

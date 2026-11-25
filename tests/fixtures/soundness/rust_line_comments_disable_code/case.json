@@ -1,0 +1,7 @@
+{
+  "description": "line comments added to each line of an impl disable it: the hunk is not structure",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

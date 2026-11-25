@@ -1,0 +1,7 @@
+{
+  "description": "block comment delimiters removed around unchanged code enable it: the impl is new, so the hunk is not structure",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

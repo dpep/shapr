@@ -1,0 +1,7 @@
+{
+  "description": "an edit inside a block comment that already disabled code is comment_only: no code appears or disappears",
+  "expect": {
+    "hunks": [{"kind": "comment_only", "verdict": "structure"}],
+    "summary": {"verdict": "structure"}
+  }
+}
