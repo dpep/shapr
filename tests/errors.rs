@@ -340,6 +340,11 @@ fn text_output_quotes_control_characters_in_names() {
         );
         assert!(text.contains("\\n::error::x"), "{args:?}: {text}");
     }
+    // A short-flag cluster clap names by its first character stays on its line.
+    let out = shapr(dir.path(), &["-\nFAKE"]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("'-\\n'"), "{text}");
+    assert!(text.lines().all(|l| !l.starts_with("' found")), "{text}");
 }
 
 /// A blob:none clone of a two-commit upstream, with nothing checked out.

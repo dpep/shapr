@@ -910,22 +910,34 @@ pub(crate) fn clap(error: &clap::Error) {
 /// A clap error rendered with the arguments it quotes escaped, so its only
 /// line breaks are clap's own.
 pub(crate) fn clap_text(error: &clap::Error) -> String {
+    // clap quotes every argument it names ('…'): escape control characters
+    // inside those spans, so an argument can't break a line, and leave
+    // clap's own line breaks, which are never inside quotes, alone.
     let mut text = error.render().to_string();
+    // An argument with more than control characters may also appear
+    // unquoted (a validator's message): escape it wherever it appears.
     for arg in std::env::args_os().skip(1) {
         let arg = arg.to_string_lossy();
-        // clap may quote an argument whole or only its value after `=`.
         let values = std::iter::once(&*arg).chain(arg.split_once('=').map(|(_, v)| v));
-        for value in values.filter(|v| v.chars().any(char::is_control)) {
-            if value.chars().all(char::is_control) {
-                // A bare control character matches clap's own line breaks:
-                // escape only where clap quoted it.
-                text = text.replace(&format!("'{value}'"), &format!("'{}'", escape(value)));
-            } else {
-                text = text.replace(value, &escape(value));
-            }
+        for value in
+            values.filter(|v| v.chars().any(char::is_control) && !v.chars().all(char::is_control))
+        {
+            text = text.replace(value, &escape(value));
         }
     }
-    text
+    let mut out = String::with_capacity(text.len());
+    let mut quoted = false;
+    for c in text.chars() {
+        if c == '\'' {
+            quoted = !quoted;
+        }
+        if quoted && c.is_control() {
+            push_escaped(&mut out, c);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// TEXT with each control character (C0, DEL, C1) escaped C-style, as git
