@@ -397,12 +397,7 @@ const KEYWORDS: &[(&str, Category)] = &[
     ("spec", Category::Test),
     ("specs", Category::Test),
     ("coverage", Category::Test),
-    ("docs", Category::Docs),
-    ("doc", Category::Docs),
-    ("documentation", Category::Docs),
-    ("readme", Category::Docs),
     ("typo", Category::Docs),
-    ("changelog", Category::Docs),
     ("chore", Category::Chore),
     ("bump", Category::Chore),
     ("bumps", Category::Chore),
@@ -445,8 +440,12 @@ const TEST_ONLY: &[&str] = &["test only", "tests only", "spec only", "specs only
 /// Words before an issue reference that say it was a bug.
 const FIXING: &[&str] = &["fix", "fixes", "fixed"];
 
+/// Words that claim a fix when they open a body line ("Fixes the flake"):
+/// a summary, where elsewhere in a body they are a passing mention.
+const OPENING_FIXES: &[&str] = &["fixes", "fixed"];
+
 /// Look like `KEY-12` issue keys but are standards.
-const NOT_ISSUE_KEYS: &[&str] = &["UTF", "SHA", "ISO", "RFC", "PEP", "MD", "CVE"];
+const NOT_ISSUE_KEYS: &[&str] = &["UTF", "SHA", "ISO", "RFC", "PEP", "MD", "CVE", "EUI"];
 
 /// Hints in one message, in order, each once. The first non-empty line is
 /// the subject. Purpose words count only there (a body says too much in
@@ -536,6 +535,14 @@ fn hints_in(message: &Message) -> Vec<Hint> {
         if line.starts_with("BREAKING CHANGE:") || line.starts_with("BREAKING-CHANGE:") {
             add(HintKind::Breaking, "BREAKING CHANGE", None, Field::Body);
         }
+        if let Some(word) = opening_fix(line) {
+            add(
+                HintKind::Keyword,
+                &word,
+                Some(fix_category(line)),
+                Field::Body,
+            );
+        }
     }
     for (field, text) in [(Field::Subject, subject), (Field::Body, body.as_str())] {
         let mut previous = String::new();
@@ -573,6 +580,38 @@ fn hints_in(message: &Message) -> Vec<Hint> {
         }
     }
     hints
+}
+
+/// `fixes` or `fixed` opening a body line, after any list marker, and
+/// followed by what it fixes, unless that is an issue reference, which
+/// claims the fix itself.
+fn opening_fix(line: &str) -> Option<String> {
+    let line = line.trim_start();
+    let line = ["- ", "* ", "+ "]
+        .iter()
+        .find_map(|m| line.strip_prefix(m))
+        .unwrap_or(line);
+    let mut words = line.split_whitespace();
+    let first = words.next()?;
+    let word = first
+        .trim_end_matches(|c: char| ",.;:!".contains(c))
+        .to_ascii_lowercase();
+    // A template's "Fixes # (issue)" or a bare "Fixes:" says nothing yet.
+    let what = words.next().filter(|w| !w.starts_with(['#', '<']))?;
+    let reference = issue(what.trim_matches(|c: char| ",.;:()".contains(c))).is_some();
+    (OPENING_FIXES.contains(&word.as_str()) && !reference).then_some(word)
+}
+
+/// A fix claim's category: `style` beside a style word ("Fixes rubocop
+/// offenses"), else `fix`.
+fn fix_category(text: &str) -> Category {
+    let style = purpose_words(text)
+        .iter()
+        .any(|w| KEYWORDS.contains(&(w.as_str(), Category::Style)));
+    match style {
+        true => Category::Style,
+        false => Category::Fix,
+    }
 }
 
 /// The first non-empty line.
@@ -747,6 +786,67 @@ mod tests {
     fn purpose_words_count_only_in_the_subject() {
         let found = hints("Speed up lookups\n\nThis fixes a bug and adds a test.");
         assert!(found.is_empty(), "{found:?}");
+    }
+
+    /// A file named in the subject says what it touched, not what the
+    /// change is for (rspec-networking#29, rwr#18).
+    #[test]
+    fn docs_words_name_a_subject_and_only_the_docs_type_claims_docs() {
+        for subject in [
+            "README: say which EUI-64 addresses match",
+            "Say which existing rules change meaning in the changelog",
+            "Update the docs",
+            "Documentation for the retry option",
+        ] {
+            let found = hints(subject);
+            assert!(found.is_empty(), "{subject}: {found:?}");
+        }
+        assert_eq!(
+            categories("docs: say which rules match"),
+            [Some(Category::Docs)]
+        );
+        assert_eq!(
+            categories("Fix a typo"),
+            [Some(Category::Fix), Some(Category::Docs)]
+        );
+    }
+
+    /// "Fixes the flake" opening a description (rq#36) says what the change
+    /// is for; the same word mid-sentence is a passing mention.
+    #[test]
+    fn a_body_line_opening_with_fixes_or_fixed_claims_fix() {
+        let fix = || (HintKind::Keyword, "fixes".to_string(), Some(Category::Fix));
+        assert_eq!(
+            hints("Lay the database down once\n\nFixes the flake in a test."),
+            [fix()]
+        );
+        assert_eq!(hints("Lay it down once\n\n- Fixes the race."), [fix()]);
+        assert_eq!(
+            hints("Lay it down once\n\nFixed: openers raced."),
+            [(HintKind::Keyword, "fixed".into(), Some(Category::Fix))]
+        );
+        assert_eq!(
+            hints("Lay it down once\n\nFixes rubocop offenses."),
+            [(HintKind::Keyword, "fixes".into(), Some(Category::Style))]
+        );
+        // A reference after it already claims the fix.
+        assert_eq!(
+            hints("Lay it down once\n\nFixes #12"),
+            [(HintKind::Reference, "#12".into(), Some(Category::Fix))]
+        );
+        for body in [
+            "This fixes a bug and adds a test.",
+            "Prefixes each line with its number.",
+            "## Fix",
+            "Fix the gate first.",
+            "fixes_for(x) returns them.",
+            "Fixes # (issue)",
+            "Fixes:",
+            "Fixes <!-- the issue -->",
+        ] {
+            let found = hints(&format!("Speed up lookups\n\n{body}"));
+            assert!(found.is_empty(), "{body}: {found:?}");
+        }
     }
 
     fn categories(text: &str) -> Vec<Option<Category>> {
