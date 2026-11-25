@@ -1045,6 +1045,17 @@ pub(crate) fn clap(error: &clap::Error) {
 /// A clap error rendered with the arguments it quotes escaped, so its only
 /// line breaks are clap's own.
 pub(crate) fn clap_text(error: &clap::Error) -> String {
+    use clap::error::ErrorKind;
+    // Help and version text is shapr's own, never an argument: its
+    // apostrophes ("DIR's") aren't quotes, and its line breaks are real.
+    if matches!(
+        error.kind(),
+        ErrorKind::DisplayHelp
+            | ErrorKind::DisplayVersion
+            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    ) {
+        return error.render().to_string();
+    }
     // clap quotes every argument it names ('…'): escape control characters
     // inside those spans, so an argument can't break a line, and leave
     // clap's own line breaks, which are never inside quotes, alone.
