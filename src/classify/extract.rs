@@ -1296,6 +1296,24 @@ struct Flow {
 impl Flow {
     fn of(tree: &Tree, a: NodeId, chunk: &[NodeId]) -> Flow {
         let inside: HashSet<NodeId> = chunk.iter().flat_map(|&s| tree.descendants(s)).collect();
+        // A block's parameters are a local of the block, not of A: a local
+        // is its name and the block declaring it, if any.
+        let blocks: HashMap<NodeId, HashSet<&str>> = tree
+            .descendants(a)
+            .filter(|&d| tree.node(d).flags.contains(Flags::BLOCK_PARAMETERS))
+            .filter_map(|d| {
+                let names = tree.descendants(d).map(|p| tree.node(p));
+                let names = names.filter(|p| p.role.defines().is_some());
+                Some((tree.node(d).parent?, names.filter_map(local_name).collect()))
+            })
+            .collect();
+        let local = |id: NodeId, name: &str| {
+            let block = tree
+                .ancestors(id)
+                .take_while(|&p| p != a)
+                .find(|p| blocks.get(p).is_some_and(|names| names.contains(name)));
+            (name.to_string(), block)
+        };
         let (mut defs_in, mut defs_out, mut reads_in, mut reads_out) = (
             HashSet::new(),
             HashSet::new(),
@@ -1307,7 +1325,7 @@ impl Flow {
             let Some(name) = local_name(node) else {
                 continue;
             };
-            let name = name.to_string();
+            let name = local(id, name);
             let is_in = inside.contains(&id);
             match (node.role, is_in) {
                 (Role::Reference(_), true) => reads_in.insert(name),
@@ -1322,17 +1340,21 @@ impl Flow {
             let Some(name) = node.name.as_deref().filter(|_| node.role == Role::Opaque) else {
                 continue;
             };
-            if defs_in.contains(name) || defs_out.contains(name) {
+            let name = local(id, name);
+            if defs_in.contains(&name) || defs_out.contains(&name) {
                 match inside.contains(&id) {
-                    true => reads_in.insert(name.to_string()),
-                    false => reads_out.insert(name.to_string()),
+                    true => reads_in.insert(name),
+                    false => reads_out.insert(name),
                 };
             }
         }
+        let names = |set: HashSet<&(String, Option<NodeId>)>| {
+            set.into_iter().map(|(name, _)| name.clone()).collect()
+        };
         Flow {
-            free: reads_in.difference(&defs_in).cloned().collect(),
-            clobbers: defs_in.intersection(&defs_out).cloned().collect(),
-            outflow: defs_in.intersection(&reads_out).cloned().collect(),
+            free: names(reads_in.difference(&defs_in).collect()),
+            clobbers: names(defs_in.intersection(&defs_out).collect()),
+            outflow: names(defs_in.intersection(&reads_out).collect()),
         }
     }
 }

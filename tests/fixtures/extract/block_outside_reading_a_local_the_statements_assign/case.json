@@ -1,0 +1,7 @@
+{
+  "description": "statements extracted into a new method, where they assign a local that a block after them reads without declaring it as a parameter: the block reads the caller's local, which no longer changes, so a wiring near miss",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "wiring"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}
