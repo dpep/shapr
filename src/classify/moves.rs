@@ -1214,6 +1214,24 @@ fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
             out.push((tree.node(sibling).hash, before));
         }
     }
+    // The statement lists enclosing its container count too: a method
+    // moved between two `impl`s crosses what stands between them (a
+    // `macro_rules!` redefinition its body expands).
+    let mut path = parent;
+    for outer in tree.ancestors(parent) {
+        if outer == Tree::ROOT || transparent(tree, outer) {
+            let at = tree.node(path).span.start;
+            for &sibling in &tree.node(outer).children {
+                if sibling == path || tree.node(sibling).comment {
+                    continue;
+                }
+                if needs.by(tree, sibling) {
+                    out.push((tree.node(sibling).hash, tree.node(sibling).span.start < at));
+                }
+            }
+        }
+        path = outer;
+    }
     out.sort_unstable();
     out
 }

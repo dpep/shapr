@@ -1,0 +1,4 @@
+{
+  "description": "a method moved from one opening of a class into a later one, past a top-level call to it: the call now runs before the method exists, never structure",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}}, "summary": {"verdict": {"$not": "structure"}}}
+}

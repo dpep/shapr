@@ -1,0 +1,4 @@
+{
+  "description": "a method moved between two impls inside a module across a macro_rules! redefinition its body invokes: it expands the other definition, never structure",
+  "expect": {"hunks": {"$every": {"verdict": {"$not": "structure"}}}, "summary": {"verdict": {"$not": "structure"}}}
+}
