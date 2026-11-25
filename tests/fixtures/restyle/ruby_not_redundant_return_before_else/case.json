@@ -1,0 +1,6 @@
+{
+  "description": "not the same program, so logic: a return skips the else clause, whose value the method then returns",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

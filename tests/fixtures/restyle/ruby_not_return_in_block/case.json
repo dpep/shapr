@@ -1,0 +1,6 @@
+{
+  "description": "not the same program, so logic: a return in a block leaves the method",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

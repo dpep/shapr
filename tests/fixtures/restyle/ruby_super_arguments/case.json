@@ -1,0 +1,15 @@
+{
+  "description": "super passing the method's positional parameters in order, and a bare super, which passes them",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {"kind": {"$not": "logic"}},
+          "$some": {"detail": {"variants": ["Style/SuperArguments"]}, "kind": "restyle", "structure": true}
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

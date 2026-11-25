@@ -561,6 +561,156 @@ fn is_doc(text: &str) -> bool {
         || text.starts_with("/*!")
 }
 
+/// Derives outside std known never to read doc comments, by crate: serde's
+/// and thiserror's read only their own attributes.
+const DOCLESS_DERIVES: &[(&str, &[&str])] = &[
+    ("serde", &["Serialize", "Deserialize"]),
+    ("serde_derive", &["Serialize", "Deserialize"]),
+    ("thiserror", &["Error"]),
+];
+
+/// The paths a `#[derive(...)]` attribute names, or `None` for another
+/// attribute.
+fn derives(attr: &str) -> Option<Vec<&str>> {
+    let inner = attr.strip_prefix("#[")?.strip_suffix(']')?.trim();
+    let args = inner.strip_prefix("derive")?.trim();
+    let args = args.strip_prefix('(')?.strip_suffix(')')?;
+    Some(
+        args.split(',')
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .collect(),
+    )
+}
+
+/// Whether derive `path` on `item` never reads doc comments: one of std's,
+/// or one of [`DOCLESS_DERIVES`] named through its crate or imported from it
+/// where `item` sits.
+fn docless_derive(path: &str, item: &Node<'_>, src: &[u8]) -> bool {
+    let segments: Vec<&str> = path.trim_start_matches("::").split("::").collect();
+    let name = segments[segments.len() - 1];
+    if [roles::NAMELESS_DERIVES, &["Debug"]]
+        .concat()
+        .contains(&name)
+    {
+        return true;
+    }
+    let root = match segments.len() {
+        1 => import_root(item, name, src),
+        _ => Some(segments[0].to_string()),
+    };
+    root.is_some_and(|root| {
+        DOCLESS_DERIVES
+            .iter()
+            .any(|(krate, names)| *krate == root && names.contains(&name))
+    })
+}
+
+/// The crate a `use` brings `name` from where `item` sits, when the imports
+/// settle it: the innermost scope binding it explicitly, reached through
+/// blocks and `use super::*` (a module doesn't see its parent's imports
+/// otherwise). Any other glob, or a binding from two crates, settles nothing.
+fn import_root(item: &Node<'_>, name: &str, src: &[u8]) -> Option<String> {
+    let mut scope = item.parent();
+    while let Some(s) = scope {
+        let module = match s.kind() {
+            "source_file" => true,
+            "declaration_list" if s.parent().is_some_and(|p| p.kind() == "mod_item") => true,
+            "block" => false,
+            _ => {
+                scope = s.parent();
+                continue;
+            }
+        };
+        let mut uses = Uses::default();
+        let mut cursor = s.walk();
+        for child in s.named_children(&mut cursor) {
+            if child.kind() == "use_declaration"
+                && let Some(arg) = child.child_by_field_name("argument")
+            {
+                uses.collect(arg, None, name, src);
+            }
+        }
+        if let Some(first) = uses.roots.first() {
+            return uses.roots.iter().all(|r| r == first).then(|| first.clone());
+        }
+        let through = match module {
+            true => s.kind() != "source_file" && uses.globs == ["super"],
+            false => uses.globs.is_empty(),
+        };
+        if !through {
+            return None;
+        }
+        // A module's body sits in its `mod_item`; continue from the item's parent.
+        scope = s
+            .parent()
+            .and_then(|p| if module { p.parent() } else { Some(p) });
+    }
+    None
+}
+
+/// What a scope's `use` declarations say about one name: the crates that
+/// bind it, and the paths of its globs.
+#[derive(Default)]
+struct Uses {
+    roots: Vec<String>,
+    globs: Vec<String>,
+}
+
+impl Uses {
+    /// Reads use tree `n`, whose path starts at crate `prefix` when it sits
+    /// in a `path::{...}` list.
+    fn collect(&mut self, n: Node<'_>, prefix: Option<&str>, name: &str, src: &[u8]) {
+        let text = |n: &Node<'_>| String::from_utf8_lossy(&src[span(n)]).into_owned();
+        let root = |path: &str| {
+            prefix.map_or_else(
+                || {
+                    let path = path.trim_start_matches("::");
+                    path.split("::").next().unwrap_or(path).to_string()
+                },
+                str::to_string,
+            )
+        };
+        match n.kind() {
+            "identifier" | "scoped_identifier" => {
+                let path = text(&n);
+                if path.rsplit("::").next() == Some(name) {
+                    self.roots.push(root(&path));
+                }
+            }
+            "use_as_clause" => {
+                let alias = n.child_by_field_name("alias").map(|a| text(&a));
+                let path = n.child_by_field_name("path").map(|p| text(&p));
+                if let (Some(alias), Some(path)) = (alias, path)
+                    && alias == name
+                {
+                    self.roots.push(root(&path));
+                }
+            }
+            "use_wildcard" => {
+                let path = text(&n).trim_end_matches("::*").to_string();
+                self.globs.push(match prefix {
+                    Some(prefix) => format!("{prefix}::{{..}}"),
+                    None => path,
+                });
+            }
+            "scoped_use_list" => {
+                let base = n.child_by_field_name("path").map(|p| root(&text(&p)));
+                if let Some(list) = n.child_by_field_name("list") {
+                    self.collect(list, base.as_deref().or(prefix), name, src);
+                }
+            }
+            "use_list" => {
+                let mut cursor = n.walk();
+                for child in n.named_children(&mut cursor) {
+                    self.collect(child, prefix, name, src);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The attributes before item `n`, across the comments between them.
 fn attributes<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
     std::iter::successors(n.prev_sibling(), |s| s.prev_sibling())
@@ -629,10 +779,24 @@ impl<'a> Walker<'a> {
         let item = std::iter::successors(n.next_sibling(), |s| s.next_sibling())
             .filter(|_| outer)
             .find(|s| !is_comment(s) && s.kind() != "attribute_item");
-        let read = |item: &Node<'_>| roles::reads_tokens(&attributes(item), self.src);
-        item.is_some_and(|i| read(&i))
+        item.is_some_and(|i| self.reads_docs(&i))
             || std::iter::successors(n.parent(), |p| p.parent())
-                .any(|p| p.kind() == "token_tree" || read(&p))
+                .any(|p| p.kind() == "token_tree" || self.reads_docs(&p))
+    }
+
+    /// Whether `item`'s attributes may read its doc comments: a derive not
+    /// known to ignore them ([`DOCLESS_DERIVES`]), or an attribute macro. A
+    /// field's or variant's attributes are inert; only its item's read it.
+    fn reads_docs(&self, item: &Node<'_>) -> bool {
+        if matches!(item.kind(), "field_declaration" | "enum_variant") {
+            return false;
+        }
+        attributes(item)
+            .iter()
+            .any(|attr| match derives(self.text(attr)) {
+                Some(paths) => paths.iter().any(|p| !docless_derive(p, item, self.src)),
+                None => roles::reads_tokens(std::slice::from_ref(attr), self.src),
+            })
     }
 
     fn is_local(&self, name: &str) -> bool {

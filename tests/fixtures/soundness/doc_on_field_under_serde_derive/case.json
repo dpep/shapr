@@ -1,0 +1,6 @@
+{
+  "description": "serde's derives never read doc comments, so a doc added to a field under an imported serde Serialize (one of its fields under a serde attribute) is a comment",
+  "expect": {
+    "hunks": [{"kind": "comment_only", "verdict": "structure"}]
+  }
+}

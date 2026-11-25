@@ -1,0 +1,15 @@
+{
+  "description": "a method body's last statement returned explicitly before a rescue clause, and as its value",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {"kind": {"$not": "logic"}},
+          "$some": {"detail": {"variants": ["Style/RedundantReturn"]}, "kind": "restyle", "structure": true}
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "description": "not the same program, so logic: copy is not the parameter, though it holds its value",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

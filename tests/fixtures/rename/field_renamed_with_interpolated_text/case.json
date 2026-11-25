@@ -1,0 +1,9 @@
+{
+  "description": "text inside an interpolated string that happens to spell the field is part of a larger string, not the field's name, so changing it with the field stays logic",
+  "expect": {
+    "hunks": [
+      {"kind": "rename"},
+      {"kind": "logic"}
+    ]
+  }
+}

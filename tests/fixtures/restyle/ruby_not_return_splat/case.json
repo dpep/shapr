@@ -1,0 +1,6 @@
+{
+  "description": "not the same program, so logic: return *params builds a new array",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

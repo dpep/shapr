@@ -1,0 +1,15 @@
+{
+  "description": "a bare super passes each parameter's current value, as super(record) does, so a reassignment before it changes both alike",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {"kind": {"$not": "logic"}},
+          "$some": {"detail": {"variants": ["Style/SuperArguments"]}, "kind": "restyle", "structure": true}
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

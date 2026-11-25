@@ -1,0 +1,6 @@
+{
+  "description": "schemars' JsonSchema beside serde's Serialize reads doc comments into descriptions, so a doc under both is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

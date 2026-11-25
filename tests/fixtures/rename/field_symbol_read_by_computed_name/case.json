@@ -1,0 +1,9 @@
+{
+  "description": "a field read by a computed name in its file (remove_instance_variable over a list) could be any field, so renaming it with its symbol stays logic",
+  "expect": {
+    "hunks": [
+      {"kind": "logic"},
+      {"kind": "logic"}
+    ]
+  }
+}
