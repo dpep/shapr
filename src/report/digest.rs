@@ -9,54 +9,80 @@ use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
-/// Logic items listed before the rest are only placed.
+/// Items listed before the rest are only placed.
 const SHOWN: usize = 15;
-/// Places a text line names before counting the rest.
-const PLACES: usize = 12;
 
 #[derive(Serialize)]
 pub struct Digest<'a> {
     record: &'static str,
     schema: u32,
     subject: Option<String>,
+    input: Option<super::Input>,
     verdict: Verdict,
     hunks: usize,
     review_lines: usize,
     test_review_lines: usize,
     refactor_share: f64,
     claims: Vec<&'static str>,
-    unproven: Vec<String>,
+    unproven: Vec<Claim<'a>>,
     read_first: Vec<Item<'a>>,
     more: More<'a>,
     unproven_structure: Vec<Unproven<'a>>,
     skip: Skip,
     style_checked: usize,
     style: Vec<Style<'a>>,
-    outside: BTreeMap<&'static str, Vec<Place<'a>>>,
+    outside: BTreeMap<&'static str, Outside<'a>>,
 }
 
-/// `file:line`.
+/// `file:line`, its line on the before side when DELETED: the hunk only deletes.
 #[derive(Clone, Copy, PartialEq)]
-struct Place<'a>(&'a str, usize);
+struct Place<'a>(&'a str, usize, bool);
 
 impl Serialize for Place<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&format!("{}:{}", self.0, self.1))
+        s.serialize_str(&format!("{}:{}{}", self.0, self.1, deleted(self.2)))
     }
 }
 
-/// Logic to read: one hunk's residual, or the residuals sharing a reason.
+fn deleted(deleted: bool) -> &'static str {
+    if deleted { " (deleted)" } else { "" }
+}
+
+/// PATH in text: as git quotes it, and quoted too where it holds a
+/// separator places use, so `a b.rb:3` can't read as two places.
+fn text_path(path: &str) -> std::borrow::Cow<'_, str> {
+    match quote_path(path) {
+        std::borrow::Cow::Borrowed(p) if p.contains([' ', ',', ':']) => format!("\"{p}\"").into(),
+        quoted => quoted,
+    }
+}
+
+/// A claim the code doesn't bear out, as `summary.claims` has it, with
+/// every hunk behind it placed.
+#[derive(Serialize)]
+struct Claim<'a> {
+    claim: crate::claims::Category,
+    finding: crate::claims::Finding,
+    hunks: Vec<Place<'a>>,
+}
+
+/// Lines to read: one hunk's residual or proven part that still needs
+/// reading, or several of one kind sharing a reason.
 #[derive(Serialize)]
 struct Item<'a> {
     at: Vec<Place<'a>>,
+    /// `logic`, or the structural kind proven but still read (extract).
+    kind: &'static str,
     review_lines: usize,
     facets: Vec<&'static str>,
-    /// Changed lines per structural kind proven in the same hunk.
+    /// Changed lines per structural kind proven beside the logic, over its hunks.
     with: BTreeMap<&'static str, usize>,
     test: bool,
-    /// Why the residual isn't the structural kind it resembles.
+    /// The part's reason: for a residual, why it isn't the kind it resembles.
     note: Option<String>,
     relocated: Option<String>,
+    #[serde(skip)]
+    relocated_lines: usize,
     #[serde(skip)]
     risk: (bool, usize),
 }
@@ -73,10 +99,18 @@ struct More<'a> {
 struct Unproven<'a> {
     at: Place<'a>,
     kind: &'static str,
+    review_lines: usize,
     why: Vec<&'static str>,
 }
 
-/// Proven structure, as counts: what a reviewer can skip.
+/// The hunks of one category outside the verdict.
+#[derive(Serialize, Default)]
+struct Outside<'a> {
+    review_lines: usize,
+    at: Vec<Place<'a>>,
+}
+
+/// Proven structure with no line to read, as counts: what a reviewer can skip.
 #[derive(Serialize, Default)]
 struct Skip {
     hunks: usize,
@@ -93,13 +127,10 @@ struct Style<'a> {
 
 /// The hunk's first line, on the after side unless it only deletes.
 fn place<'a>(h: &HunkRecord<'a>) -> Place<'a> {
-    Place(
-        h.file,
-        match h.after.count {
-            0 => h.before.start,
-            _ => h.after.start,
-        },
-    )
+    match h.after.count {
+        0 => Place(h.file, h.before.start, true),
+        _ => Place(h.file, h.after.start, false),
+    }
 }
 
 pub fn build<'a>(report: &'a Report) -> Digest<'a> {
@@ -109,30 +140,30 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
     let mut unproven_structure = Vec::new();
     let mut style = Vec::new();
     let mut style_checked = 0;
-    let mut outside: BTreeMap<&'static str, Vec<Place>> = BTreeMap::new();
+    let mut outside: BTreeMap<&'static str, Outside> = BTreeMap::new();
     for h in &report.hunks {
         if !h.verdict.counted() {
-            outside
-                .entry(h.category.as_str())
-                .or_default()
-                .push(place(h));
+            let group = outside.entry(h.category.as_str()).or_default();
+            group.review_lines += h.lines.review_lines;
+            group.at.push(place(h));
             continue;
         }
         for p in h.parts.iter().filter(|p| p.kind != Kind::Logic) {
-            if p.structure {
+            if p.structure && p.review_lines == 0 {
                 *skip.kinds.entry(p.kind.as_str()).or_insert(0) += 1;
                 skip.changed_lines += p.changed;
-            } else {
+            } else if !p.structure {
                 let mut why: Vec<&'static str> = p.assumptions.iter().map(|a| a.as_str()).collect();
                 why.extend(p.context.iter().map(|c| c.as_str()));
                 unproven_structure.push(Unproven {
                     at: place(h),
                     kind: p.kind.as_str(),
+                    review_lines: p.review_lines,
                     why,
                 });
             }
         }
-        if h.verdict == Verdict::Structure {
+        if h.verdict == Verdict::Structure && h.lines.review_lines == 0 {
             skip.hunks += 1;
         }
         if let Some(st) = h
@@ -147,53 +178,69 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 };
                 for d in &e.deviations {
                     style.push(Style {
-                        at: Place(h.file, d.line),
+                        at: Place(h.file, d.line, false),
                         norm: e.norm,
                         expected: expected.clone(),
                     });
                 }
             }
         }
-        let Some(r) = h.parts.iter().find(|p| p.kind == Kind::Logic) else {
-            continue;
-        };
-        if r.review_lines == 0 {
-            continue;
-        }
-        let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
-        let reason = r
-            .reason
-            .strip_prefix(crate::classify::PLAIN_LOGIC)
-            .map_or(r.reason.as_str(), |rest| rest.trim_start_matches("; "));
-        let note = (!reason.is_empty()).then(|| reason.to_string());
-        // Residuals sharing a reason read as one item, across files.
-        if let Some(item) = items
-            .iter_mut()
-            .find(|i| note.is_some() && i.note == note && i.facets == facets)
+        // Placement follows review_lines: proven structure still read is listed.
+        for r in (h.parts.iter())
+            .filter(|p| p.review_lines > 0 && (p.kind == Kind::Logic || p.structure))
         {
-            item.at.push(place(h));
-            item.review_lines += r.review_lines;
-            continue;
+            let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
+            let reason = r
+                .reason
+                .strip_prefix(crate::classify::PLAIN_LOGIC)
+                .map_or(r.reason.as_str(), |rest| rest.trim_start_matches("; "));
+            let note = (!reason.is_empty()).then(|| reason.to_string());
+            let kind = r.kind.as_str();
+            let logic = r.kind == Kind::Logic;
+            let test = h.category == Category::Test || r.facets.contains(&Facet::Test);
+            let mut with = BTreeMap::new();
+            for p in (h.parts.iter()).filter(|p| logic && p.kind != Kind::Logic) {
+                *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
+            }
+            let relocated = if logic { h.lines.relocated_lines } else { 0 };
+            // Items sharing a reason read as one, across files; tests apart,
+            // as a reviewer weighs them apart.
+            if let Some(item) = items.iter_mut().find(|i| {
+                note.is_some()
+                    && (i.kind, &i.note, &i.facets, i.test) == (kind, &note, &facets, test)
+            }) {
+                item.at.push(place(h));
+                item.review_lines += r.review_lines;
+                for (k, n) in with {
+                    *item.with.entry(k).or_insert(0) += n;
+                }
+                item.relocated_lines += relocated;
+                item.relocated = match item.relocated_lines {
+                    0 => None,
+                    n => Some(format!(
+                        "{n} line{} relocated verbatim across {} hunks",
+                        plural(n),
+                        item.at.len()
+                    )),
+                };
+                continue;
+            }
+            let risky = (r.facets.iter())
+                .filter(|f| !matches!(f, Facet::Test | Facet::LiteralOnly))
+                .count();
+            items.push(Item {
+                at: vec![place(h)],
+                kind,
+                review_lines: r.review_lines,
+                facets,
+                with,
+                test,
+                relocated: h.relocated_note.clone().filter(|_| logic),
+                relocated_lines: relocated,
+                risk: (!r.detail.contains_key("near"), risky),
+                note,
+            });
         }
-        let risky = (r.facets.iter())
-            .filter(|f| !matches!(f, Facet::Test | Facet::LiteralOnly))
-            .count();
-        items.push(Item {
-            at: vec![place(h)],
-            review_lines: r.review_lines,
-            facets,
-            with: (h.parts.iter()).filter(|p| p.kind != Kind::Logic).fold(
-                BTreeMap::new(),
-                |mut with, p| {
-                    *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
-                    with
-                },
-            ),
-            test: h.category == Category::Test || r.facets.contains(&Facet::Test),
-            relocated: h.relocated_note.clone(),
-            risk: (!r.detail.contains_key("near"), risky),
-            note,
-        });
     }
     // A near miss of a structural kind first, then the most lines, then the
     // most facets: a facet alone marks a rewrite as readily as a risk.
@@ -205,9 +252,15 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
         at: rest.iter().flat_map(|i| i.at.iter().copied()).collect(),
     };
     let claims = s.claims.experimental.categories.iter();
-    let unproven = super::conflicts(report, false)
-        .into_iter()
-        .map(|(label, line)| format!("{label}: {line}"))
+    let unproven = (s.claims.experimental.conflicts.iter())
+        .map(|c| Claim {
+            claim: c.claim,
+            finding: c.finding,
+            hunks: (c.hunks.iter())
+                .filter_map(|&id| report.hunks.get(id))
+                .map(place)
+                .collect(),
+        })
         .collect();
     Digest {
         record: "digest",
@@ -215,6 +268,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
         subject: (report.meta.source.as_ref())
             .map(|s| s.name())
             .or(report.meta.subject.clone()),
+        input: report.meta.input,
         verdict: s.verdict,
         hunks: s.hunks,
         review_lines: s.lines.review_lines,
@@ -232,22 +286,23 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
     }
 }
 
-/// Places as text, one file's lines together: `a.rb:3,9 b.rb:1`, the rest
-/// counted past `PLACES`.
+/// Places as text, every one, each file's lines together in the order the
+/// files first appear, deletions apart: `a.rb:3,9 a.rb:20 (deleted) b.rb:1`.
 fn places(at: &[Place]) -> String {
-    let mut out: Vec<String> = Vec::new();
-    let mut last = None;
-    for p in at.iter().take(PLACES) {
-        match (last, out.last_mut()) {
-            (Some(file), Some(s)) if file == p.0 => s.push_str(&format!(",{}", p.1)),
-            _ => out.push(format!("{}:{}", quote_path(p.0), p.1)),
+    let mut files: Vec<(&str, bool, Vec<String>)> = Vec::new();
+    for p in at {
+        match files
+            .iter_mut()
+            .find(|(file, d, _)| (*file, *d) == (p.0, p.2))
+        {
+            Some((.., lines)) => lines.push(p.1.to_string()),
+            None => files.push((p.0, p.2, vec![p.1.to_string()])),
         }
-        last = Some(p.0);
     }
-    if at.len() > PLACES {
-        out.push(format!("and {} more", at.len() - PLACES));
-    }
-    out.join(" ")
+    (files.iter())
+        .map(|(file, d, lines)| format!("{}:{}{}", text_path(file), lines.join(","), deleted(*d)))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn plural(n: usize) -> &'static str {
@@ -261,7 +316,7 @@ pub fn json(out: &mut impl Write, report: &Report) -> io::Result<()> {
 
 pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     let d = build(report);
-    summary_text(out, report)?;
+    summary_text(out, report, true)?;
     if !d.read_first.is_empty() {
         emit(out, "read first:")?;
     }
@@ -272,6 +327,9 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             i.review_lines,
             plural(i.review_lines)
         );
+        if i.kind != Kind::Logic.as_str() {
+            line.push_str(&format!(", proven {}, still read", i.kind));
+        }
         if !i.facets.is_empty() {
             line.push_str(&format!(" [{}]", i.facets.join(", ")));
         }
@@ -308,9 +366,11 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         emit(
             out,
             &format!(
-                "unproven {} at {} ({})",
+                "unproven {} at {}, {} line{} ({})",
                 u.kind,
                 places(&[u.at]),
+                u.review_lines,
+                plural(u.review_lines),
                 u.why.join(", ")
             ),
         )?;
@@ -322,8 +382,9 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         emit(
             out,
             &format!(
-                "skip, proven structure: {} changed lines ({}); {} hunk{} wholly structure",
+                "skip, proven structure: {} changed line{} ({}); {} hunk{} wholly structure",
                 d.skip.changed_lines,
+                plural(d.skip.changed_lines),
                 kinds.join(", "),
                 d.skip.hunks,
                 plural(d.skip.hunks)
@@ -351,10 +412,17 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             ),
         )?;
     }
-    for (category, at) in &d.outside {
+    for (category, group) in &d.outside {
+        let lines = match group.review_lines {
+            0 => String::new(),
+            n => format!(", {n} review line{}", plural(n)),
+        };
         emit(
             out,
-            &format!("outside the verdict, {category}: {}", places(at)),
+            &format!(
+                "outside the verdict, {category}{lines}: {}",
+                places(&group.at)
+            ),
         )?;
     }
     Ok(())

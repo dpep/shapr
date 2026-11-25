@@ -130,7 +130,8 @@ impl Git {
         // file binary, which would take it out of the verdict: diff those
         // again as text.
         let mut blobs = Blobs::new(self);
-        let attributed: Vec<FileDiff> = crate::diff::parse(&text)
+        // git's own output; a malformed header surfaces where the diff is read.
+        let attributed: Vec<FileDiff> = (crate::diff::parse(&text).unwrap_or_default())
             .into_iter()
             .filter(|f| f.binary && !holds_binary(&mut blobs, f))
             .collect();
@@ -146,14 +147,14 @@ impl Git {
         let again = self.run_diff(range, cached, &literal, true)?;
         let again: Vec<(FileDiff, &str)> = file_sections(&again)
             .into_iter()
-            .filter_map(|s| Some((crate::diff::parse(s).pop()?, s)))
+            .filter_map(|s| Some((crate::diff::parse(s).ok()?.pop()?, s)))
             .collect();
         let same =
             |a: &FileDiff, b: &FileDiff| a.old_path == b.old_path && a.new_path == b.new_path;
         Ok(file_sections(&text)
             .into_iter()
             .map(|section| {
-                let Some(file) = crate::diff::parse(section).pop() else {
+                let Some(file) = crate::diff::parse(section).ok().and_then(|mut f| f.pop()) else {
                     return section;
                 };
                 match again

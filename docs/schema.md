@@ -1260,37 +1260,47 @@ first, then the logic to read, ranked, then what shapr couldn't prove, what
 to skip, the style check and the hunks outside the verdict. Under `-j` it is
 one compact `digest` object; `-J` doesn't take it. It holds nothing the full
 output doesn't: a consumer that needs the evidence reads the full JSON.
-A place is a `"file:line"` string, the line a hunk's first (on the after
-side unless it only deletes) or a style deviation's.
+A place is a `"file:line"` string, the line a hunk's first or a style
+deviation's, on the after side; a hunk that only deletes is placed by its
+first before line and its place ends in ` (deleted)`. The text names every
+place, each file's lines together, deletions apart (`a.rb:3,9 a.rb:20
+(deleted) b.rb:1`); nothing hides behind a count. A path holding a space,
+comma or colon is in double quotes there, as is one git quotes.
 
 | field | type | meaning |
 |---|---|---|
 | `record` | `"digest"` | |
 | `schema` | int | As in the `meta` record. |
-| `subject` | string or null | The change: a GitHub change's name, or what shapr chose to compare (`meta.subject`). |
+| `subject` | string or null | What was compared, always: a GitHub change's name (`o/r#12`, `o/r@abc1234`), the revisions as given (`HEAD~1..HEAD`, `REV^!` for a commit) or what shapr chose (`uncommitted changes`, `stdin`), with ` in PATH...` when paths limited it. The text summary names it too, where the full text output names only what shapr chose. |
+| `input` | string or null | As `meta.input`: the form the change was named in. |
 | `verdict`, `hunks`, `review_lines`, `test_review_lines`, `refactor_share` | | As in the `summary` record. |
 | `claims` | string array | The categories the messages claim (`summary.claims.experimental.categories` above 0). |
-| `unproven` | string array | Each claim the code doesn't bear out, as the text output's `unproven:` and `conflict:` lines say it. |
-| `read_first` | array | The logic to read, ranked: a residual that nearly proved a structural kind first, then more review lines, then more facets. At most 15; `more` places the rest. Below. |
-| `more` | object | The logic left out of `read_first`: `items`, `review_lines`, and `at`, their places. |
-| `unproven_structure` | array | Parts of a structural kind that aren't structure: `at`, `kind`, and `why`, their assumptions and move contexts. |
-| `skip` | object | Proven structure, to skip: `hunks` (wholly structure), `changed_lines` in structure parts, and `kinds`, part count per kind. |
+| `unproven` | array | Each claim the code doesn't bear out (`summary.claims.experimental.conflicts`): `claim`, `finding`, and `hunks`, the places of every hunk behind it. |
+| `read_first` | array | The lines to read, ranked: residuals, and proven parts that still need reading (`extract`, `inline`, `typing`: their `review_lines` above 0). A residual that nearly proved a structural kind first, then more review lines, then more facets. At most 15; `more` places the rest. Below. |
+| `more` | object | The items left out of `read_first`: `items`, `review_lines`, and `at`, their places. |
+| `unproven_structure` | array | Parts of a structural kind that aren't structure: `at`, `kind`, `review_lines`, and `why`, their assumptions and move contexts. |
+| `skip` | object | Proven structure with no line to read (`review_lines` 0), to skip: `hunks` (wholly structure, nothing to read), `changed_lines` in those parts, and `kinds`, part count per kind. |
 | `style_checked` | int | Hunks whose new code was judged against at least one norm (see [Style](#style)). |
 | `style` | array | Each deviation from a diverging norm: `at`, `norm`, `expected`. Empty with `style_checked` above 0: the new code follows the norms around it. |
-| `outside` | object | Per category, the places of the hunks outside the verdict. |
+| `outside` | object | Per category, the hunks outside the verdict: `review_lines`, summed (a file no frontend parses is still read), and `at`, their places. |
 
-Each `read_first` item is one hunk's residual, or the residuals, in any
-file, that share a reason:
+Every review line is placed once: `read_first` and `more`, `unproven_structure`
+and `outside` sum to `review_lines`.
+
+Each `read_first` item is one hunk's residual or proven part still to read,
+or several of one kind, in any file, that share a reason and facets, tests
+apart from code:
 
 | field | type | meaning |
 |---|---|---|
 | `at` | string array | The hunks' places. |
-| `review_lines` | int | The residuals' `review_lines`, summed. |
-| `facets` | string array | The residual's facets. |
-| `with` | object | Changed lines per structural kind proven in the same hunk, beside the logic. |
+| `kind` | string | `logic` for residuals, else the structural kind proven. |
+| `review_lines` | int | The parts' `review_lines`, summed. |
+| `facets` | string array | The parts' facets. |
+| `with` | object | Changed lines per structural kind proven in the item's hunks, beside the logic, summed; empty for a structural item. |
 | `test` | bool | In a test file, or carrying the `test` facet. |
-| `note` | string or null | The residual's reason: which structural kind it resembles and why it isn't one. |
-| `relocated` | string or null | The text output's note on lines relocated verbatim. |
+| `note` | string or null | The part's reason: for a residual, which structural kind it resembles and why it isn't one. |
+| `relocated` | string or null | The text output's note on lines relocated verbatim; for several hunks, their relocated lines summed. |
 
 ## GitHub input
 
@@ -1399,7 +1409,7 @@ the change exits 0, whatever the verdict.
 | code | meaning |
 |---|---|
 | 0 | success |
-| 2 | operational error: git failed (not a repository, a bad revision, a name that is neither a revision nor a path, a range reaching past a shallow clone's history: `shallow clone: the base commit isn't fetched`, naming `fetch-depth: 0` and `git fetch --unshallow`), stdin unreadable, stdin holds no diff (no file header), a merge against all its parents (`shapr R` or `R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), GitHub failed (unreachable, not found, rate limited, a fetch refused), or shapr itself failed (`internal error: ..., please report it`: a bug, never a verdict) |
+| 2 | operational error: git failed (not a repository, a bad revision, a name that is neither a revision nor a path, a range reaching past a shallow clone's history: `shallow clone: the base commit isn't fetched`, naming `fetch-depth: 0` and `git fetch --unshallow`), stdin unreadable, stdin holds no diff (no file header), a malformed hunk header in a file's section (`not a diff: malformed hunk header at line N`: one that doesn't parse, or line numbers past the platform's integer; a line starting `@@ ` in a mail's headers or commit message is text), a merge against all its parents (`shapr R` or `R^!` on a merge, a combined `diff --cc`: diff against one parent, `R^1..R`), GitHub failed (unreachable, not found, rate limited, a fetch refused), or shapr itself failed (`internal error: ..., please report it`: a bug, never a verdict) |
 | 64 | usage: a bad command line (a revision starting with `-`, one revision that isn't one commit: `REV^{tree}`, `REV:PATH`, `REV^@`, more than two revisions, a range beside another revision, a bare `--merge-base`), a name that is both a revision and a path (use `--`), a revision after a path, no input (no arguments and an empty or blank stdin), a GitHub file or directory page (`/blob/`, `/tree/`), a malformed GitHub form, an ambiguous `#N`, or a relative cache directory |
 
 An empty diff from a range (`shapr main..main`) is the verdict `none`.

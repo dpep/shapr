@@ -423,7 +423,13 @@ fn dispatch() -> ExitCode {
     {
         return fail(format, &format!("the diff is {}", git::MERGE), ERROR);
     }
-    let files = diff::parse(&text);
+    let files = match diff::parse(&text) {
+        Ok(files) => files,
+        Err(diff::Malformed(line)) => {
+            let message = format!("not a diff: malformed hunk header at line {line}");
+            return fail(format, &message, ERROR);
+        }
+    };
     let stdin = matches!(input, Input::Stdin);
     if stdin && files.is_empty() {
         // An empty pipe is usually an upstream failure (`git diff nope | shapr`).
@@ -502,7 +508,10 @@ fn dispatch() -> ExitCode {
     };
     let labels = classify::classify(&change, outside);
     let mut meta = report::Meta::new("classify", source).input(form, paths);
-    meta.subject = subject(&input, cli.merge_base.as_deref());
+    if let Some((subject, chosen)) = subject(&input, cli.merge_base.as_deref()) {
+        meta.subject = Some(subject);
+        meta.subject_chosen = chosen;
+    }
     meta.untracked = untracked.as_ref().map(Vec::len);
     if let Some(note) = untracked
         .as_deref()
@@ -666,30 +675,36 @@ fn shell_word(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
-/// What INPUT compares, in the words of the text summary, when shapr chose it
-/// (the working tree, the index, a merge base, stdin); `None` when the caller
-/// spelled it out as revisions, or for a GitHub change, which names its source.
-fn subject(input: &Input, base: Option<&str>) -> Option<String> {
+/// What INPUT compares, in the words of the text summary, and whether shapr
+/// chose it (the working tree, the index, a merge base, stdin) rather than the
+/// caller spelling it out as revisions; `None` for a GitHub change, which names
+/// its source.
+fn subject(input: &Input, base: Option<&str>) -> Option<(String, bool)> {
     let Input::Local { form, range, paths } = input else {
-        return matches!(input, Input::Stdin).then(|| "stdin".to_string());
+        return matches!(input, Input::Stdin).then(|| ("stdin".to_string(), true));
     };
-    let compared = match form {
-        // The caller typed these; echoing them back says nothing.
+    let (compared, chosen) = match form {
         report::Input::Commit | report::Input::Range | report::Input::MergeBaseRange => {
-            return None;
+            (range.clone(), false)
         }
-        report::Input::MergeBaseWorktree => format!("{}...working tree", base.unwrap_or(range)),
-        report::Input::Worktree => "uncommitted changes".to_string(),
-        report::Input::Staged if range == "HEAD" => "staged changes".to_string(),
-        report::Input::Staged => format!("staged changes against {range}"),
+        report::Input::MergeBaseWorktree => {
+            (format!("{}...working tree", base.unwrap_or(range)), true)
+        }
+        report::Input::Worktree => ("uncommitted changes".to_string(), true),
+        report::Input::Staged if range == "HEAD" => ("staged changes".to_string(), true),
+        report::Input::Staged => (format!("staged changes against {range}"), true),
         report::Input::Stdin | report::Input::GithubPr | report::Input::GithubCommit => {
             return None;
         }
     };
-    Some(match paths.as_slice() {
+    let compared = match paths.as_slice() {
         [] => compared,
-        paths => format!("{compared} in {}", paths.join(" ")),
-    })
+        paths => {
+            let words: Vec<String> = paths.iter().map(|p| shell_word(p)).collect();
+            format!("{compared} in {}", words.join(" "))
+        }
+    };
+    Some((compared, chosen))
 }
 
 /// The form revisions take, before git is asked anything.
