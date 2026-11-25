@@ -1,0 +1,12 @@
+{
+  "description": "a subject mentioning a test (\"why a test hunk is logic\") is a test hint, not a claim that only tests changed, so code outside tests doesn't conflict with it",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "summary": {
+      "claims": {
+        "hints": [{"hint": "keyword", "value": "test", "category": "test", "field": "subject"}],
+        "experimental": {"categories": {"test": 1}, "conflicts": []}
+      }
+    }
+  }
+}

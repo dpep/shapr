@@ -1,0 +1,12 @@
+{
+  "description": "\"Just tests.\" claims only tests changed, which a changed condition in code doesn't bear out",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "summary": {
+      "claims": {
+        "hints": [{"hint": "test_only", "value": "just tests", "category": "test", "field": "body"}],
+        "experimental": {"conflicts": [{"claim": "test", "finding": "non_test_behavior_hunks", "count": 1, "hunks": [0]}]}
+      }
+    }
+  }
+}

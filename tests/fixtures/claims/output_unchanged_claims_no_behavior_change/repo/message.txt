@@ -1,0 +1,3 @@
+Use one helper for the gate
+
+Output is unchanged.

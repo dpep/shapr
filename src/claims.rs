@@ -313,8 +313,11 @@ impl Claims {
             if reorder && !code.hunks.is_empty() && !code.hunks.iter().any(|h| h.reorder) {
                 conflict(Category::Refactor, Finding::NoReorderParts, ids(&|_| true));
             }
+            // Only a test-only claim says nothing outside tests changed: a
+            // test word alone may name what else the change is about.
+            let test_only = self.hints.iter().any(|h| h.hint == HintKind::TestOnly);
             let outside_tests = ids(&|h| h.behavior && !h.test);
-            if tests && !outside_tests.is_empty() {
+            if test_only && !outside_tests.is_empty() {
                 conflict(Category::Test, Finding::NonTestBehaviorHunks, outside_tests);
             }
         }
@@ -422,10 +425,21 @@ const NO_BEHAVIOR_CHANGE: &[&str] = &[
     "no behaviour change",
     "no functional change",
     "no logic change",
+    "no behavioral change",
+    "no behavioural change",
+    "without changing behavior",
+    "without changing behaviour",
     "behavior preserving",
     "behaviour preserving",
     "pure refactor",
 ];
+
+/// What a consumer of the change observes, for a clause saying it stays the
+/// same.
+const OBSERVED: &[&str] = &["output", "behavior", "behaviour"];
+
+/// Closing words of "no change to ...": what it names is observed.
+const OBSERVED_NOUNS: &[&str] = &["output", "behavior", "behaviour", "hash", "hashes", "json"];
 
 /// Keywords claiming a reorder, checked against the reorder and move parts.
 const REORDER: &[&str] = &["reorder", "reordered", "reordering", "alphabetize"];
@@ -436,6 +450,10 @@ const STYLE_FIXES: &[&str] = &["fix", "fixes", "fixed", "fixing"];
 
 /// Phrases saying the change is to test code, matched as `NO_BEHAVIOR_CHANGE`.
 const TEST_ONLY: &[&str] = &["test only", "tests only", "spec only", "specs only"];
+
+/// Clauses saying the change is to test code, matched whole: elsewhere
+/// "only tests" describes code ("a method only tests reach").
+const TEST_ONLY_CLAUSES: &[&str] = &["only tests", "only specs", "just tests", "just specs"];
 
 /// Words before an issue reference that say it was a bug.
 const FIXING: &[&str] = &["fix", "fixes", "fixed"];
@@ -570,6 +588,19 @@ fn hints_in(message: &Message) -> Vec<Hint> {
                 add(HintKind::TestOnly, phrase, Some(Category::Test), field);
             }
         }
+        for clause in clauses(text) {
+            if let Some(said) = unchanged_claim(&clause) {
+                add(
+                    HintKind::NoBehaviorChange,
+                    &said,
+                    Some(Category::Refactor),
+                    field,
+                );
+            }
+            if TEST_ONLY_CLAUSES.contains(&clause.as_str()) {
+                add(HintKind::TestOnly, &clause, Some(Category::Test), field);
+            }
+        }
         if tokens(text).any(|w| w == "NFC") {
             add(
                 HintKind::NoBehaviorChange,
@@ -674,6 +705,95 @@ fn purpose_words(text: &str) -> Vec<String> {
     out
 }
 
+/// TEXT's clauses, normalized: split at `.;:!?` before a space or the end,
+/// at blank lines and at list items. A wrapped line doesn't end one.
+fn clauses(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut flush = |current: &mut String| {
+        let clause = normalize(current);
+        if !clause.is_empty() {
+            out.push(clause);
+        }
+        current.clear();
+    };
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let item = ["- ", "* ", "+ "]
+            .iter()
+            .find_map(|m| trimmed.strip_prefix(m));
+        if trimmed.is_empty() || item.is_some() {
+            flush(&mut current);
+        }
+        let mut chars = item.unwrap_or(line).chars().peekable();
+        while let Some(c) = chars.next() {
+            match ".;:!?".contains(c) && chars.peek().is_none_or(|n| n.is_whitespace()) {
+                true => flush(&mut current),
+                false => current.push(c),
+            }
+        }
+        current.push(' ');
+    }
+    flush(&mut current);
+    out
+}
+
+/// The words of a clause claiming that what a consumer observes stays the
+/// same, ending it or its first comma: opening it, "(the) output is
+/// unchanged"; anywhere, "no change to any error's hash" or "this commit
+/// doesn't change behavior". A qualified subject ("Unix behavior is
+/// unchanged") or a complement ("the same for nil") claims nothing.
+fn unchanged_claim(clause: &str) -> Option<String> {
+    let parts: Vec<&str> = clause.split(',').map(str::trim).collect();
+    let opening = parts[0].strip_prefix("the ").unwrap_or(parts[0]);
+    if let Some((noun, rest)) = opening.split_once(' ')
+        && let Some((verb, complement)) = rest.split_once(' ')
+        && OBSERVED.contains(&noun)
+        && ["is", "stays", "remains"].contains(&verb)
+        && [
+            "unchanged",
+            "the same",
+            "identical",
+            "byte for byte the same",
+            "byte for byte identical",
+        ]
+        .contains(&complement)
+    {
+        return Some(parts[0].to_string());
+    }
+    for part in parts {
+        let words: Vec<&str> = part.split(' ').collect();
+        // "no change(s) to/in" and up to four words closing on what's observed.
+        for (i, w) in words.windows(3).enumerate() {
+            let named = &words[i + 3..];
+            if w[0] == "no"
+                && ["change", "changes"].contains(&w[1])
+                && ["to", "in"].contains(&w[2])
+                && (1..=4).contains(&named.len())
+                && named.last().is_some_and(|n| OBSERVED_NOUNS.contains(n))
+            {
+                return Some(words[i..].join(" "));
+            }
+        }
+        // "this (commit) doesn't change (any) behavior"
+        for negation in ["does not change ", "doesn't change "] {
+            let Some((before, after)) = part.split_once(negation) else {
+                continue;
+            };
+            let observed = after.strip_prefix("any ").unwrap_or(after);
+            // The last two words before it, nearest first.
+            let subject: Vec<&str> = before.trim_end().rsplit(' ').take(2).collect();
+            if ["behavior", "behaviour"].contains(&observed)
+                && let Some(at) = subject.iter().position(|w| *w == "this")
+            {
+                let said: Vec<&str> = subject[..=at].iter().rev().copied().collect();
+                return Some(format!("{} {negation}{after}", said.join(" ")));
+            }
+        }
+    }
+    None
+}
+
 fn tokens(text: &str) -> impl Iterator<Item = &str> {
     text.split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|w| !w.is_empty())
@@ -682,6 +802,7 @@ fn tokens(text: &str) -> impl Iterator<Item = &str> {
 fn normalize(text: &str) -> String {
     text.to_lowercase()
         .replace('-', " ")
+        .replace('\u{2019}', "'")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -890,6 +1011,87 @@ mod tests {
         assert!(hints("Skip an unchanged file").is_empty());
         assert!(hints("Skip the walk on a large, unchanged repo").is_empty());
         assert!(hints("Speed up\n\nThe suite, unchanged.").is_empty());
+    }
+
+    #[test]
+    fn a_clause_saying_what_is_observed_stays_the_same_claims_no_behavior_change() {
+        let said = |body: &str| -> Vec<String> {
+            hints(&format!("Use the helpers\n\n{body}"))
+                .into_iter()
+                .filter(|h| h.0 == HintKind::NoBehaviorChange)
+                .map(|h| h.1)
+                .collect()
+        };
+        for (body, value) in [
+            ("Output is unchanged.", "output is unchanged"),
+            (
+                "Tidy; output is byte-for-byte the same.",
+                "output is byte for byte the same",
+            ),
+            (
+                "The output is unchanged, including escapes.",
+                "the output is unchanged",
+            ),
+            (
+                "Behaviour is unchanged: it still logs.",
+                "behaviour is unchanged",
+            ),
+            ("- Behavior stays the same", "behavior stays the same"),
+            (
+                "No change to any error's hash; specs pass.",
+                "no change to any error's hash",
+            ),
+            (
+                "There are no changes in the JSON.",
+                "no changes in the json",
+            ),
+            (
+                "This commit doesn\u{2019}t change any behaviour, but",
+                "this commit doesn't change any behaviour",
+            ),
+            (
+                "Meaning this does not change behavior.",
+                "this does not change behavior",
+            ),
+        ] {
+            assert_eq!(said(body), [value], "{body}");
+        }
+        for body in [
+            "This changes output.",
+            "The output is no longer unchanged.",
+            "Output is not unchanged.",
+            "Without the index the behavior is unchanged.",
+            "Without the index\nthe behavior is unchanged.",
+            "Unix behavior is unchanged.",
+            "The behavior is the same for nil.",
+            "Output is identical on a 2,372-query harness.",
+            "No change to the default of 5 at this stage.",
+            "Users notice no change in behavior because it is cached.",
+            "It is ignored and doesn't change behavior.",
+            "This does not change behavior of the migration if you use one.",
+        ] {
+            assert!(said(body).is_empty(), "{body}: {:?}", said(body));
+        }
+    }
+
+    #[test]
+    fn only_or_just_tests_claims_test_only_as_a_whole_clause() {
+        let only = |body: &str| -> Vec<String> {
+            hints(&format!("Cover the gate\n\n{body}"))
+                .into_iter()
+                .filter(|h| h.0 == HintKind::TestOnly)
+                .map(|h| h.1)
+                .collect()
+        };
+        assert_eq!(only("Just tests."), ["just tests"]);
+        assert_eq!(only("- Only specs"), ["only specs"]);
+        for body in [
+            "A method only tests reach counts as dead.",
+            "Backtraces in normal runs, not just tests.",
+            "It only tests the happy path.",
+        ] {
+            assert!(only(body).is_empty(), "{body}: {:?}", only(body));
+        }
     }
 
     #[test]
