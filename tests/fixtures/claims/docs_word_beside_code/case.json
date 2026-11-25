@@ -1,0 +1,13 @@
+{
+  "description": "a commit subject naming the README beside a behavior change claims nothing, so nothing conflicts with the code",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {
+      "claims": {
+        "hints": [],
+        "experimental": {"conflicts": []}
+      }
+    }
+  }
+}

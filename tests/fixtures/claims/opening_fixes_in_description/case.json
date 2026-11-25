@@ -1,0 +1,12 @@
+{
+  "description": "a description whose body opens with \"Fixes the ...\" claims fix",
+  "args": ["-j", "--message", "message.txt", "HEAD~1..HEAD"],
+  "expect": {
+    "summary": {
+      "claims": {
+        "hints": [{"hint": "keyword", "value": "fixes", "category": "fix", "field": "body"}],
+        "experimental": {"categories": {"fix": 1, "docs": 0}, "conflicts": []}
+      }
+    }
+  }
+}

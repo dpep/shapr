@@ -190,6 +190,10 @@ impl Frontend for Rust {
         roles::construct(tree, id)
     }
 
+    fn pattern(&self, tree: &Tree, id: NodeId) -> Option<super::Pattern> {
+        roles::pattern(tree, id)
+    }
+
     /// Rust has no default arguments: no argument restates one.
     fn signature(&self, _: &Tree, _: NodeId) -> Option<Signature> {
         None

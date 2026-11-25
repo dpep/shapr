@@ -1,0 +1,17 @@
+{
+  "description": "a Rust test fn that trades three assertions for one carries removes_assertions",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {"$some": "removes_assertions"},
+            "detail": {"assertions": {"removed": 2, "added": 1}}
+          }
+        ]
+      }
+    ]
+  }
+}

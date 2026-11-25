@@ -350,8 +350,9 @@ const PASSES: &[Pass] = &[
 pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     let mut labels = passes(change, outside);
     runs::refine(change, outside, &mut labels);
-    facets::run(change, &mut labels);
+    // Facets read the relocated runs.
     relocate::run(change, &mut labels);
+    facets::run(change, &mut labels);
     debug_assert!(aligned(change, &labels), "per-hunk lists out of step");
     labels
 }

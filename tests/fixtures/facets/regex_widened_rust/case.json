@@ -1,0 +1,4 @@
+{
+  "description": "a pattern Rust passes to Regex::new widened: regex_widened",
+  "expect": {"hunks": [{"kind": "logic", "parts": [{"kind": "logic", "facets": {"$some": "regex_widened"}}]}]}
+}

@@ -2,7 +2,7 @@
 //! own text (the name it declares or calls) instead of as a child.
 
 use super::{Walker, is_comment, kind, span, trailing};
-use crate::frontend::Construct;
+use crate::frontend::{Construct, Pattern};
 use crate::tree::{Canonical, Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
 use tree_sitter::Node;
@@ -908,6 +908,13 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         "call_expression" | "tuple_struct_pattern" if first_named("Err") => Construct::Error,
         "parameters" => Construct::Parameters,
         "function_item" | "mod_item" if test_item(tree, id) => Construct::Test,
+        "macro_invocation"
+            if matches!(name, Some(n) if ["assert", "debug_assert", "prop_assert"]
+                .iter()
+                .any(|p| n.starts_with(p))) =>
+        {
+            Construct::Assertion
+        }
         _ => return None,
     })
 }
@@ -953,4 +960,89 @@ fn test_item(tree: &Tree, id: NodeId) -> bool {
             matches!(text.as_str(), "#[test]" | "#[cfg(test)]" | "#[rstest]")
                 || text.ends_with("::test]")
         })
+}
+
+/// The pattern `id` spells when it is a string literal passed first to
+/// `Regex::new`: a raw string's text, or a plain string's with `\\` and
+/// `\"` unescaped (`None` for other escapes, which the regex would read
+/// another way).
+pub(super) fn pattern(tree: &Tree, id: NodeId) -> Option<Pattern> {
+    let node = tree.node(id);
+    let args = node.parent?;
+    let call = tree.node(args).parent?;
+    let callee = tree.node(call);
+    let regex = callee.name.as_deref() == Some("new")
+        && tree.node(args).kind == "arguments"
+        && tree.code_children(args).next() == Some(id)
+        && (callee.children.first()).is_some_and(|&c| {
+            let c = tree.node(c);
+            c.role == Role::Reference(NameKind::Class) && c.name.as_deref() == Some("Regex")
+        });
+    if !regex {
+        return None;
+    }
+    let text = std::str::from_utf8(tree.text(&node.extent)).ok()?;
+    let body = match node.kind {
+        "raw_string_literal" => {
+            let rest = text.strip_prefix('r')?;
+            let hashes = "#".repeat(rest.len() - rest.trim_start_matches('#').len());
+            let inner = rest
+                .strip_prefix(hashes.as_str())?
+                .strip_suffix(hashes.as_str())?;
+            inner.strip_prefix('"')?.strip_suffix('"')?.to_string()
+        }
+        "string_literal" => {
+            let inner = text.strip_prefix('"')?.strip_suffix('"')?;
+            let mut out = String::new();
+            let mut chars = inner.chars();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => match chars.next()? {
+                        e @ ('\\' | '"') => out.push(e),
+                        _ => return None,
+                    },
+                    _ => out.push(c),
+                }
+            }
+            out
+        }
+        _ => return None,
+    };
+    Some(Pattern {
+        body,
+        flags: String::new(),
+        extended: false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frontend::{Frontend, Rust};
+
+    fn patterns(source: &str) -> Vec<String> {
+        let tree = Rust.parse(source.as_bytes().to_vec());
+        (tree.descendants(Tree::ROOT))
+            .filter_map(|id| pattern(&tree, id))
+            .map(|p| p.body)
+            .collect()
+    }
+
+    #[test]
+    fn a_string_passed_first_to_regex_new_is_a_pattern() {
+        assert_eq!(
+            patterns(
+                "fn f() {\n    regex::Regex::new(r#\"a\"{2}\"#);\n    Regex::new(\"\\\\d+\");\n}\n"
+            ),
+            ["a\"{2}", "\\d+"]
+        );
+        for source in [
+            "fn f() { Regex::new(\"\\n\"); }\n",
+            "fn f() { Other::new(\"a{2}\"); }\n",
+            "fn f() { Regex::with(\"a{2}\"); }\n",
+            "fn f() { Regex::new(&s); }\n",
+        ] {
+            assert!(patterns(source).is_empty(), "{source}");
+        }
+    }
 }

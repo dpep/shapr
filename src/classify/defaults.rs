@@ -20,7 +20,7 @@ use super::site::{CodeLines, Side as SiteSide};
 use super::{Claim, Confidence, Evidence, Kind, Labels, Method, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::frontend::{self, Arguments, Frontend};
-use crate::tree::{Flags, MARK, NameKind, NodeId, Receiver, Role, Span, Tree};
+use crate::tree::{Flags, NameKind, NodeId, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
@@ -323,6 +323,26 @@ impl Pair<'_> {
         }
     }
 
+    /// [`Pair::describe`], saying when the call on the other side passes
+    /// nothing: a call with no arguments may mean something else than its
+    /// defaults (WebMock's bare `to_return` is an empty response sequence).
+    fn describe_unproven(&self, r: &Restated) -> String {
+        let what = self.describe(r);
+        let (side, call) = match r.side {
+            Side::Before => (Side::After, r.calls.1),
+            Side::After => (Side::Before, r.calls.0),
+        };
+        let tree = self.tree(side);
+        if !empty(&self.frontend.arguments(tree, call)) {
+            return what;
+        }
+        let method = tree.node(call).name.as_deref().unwrap_or_default();
+        match r.side {
+            Side::Before => format!("{what}, leaving `{method}` with no arguments"),
+            Side::After => format!("{what} to `{method}`, which passed none"),
+        }
+    }
+
     fn text(&self, side: Side, id: NodeId) -> String {
         let tree = self.tree(side);
         String::from_utf8_lossy(tree.text(&tree.node(id).extent)).into_owned()
@@ -359,14 +379,28 @@ impl Pair<'_> {
     fn restates(&self, x: NodeId, y: NodeId, found: &mut Vec<Restated>) -> Option<bool> {
         let (tb, ta) = (&self.trees.before, &self.trees.after);
         let (nx, ny) = (tb.node(x), ta.node(y));
-        let unmarked = |tree: &Tree, id| -> Vec<u8> {
-            let text = tree.own_text(id, false).into_iter();
-            text.filter(|&b| b != MARK).collect()
-        };
         if !matches!(nx.role, Role::Call(_))
             || (nx.role, nx.kind, &nx.name) != (ny.role, ny.kind, &ny.name)
-            || unmarked(tb, x) != unmarked(ta, y)
         {
+            return None;
+        }
+        let (ax, ay) = (
+            self.frontend.arguments(tb, x),
+            self.frontend.arguments(ta, y),
+        );
+        // A call left passing nothing may drop its list's delimiters too.
+        let emptied = empty(&ax) != empty(&ay);
+        let unmarked = |tree: &Tree, id, args: &Option<Arguments>| -> Vec<u8> {
+            let skip = match (emptied, args) {
+                (true, Some(a)) => &a.delimiters[..],
+                _ => &[],
+            };
+            (tree.own_offsets(id))
+                .filter(|at| !tree.ignored(*at) && !skip.contains(at))
+                .map(|at| tree.source[at])
+                .collect()
+        };
+        if unmarked(tb, x, &ax) != unmarked(ta, y, &ay) {
             return None;
         }
         let others = |tree: &Tree, id| -> Vec<NodeId> {
@@ -401,10 +435,7 @@ impl Pair<'_> {
             ));
             Some(true)
         };
-        let (Some(ax), Some(ay)) = (
-            self.frontend.arguments(tb, x),
-            self.frontend.arguments(ta, y),
-        ) else {
+        let (Some(ax), Some(ay)) = (ax, ay) else {
             return near(
                 "the call's arguments can't each be tied to a parameter \
                  (a splat, `...`, or a key that isn't a plain symbol)",
@@ -443,6 +474,12 @@ impl Pair<'_> {
         }
         Some(same)
     }
+}
+
+/// The call passes no argument.
+fn empty(args: &Option<Arguments>) -> bool {
+    args.as_ref()
+        .is_some_and(|a| a.positional.is_empty() && a.keywords.is_empty())
 }
 
 /// The one code child (or descendant, through children that differ alone)
@@ -566,7 +603,7 @@ impl<'c> Lookups<'c> {
     fn prove(&mut self, f: usize, pair: &Pair, r: &Restated) -> Result<Proof, String> {
         let (tree, frontend) = (pair.tree(r.side), pair.frontend);
         let value = pair.text(r.side, r.value);
-        let what = pair.describe(r);
+        let what = pair.describe_unproven(r);
         let fail = |why: String| format!("{what}, not shown to restate a default: {why}");
         if !frontend.plain_literal(tree, r.value) {
             return Err(fail(format!("`{value}` isn't a plain literal")));

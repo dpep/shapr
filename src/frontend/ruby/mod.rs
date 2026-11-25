@@ -216,6 +216,10 @@ impl Frontend for Ruby {
         roles::construct(tree, id)
     }
 
+    fn pattern(&self, tree: &Tree, id: NodeId) -> Option<super::Pattern> {
+        roles::pattern(tree, id)
+    }
+
     fn signature(&self, tree: &Tree, def: NodeId) -> Option<Signature> {
         signature::signature(tree, def)
     }

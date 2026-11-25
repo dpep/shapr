@@ -450,6 +450,13 @@ fn judge(
     {
         return Err(format!("calls {} instead of {}", pair.to, pair.from));
     }
+    // The old definition gone and its uses on another name: no rename story.
+    if !facts.defined && defines(change, pair, facts, &pair.from) == (true, false) {
+        return Err(format!(
+            "{} is removed and its uses become {}: a replacement, not a rename",
+            pair.from, pair.to
+        ));
+    }
     holds(change, pair, facts, all, outside).map_err(|why| match swapped(change, pair, facts) {
         true => String::new(),
         false => format!("renames {} to {}, but {why}", pair.from, pair.to),
@@ -465,6 +472,24 @@ fn swapped(change: &Change, pair: &Pair, facts: &Facts) -> bool {
     let has =
         |roots: &Roots, name: &str| roots.iter().any(|&(_, t, r)| conflicts(t, r, scope, name));
     has(&before, &pair.to) && has(&after, &pair.from)
+}
+
+/// Whether `name` is defined in the name's scope, before and after the
+/// change.
+fn defines(change: &Change, pair: &Pair, facts: &Facts, name: &str) -> (bool, bool) {
+    let scope = pair.space.scope;
+    let (before, after) = roots(change, pair, facts);
+    let any = |roots: &Roots| {
+        roots.iter().any(|&(_, t, root)| {
+            t.descendants(root).any(|id| {
+                let n = t.node(id);
+                n.name.as_deref() == Some(name)
+                    && n.role.defines().is_some()
+                    && Scope::of(n.role) == Some(scope)
+            })
+        })
+    };
+    (any(&before), any(&after))
 }
 
 /// Whether method `pair.to` has a definition, in the change's after side or
@@ -520,7 +545,11 @@ fn holds(
         }
     }
     if !facts.defined {
-        return Err(format!("{from}'s definition isn't renamed"));
+        return Err(match defines(change, pair, facts, from) {
+            (_, true) => format!("{from}'s definition is kept, not renamed"),
+            (true, false) => format!("{from}'s definition is removed, not renamed"),
+            (false, false) => format!("{from} isn't defined in the change"),
+        });
     }
     if let Some(why) = &facts.blocked {
         return Err(why.clone());

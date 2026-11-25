@@ -39,7 +39,12 @@ pub(super) fn signature(tree: &Tree, def: NodeId) -> Option<Signature> {
 }
 
 pub(super) fn arguments(tree: &Tree, call: NodeId) -> Option<Arguments> {
-    let mut arguments = Arguments::default();
+    let mut arguments = Arguments {
+        delimiters: (tree.own_offsets(call))
+            .filter(|&at| matches!(tree.source[at], b'(' | b')'))
+            .collect(),
+        ..Arguments::default()
+    };
     let list = tree
         .code_children(call)
         .find(|&c| tree.node(c).flags.contains(Flags::ARGUMENTS));
@@ -252,6 +257,8 @@ mod tests {
             .map(|(k, v)| (k.as_str(), text(&tree, *v)))
             .collect();
         assert_eq!(keywords, [("a", "1"), ("b", "2"), ("c", "3")]);
+        let delimiters: Vec<u8> = a.delimiters.iter().map(|&at| tree.source[at]).collect();
+        assert_eq!(delimiters, b"()");
     }
 
     #[test]

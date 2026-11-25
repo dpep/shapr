@@ -1,0 +1,11 @@
+{
+  "description": "assertions removed from production code aren't a test residual's: no removes_assertions",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [{"kind": "logic", "facets": {"$every": {"$not": "removes_assertions"}}}]
+      }
+    ]
+  }
+}

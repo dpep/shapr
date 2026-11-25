@@ -5,12 +5,15 @@
 //! changed, on each side: a construct present on one side and not the other
 //! (by kind, name, own text and what it tests) is a change to it.
 
-use super::{Label, Labels, Method};
-use crate::change::{Change, Trees};
+mod regex;
+
+use super::{Label, Labels, Method, Relocation};
+use crate::change::{Category, Change, Trees};
 use crate::diff::{Hunk, Lines};
-use crate::frontend::{self, Construct, Frontend};
+use crate::frontend::{self, Construct, Frontend, Pattern};
 use crate::tree::{NameKind, NodeId, Role, Span, Tree};
 use serde::Serialize;
+use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -34,10 +37,17 @@ pub enum Facet {
     ErrorHandling,
     /// Only literal values differ (numbers, strings, symbols, booleans).
     LiteralOnly,
+    /// Test code left holding fewer assertions than it removed.
+    RemovesAssertions,
+    /// A literal regular expression changed so that it matches everything
+    /// it did, and more where it changed.
+    RegexWidened,
+    /// A literal regular expression changed, not shown to widen.
+    RegexChanged,
 }
 
 impl Facet {
-    pub const ALL: [Facet; 7] = [
+    pub const ALL: [Facet; 10] = [
         Facet::Test,
         Facet::AddsDefinition,
         Facet::RemovesDefinition,
@@ -45,6 +55,9 @@ impl Facet {
         Facet::Condition,
         Facet::ErrorHandling,
         Facet::LiteralOnly,
+        Facet::RemovesAssertions,
+        Facet::RegexWidened,
+        Facet::RegexChanged,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -56,6 +69,9 @@ impl Facet {
             Facet::Condition => "condition",
             Facet::ErrorHandling => "error_handling",
             Facet::LiteralOnly => "literal_only",
+            Facet::RemovesAssertions => "removes_assertions",
+            Facet::RegexWidened => "regex_widened",
+            Facet::RegexChanged => "regex_changed",
         }
     }
 }
@@ -75,7 +91,17 @@ pub fn run(change: &Change, labels: &mut Labels) {
                 .as_ref()
                 .filter(|_| label.residual.evidence.method == Method::Ast)
             {
-                parsed.facets(&residual(hunk, label), &mut facets);
+                let hunk = residual(hunk, label);
+                parsed.facets(&hunk, &mut facets);
+                let test = file.category == Category::Test || facets.contains(&Facet::Test);
+                let (removed, added) = parsed.assertions(&hunk, &label.residual.relocated);
+                if test && added < removed {
+                    facets.insert(Facet::RemovesAssertions);
+                    label.residual.detail.insert(
+                        "assertions".to_string(),
+                        json!({"removed": removed, "added": added}),
+                    );
+                }
             }
             label.residual.facets = facets.into_iter().collect();
         }
@@ -124,24 +150,42 @@ struct TreeFacts<'a> {
     definitions: BTreeMap<Vec<String>, Vec<NodeId>>,
     /// Line ranges of test items.
     tests: Vec<(usize, usize)>,
+    /// The first line of each assertion, ascending.
+    assertions: Vec<usize>,
+    /// Each literal regular expression's first line and pattern, in order.
+    patterns: Vec<(usize, Pattern)>,
 }
 
 impl<'a> TreeFacts<'a> {
     fn new(tree: &'a Tree, frontend: &dyn Frontend) -> Self {
         let mut definitions: BTreeMap<Vec<String>, Vec<NodeId>> = BTreeMap::new();
         let mut tests = Vec::new();
+        let mut assertions = Vec::new();
+        let mut patterns = Vec::new();
         for id in tree.descendants(Tree::ROOT) {
+            if let Some(pattern) = frontend.pattern(tree, id) {
+                patterns.push((tree.node(id).extent.start, pattern));
+            }
             if definition(tree, id) {
                 definitions.entry(qualified(tree, id)).or_default().push(id);
             }
-            if frontend.construct(tree, id) == Some(Construct::Test) {
-                tests.push(tree.lines(id).into_inner());
+            match frontend.construct(tree, id) {
+                Some(Construct::Test) => tests.push(tree.lines(id).into_inner()),
+                Some(Construct::Assertion) => assertions.push(*tree.lines(id).start()),
+                _ => {}
             }
         }
+        assertions.sort_unstable();
+        patterns.sort_by_key(|(at, _)| *at);
+        let patterns = (patterns.into_iter())
+            .map(|(at, p)| (tree.line_of(at), p))
+            .collect();
         TreeFacts {
             tree,
             definitions,
             tests,
+            assertions,
+            patterns,
         }
     }
 }
@@ -272,6 +316,30 @@ impl<'a> Parsed<'a> {
         if self.literal_only(&before, &after) {
             facets.insert(Facet::LiteralOnly);
         }
+        match regexes(&before, &after) {
+            Some(regex::Change::Widened) => facets.insert(Facet::RegexWidened),
+            Some(regex::Change::Changed) => facets.insert(Facet::RegexChanged),
+            None => false,
+        };
+    }
+
+    /// Assertions starting on the hunk's changed lines, removed and added,
+    /// outside lines `relocated` verbatim to or from another hunk.
+    fn assertions(&self, hunk: &Hunk, relocated: &[Relocation]) -> (usize, usize) {
+        let count = |facts: &TreeFacts, changed: &[usize], added: bool| {
+            let moved = |line: &usize| {
+                relocated
+                    .iter()
+                    .any(|r| r.added == added && r.lines.contains(line))
+            };
+            (facts.assertions.iter())
+                .filter(|l| changed.binary_search(l).is_ok() && !moved(l))
+                .count()
+        };
+        (
+            count(&self.before, &hunk.removed, false),
+            count(&self.after, &hunk.added, true),
+        )
     }
 
     /// Every changed code line on the side lies in a test item.
@@ -454,6 +522,39 @@ impl<'a> Parsed<'a> {
     }
 }
 
+/// How the literal regular expressions on the changed lines changed: those
+/// on one side and not the other, paired in order when they are as many
+/// (none added or dropped outright). `None` when none changed that way.
+fn regexes<'s>(before: &Side<'s>, after: &Side<'s>) -> Option<regex::Change> {
+    fn on<'s>(side: &Side<'s>) -> Vec<&'s Pattern> {
+        (side.facts.patterns.iter())
+            .filter(|(line, _)| side.changed.binary_search(line).is_ok())
+            .map(|(_, p)| p)
+            .collect()
+    }
+    let (mut old, mut new) = (on(before), on(after));
+    old.retain(|p| match new.iter().position(|q| q == p) {
+        Some(i) => {
+            new.remove(i);
+            false
+        }
+        None => true,
+    });
+    if old.is_empty() || old.len() != new.len() {
+        return None;
+    }
+    let widened = old.iter().zip(&new).all(|(o, n)| {
+        o.flags == n.flags
+            && !o.extended
+            && !n.extended
+            && regex::compare(&o.body, &n.body) == regex::Change::Widened
+    });
+    Some(match widened {
+        true => regex::Change::Widened,
+        false => regex::Change::Changed,
+    })
+}
+
 /// The extents of definitions a side gained or lost outright.
 fn skips(side: &Side, ids: &[NodeId]) -> Vec<Span> {
     ids.iter()
@@ -481,8 +582,13 @@ mod tests {
                 | Facet::RemovesDefinition
                 | Facet::Signature
                 | Facet::Condition
-                | Facet::ErrorHandling => {}
-                Facet::LiteralOnly => assert_eq!(i, Facet::ALL.len() - 1, "the last variant"),
+                | Facet::ErrorHandling
+                | Facet::LiteralOnly
+                | Facet::RemovesAssertions
+                | Facet::RegexWidened => {}
+                Facet::RegexChanged => {
+                    assert_eq!(i, Facet::ALL.len() - 1, "the last variant")
+                }
             }
         }
     }
