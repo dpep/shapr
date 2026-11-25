@@ -1271,7 +1271,8 @@ comma or colon is in double quotes there, as is one git quotes.
 |---|---|---|
 | `record` | `"digest"` | |
 | `schema` | int | As in the `meta` record. |
-| `subject` | string or null | The change: a GitHub change's name, or what shapr chose to compare (`meta.subject`). |
+| `subject` | string or null | What was compared, always: a GitHub change's name (`o/r#12`, `o/r@abc1234`), the revisions as given (`HEAD~1..HEAD`, `REV^!` for a commit) or what shapr chose (`uncommitted changes`, `stdin`), with ` in PATH...` when paths limited it. The text summary names it too, where the full text output names only what shapr chose. |
+| `input` | string or null | As `meta.input`: the form the change was named in. |
 | `verdict`, `hunks`, `review_lines`, `test_review_lines`, `refactor_share` | | As in the `summary` record. |
 | `claims` | string array | The categories the messages claim (`summary.claims.experimental.categories` above 0). |
 | `unproven` | string array | Each claim the code doesn't bear out, as the text output's `unproven:` and `conflict:` lines say it. |

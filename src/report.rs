@@ -113,10 +113,14 @@ pub struct Meta {
     /// the working tree leaves out, as `git diff` does; `None` for any
     /// other change.
     pub untracked: Option<usize>,
-    /// What was compared, for the text summary (`main...HEAD`,
-    /// `uncommitted changes in lib`); a GitHub change names its `source`.
+    /// What was compared (`main...HEAD`, `uncommitted changes in lib`); a
+    /// GitHub change names its `source`.
     #[serde(skip)]
     pub subject: Option<String>,
+    /// Whether shapr chose the subject, which the text summary then names;
+    /// the caller knows revisions it typed.
+    #[serde(skip)]
+    pub subject_chosen: bool,
 }
 
 impl Meta {
@@ -131,6 +135,7 @@ impl Meta {
             paths: None,
             untracked: None,
             subject: None,
+            subject_chosen: false,
         }
     }
 
@@ -727,7 +732,7 @@ fn line(out: &mut impl Write, record: &impl Serialize) -> io::Result<()> {
 }
 
 fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
-    summary_text(out, report)?;
+    summary_text(out, report, false)?;
     if !report.hunks.is_empty() {
         writeln!(out)?;
     }
@@ -782,7 +787,9 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
 }
 
 /// The change's verdict and counts, then claims: the text output's first lines.
-fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
+/// The summary lines; STANDALONE names the subject even when the caller typed
+/// it, for output read without the command line.
+fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::Result<()> {
     let s = &report.summary;
     // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
     let kinds: Vec<String> = (s.kinds.iter())
@@ -795,7 +802,9 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             false => "",
         };
         format!("{}{merge}: ", source.name())
-    } else if let Some(subject) = &report.meta.subject {
+    } else if let Some(subject) =
+        (report.meta.subject.as_ref()).filter(|_| standalone || report.meta.subject_chosen)
+    {
         format!("{subject}: ")
     } else {
         String::new()

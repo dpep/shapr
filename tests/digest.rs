@@ -309,3 +309,28 @@ fn hunks_outside_the_verdict_carry_their_review_lines() {
     let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
     assert!(text.contains(", 2 review lines: x.c:1\n"), "{text}");
 }
+
+#[test]
+fn digest_says_what_was_compared() {
+    let dir = repo(&[&[("a.rb", BEFORE)], &[("a.rb", AFTER)]]);
+    let digest = |args: &[&str]| {
+        let args = [&["-j", "--digest"], args].concat();
+        report(&shapr(dir.path(), &args))
+    };
+    let range = digest(&["HEAD~1..HEAD"]);
+    assert_eq!(range["subject"], "HEAD~1..HEAD");
+    assert_eq!(range["input"], "range");
+    let commit = digest(&["HEAD"]);
+    assert_eq!(commit["subject"], "HEAD^!");
+    assert_eq!(commit["input"], "commit");
+    assert_eq!(
+        digest(&["HEAD~1..HEAD", "--", "a.rb"])["subject"],
+        "HEAD~1..HEAD in a.rb"
+    );
+
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(text.starts_with("HEAD~1..HEAD: "), "{text}");
+    // The full text output names only what shapr chose.
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(!text.starts_with("HEAD~1..HEAD"), "{text}");
+}

@@ -17,6 +17,7 @@ pub struct Digest<'a> {
     record: &'static str,
     schema: u32,
     subject: Option<String>,
+    input: Option<super::Input>,
     verdict: Verdict,
     hunks: usize,
     review_lines: usize,
@@ -252,6 +253,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
         subject: (report.meta.source.as_ref())
             .map(|s| s.name())
             .or(report.meta.subject.clone()),
+        input: report.meta.input,
         verdict: s.verdict,
         hunks: s.hunks,
         review_lines: s.lines.review_lines,
@@ -299,7 +301,7 @@ pub fn json(out: &mut impl Write, report: &Report) -> io::Result<()> {
 
 pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     let d = build(report);
-    summary_text(out, report)?;
+    summary_text(out, report, true)?;
     if !d.read_first.is_empty() {
         emit(out, "read first:")?;
     }
