@@ -4,7 +4,11 @@
 //! claims no line and changes no label, so a reader can discount lines it
 //! has already read where they were.
 //!
-//! Lines compare as text with every whitespace byte dropped. A block needs
+//! Lines compare as text the way the trees compare code: a leaf (string
+//! content, a heredoc body) and a verbatim span byte for byte, elsewhere
+//! each run of whitespace as one space, none at the line's ends. Where
+//! whitespace sits still counts, as it may change the parse (`offset -1` is
+//! a call, `offset - 1` a subtraction). A block needs
 //! [`MIN_LINES`] lines with two words or more (a lone `end`, `}`, `else` or
 //! name is too common to show anything moved), must match one removed run
 //! and one added run only, and never pairs a hunk with itself (a reindent
@@ -12,7 +16,7 @@
 
 use super::{Labels, Relocation};
 use crate::change::Change;
-use crate::tree::Tree;
+use crate::tree::{Span, Tree};
 use std::collections::HashMap;
 
 /// Lines of two words or more a block needs. Two such lines recur by
@@ -152,6 +156,7 @@ fn segments(change: &Change, labels: &Labels, added: bool) -> Vec<Vec<Line>> {
             true => &trees.after,
             false => &trees.before,
         };
+        let leaves = leaves(tree);
         for (h, label) in labels.iter().enumerate() {
             let lines = match added {
                 true => &label.residual.lines.after,
@@ -164,7 +169,7 @@ fn segments(change: &Change, labels: &Labels, added: bool) -> Vec<Vec<Line>> {
                     out.push(std::mem::take(&mut seg));
                 }
                 prev = Some(line);
-                let text = normalized(tree, line);
+                let text = normalized(tree, &leaves, line);
                 if text.is_empty() {
                     continue;
                 }
@@ -184,14 +189,49 @@ fn segments(change: &Change, labels: &Labels, added: bool) -> Vec<Vec<Line>> {
     out
 }
 
-/// A line's bytes with every whitespace byte dropped.
-fn normalized(tree: &Tree, line: usize) -> Vec<u8> {
+/// The spans of a tree's leaves, whose bytes compare exactly: sorted and
+/// disjoint.
+fn leaves(tree: &Tree) -> Vec<Span> {
+    let mut spans: Vec<Span> = tree
+        .nodes
+        .iter()
+        .filter(|n| n.children.is_empty())
+        .map(|n| n.span.clone())
+        .collect();
+    spans.sort_by_key(|s| s.start);
+    let mut out: Vec<Span> = Vec::new();
+    for s in spans {
+        match out.last_mut() {
+            Some(last) if s.start <= last.end => last.end = last.end.max(s.end),
+            _ => out.push(s),
+        }
+    }
+    out
+}
+
+/// A line's bytes, whitespace in a leaf or verbatim span kept, elsewhere
+/// each run made one space and the line's ends trimmed.
+fn normalized(tree: &Tree, leaves: &[Span], line: usize) -> Vec<u8> {
+    let exact = |at: usize| {
+        let i = leaves.partition_point(|s| s.end <= at);
+        leaves.get(i).is_some_and(|s| s.contains(&at)) || tree.verbatim(at)
+    };
     let span = tree.line_span(line, line);
-    let text = tree.text(&span);
-    text.iter()
-        .copied()
-        .filter(|b| !b.is_ascii_whitespace())
-        .collect()
+    let mut out = Vec::new();
+    let mut gap = false;
+    for at in span {
+        let b = tree.source[at];
+        if b.is_ascii_whitespace() && !exact(at) {
+            gap = true;
+            continue;
+        }
+        if gap && !out.is_empty() {
+            out.push(b' ');
+        }
+        gap = false;
+        out.push(b);
+    }
+    out
 }
 
 /// Runs of identifier bytes (letters, digits, `_`, anything non-ASCII).

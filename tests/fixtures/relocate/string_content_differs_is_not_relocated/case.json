@@ -1,0 +1,7 @@
+{
+  "description": "statements moved to another file with the spaces inside their strings dropped: the strings differ, so the lines aren't relocated verbatim",
+  "expect": {
+    "hunks": {"$every": {"relocated_lines": 0}},
+    "summary": {"relocated_lines": 0}
+  }
+}

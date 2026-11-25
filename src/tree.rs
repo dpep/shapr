@@ -698,7 +698,7 @@ impl Tree {
         self.comments.get(i).is_some_and(|s| s.contains(&at))
     }
 
-    fn verbatim(&self, at: usize) -> bool {
+    pub fn verbatim(&self, at: usize) -> bool {
         let i = self.verbatim.partition_point(|s| s.end <= at);
         self.verbatim.get(i).is_some_and(|s| s.contains(&at))
     }

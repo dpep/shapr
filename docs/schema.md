@@ -961,7 +961,11 @@ says how many of those are relocated, so a reader may discount them.
 
 A run is consecutive residual lines on one side of a hunk (blank lines
 inside it are skipped, not compared), matched line for line, in order,
-against consecutive residual lines on the other side of another hunk. It
+against consecutive residual lines on the other side of another hunk.
+Lines match as the trees compare code: string content, heredoc bodies and
+other leaves byte for byte, elsewhere each run of whitespace as one space and
+none at the line's ends, so indentation never counts but `offset -1` (a call)
+doesn't match `offset - 1` (a subtraction), nor `", "` match `","`. It
 needs 3 lines of two words or more (a lone `end`, `}`, `else` or name is
 too common to show anything moved). Matching is unique or nothing: of the
 removed runs matching from a line, the longest wins, and when two are as
