@@ -31,14 +31,14 @@ A hunk's `kind` is a one-word rollup: `logic` unless every part is structure, el
 
 ## Verdicts
 
-Each file has a category (`code`, `test`, `docs`, `fixture`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), and only code, test, config and manifest files count toward the verdict, so a docs edit never makes a change `behavior`. Files under a `fixtures/`, `__fixtures__/` or `testdata/` directory are `fixture`: test data, bucketed and not classified, since the tests that read them judge them:
+Each file has a category (`code`, `test`, `docs`, `fixture`, `types`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), and only code, test, config and manifest files count toward the verdict, so a docs edit never makes a change `behavior`. Files under a `fixtures/`, `__fixtures__/` or `testdata/` directory are `fixture`: test data, bucketed and not classified, since the tests that read them judge them; RBI and RBS files (`*.rbi`, `sorbet/rbi/`, `sig/`) are `types`, read by a type checker and never by Ruby, likewise outside the verdict:
 
 | change | verdict |
 |---|---|
 | only structure parts, in files that count | `structure` |
 | only logic | `behavior` |
 | both | `mixed` |
-| a README or fixture edit, whitespace in an unparsed file, or nothing | `none` |
+| a README, fixture or RBI edit, whitespace in an unparsed file, or nothing | `none` |
 | only files shapr doesn't judge (a lockfile, a binary, an unparsed language) | `unknown` |
 
 A config or manifest edit is `behavior`. A README edit or a lockfile beside a reformat leaves it `structure`; `summary.verdicts` counts the hunks outside the verdict. The full rules are in [docs/schema.md](docs/schema.md#verdicts).
@@ -136,7 +136,7 @@ Each `classify` or `norms` run appends one JSON line to `$XDG_STATE_HOME/shapr/u
 [docs/schema.md](docs/schema.md) describes every field. Highlights:
 
 - per hunk: its `parts`, each with a `kind`, the lines it covers, a graded `confidence` with the `evidence` behind it, and for the `logic` part `facets` saying what kind of logic change it is (`condition`, `signature`, `error_handling`, `literal_only`, …); the hunk's `verdict` and `kind`; code and comment lines added and deleted, and `review_lines`, the code lines a reviewer still has to read (the last column of [Kinds](#kinds)), with `relocated_lines`, those of them the change removes or adds verbatim elsewhere (a fact, not structure: the residual keeps them, and `detail.relocated` says where they came from or went);
-- per file: its `category` (`code`, `test`, `docs`, `fixture`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), lines before the change, and the same line counts;
+- per file: its `category` (`code`, `test`, `docs`, `fixture`, `types`, `config`, `manifest`, `generated`, `vendored`, `binary`, `unknown`), lines before the change, and the same line counts;
 - a summary: the verdict, hunk counts per verdict and category, `review_lines` with `test_review_lines` split out, counts of parts per kind and facet, `structure_share`, and Kamei's diffusion measures (files, directories, subsystems, entropy);
 - per hunk, experimental: `style`, how its new code sits against the style norms inferred from the code around it (Ruby's, listed in [docs/schema.md](docs/schema.md#style)), with the deviations and a fix for each; deleting code chooses no style;
 - experimental, `summary.config_trajectory`: per norm `.rubocop.yml` sets, whether the change adds or removes offenses against it;

@@ -122,7 +122,7 @@ A hunk's `verdict` is the first that applies:
 | verdict | when |
 |---|---|
 | `unknown` | The file is `binary`, `generated` or `vendored`. |
-| `none` | The file is `docs` or `fixture`. |
+| `none` | The file is `docs`, `fixture` or `types`. |
 | `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
 | `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.comparison` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
 | `behavior` | A `code`, `test`, `config` or `manifest` file shapr didn't compare (`evidence.comparison` `"none"`): a config or manifest has no parser, and its text is the setting; code too big, nested too deep or unreadable is `logic` its reason names, never left out of the verdict on its own say. |
@@ -437,6 +437,7 @@ still parsed and classified. The first rule that matches wins:
 | `generated` | `.gitattributes` marks it `linguist-generated`; or a lockfile, by name in any directory (`Cargo.lock`, `Gemfile.lock`, `Package.resolved`, `Pipfile.lock`, `Podfile.lock`, `bun.lock`, `composer.lock`, `flake.lock`, `go.sum`, `mix.lock`, `npm-shrinkwrap.json`, `package-lock.json`, `pnpm-lock.yaml`, `poetry.lock`, `pubspec.lock`, `uv.lock`, `yarn.lock`); or a minified asset (`*.min.js`, `*.min.css`). |
 | `vendored` | Under a `vendor`, `third_party` or `node_modules` directory at the repository's top (deeper, such a directory is often the project's own namespace), or `.gitattributes` marks it `linguist-vendored` (`-linguist-vendored` unmarks one). |
 | `fixture` | Under a `fixtures`, `__fixtures__` or `testdata` directory, at any depth, unless it is binary, vendored, or `.gitattributes` marks it `linguist-generated` or `linguist-documentation`. It wins over the name rules below and over `generated` by name: `spec/fixtures/Gemfile.lock` and `tests/fixtures/a.rb` are fixtures. Test data: not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; the tests that read it judge it. |
+| `types` | Type declarations only a type checker reads: an `.rbi` or `.rbs` file, or any file under an `rbi` directory at any depth (`sorbet/rbi/`) or a top-level `sig/`, unless it is binary, vendored, a fixture, docs by name or attribute, or `.gitattributes` marks it `linguist-generated` (tapioca's `sorbet/rbi/gems/`, as it suggests). Like a fixture it wins over the name rules below: `spec/a.rbi` is types. Not parsed or compared (`parsed: false`), outside the verdict, `review_lines` 0; Ruby never loads it. |
 | `docs` | `.gitattributes` marks it `linguist-documentation`; or it is under a `doc`, `docs` or `documentation` directory; or its extension is prose (`md`, `markdown`, `mdx`, `txt`, `rdoc`, `adoc`, `asciidoc`, `rst`, `org`, `textile`); or its name, extension aside, is `README`, `LICENSE`, `LICENCE`, `COPYING`, `CHANGELOG`, `CHANGES`, `HISTORY`, `NEWS`, `AUTHORS`, `CONTRIBUTORS` or `NOTICE` (any case). |
 | `test` | Under a `spec`, `test`, `tests` or `__tests__` directory, or named `*_spec.rb`, `*_test.rb`, `*_test.rs`, `*_test.go`, `*_test.py`, `test_*.rb`, `test_*.py`, `*.test.*`, `*.spec.*`, `tests.rs` or `test.rs`. |
 | `manifest` | A dependency manifest, by name: `Gemfile`, `gems.rb`, `*.gemspec`, `Cargo.toml`, `package.json`, `go.mod`, `pyproject.toml`, `Pipfile`, `Podfile`, `composer.json`, `mix.exs`, `pubspec.yaml`, `Package.swift`, `flake.nix`. |
@@ -466,7 +467,7 @@ Test code inside a code file (a Rust `#[test]` fn or `#[cfg(test)]` mod) is
 not a category: it is the residual facet `test` (see [Facets](#facets)).
 
 A file's category decides whether its hunks count toward the verdict (see
-[Verdicts](#verdicts)). A `docs` or `fixture` file's `review_lines` is 0:
+[Verdicts](#verdicts)). A `docs`, `fixture` or `types` file's `review_lines` is 0:
 prose and test data aren't code to review. Generated and vendored files don't count toward size: their
 `review_lines` is 0, and the summary's line sums, `behavior_lines`, `entropy` and
 `structure_share` leave them out. Their own `added`, `deleted` and other
@@ -609,7 +610,7 @@ commits the form spans that touch the paths.
 | `old_file` | string or null | Path before the change; `null` for an added file. Differs from `file` on a rename. |
 | `language` | string or null | The frontend that parsed it (`"ruby"` or `"rust"`, see [Languages](#languages)); `null` when none did. |
 | `parsed` | bool | Every hunk in the file was compared as trees (`evidence.comparison` `"ast"`). |
-| `category` | string | What kind of file: `code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary` or `unknown`. See [Categories](#categories). |
+| `category` | string | What kind of file: `code`, `test`, `docs`, `fixture`, `types`, `config`, `manifest`, `generated`, `vendored`, `binary` or `unknown`. See [Categories](#categories). |
 | `lines_before` | int or null | Lines in the file before the change (Kamei's LT); 0 for an added file; `null` when its content couldn't be read. |
 | `hunks` | int | Hunk records that follow for this file. |
 | `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines`, `relocated_lines` | int | Sums over the file's hunks. |

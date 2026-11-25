@@ -1,0 +1,35 @@
+{
+  "description": "RBI and RBS files are category types: not classified, outside the verdict, no lines to review",
+  "expect": {
+    "files": {
+      "$every": {
+        "category": {
+          "$not": "unknown"
+        }
+      }
+    },
+    "hunks": {
+      "$some": {
+        "file": "lib/a.rb",
+        "verdict": "behavior"
+      },
+      "$every": {
+        "$not": {
+          "category": "unknown"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior",
+      "categories": {
+        "types": 5,
+        "code": 1
+      },
+      "verdicts": {
+        "none": 5,
+        "behavior": 1
+      },
+      "review_lines": 2
+    }
+  }
+}
