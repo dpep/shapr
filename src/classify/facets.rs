@@ -83,6 +83,7 @@ pub fn run(change: &Change, labels: &mut Labels) {
             _ => None,
         };
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
+            label.tests = parsed.as_ref().is_some_and(|p| p.touches_tests(hunk));
             if !label.has_residual() {
                 continue;
             }
@@ -340,6 +341,16 @@ impl<'a> Parsed<'a> {
             count(&self.before, &hunk.removed, false),
             count(&self.after, &hunk.added, true),
         )
+    }
+
+    /// A changed code line on either side lies in a test item.
+    fn touches_tests(&self, hunk: &Hunk) -> bool {
+        let touches = |facts: &TreeFacts, changed: &[usize]| {
+            (changed.iter())
+                .filter(|&&l| facts.tree.line(l).code)
+                .any(|&l| facts.tests.iter().any(|&(f, t)| f <= l && l <= t))
+        };
+        touches(&self.before, &hunk.removed) || touches(&self.after, &hunk.added)
     }
 
     /// Every changed code line on the side lies in a test item.

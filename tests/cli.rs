@@ -1619,6 +1619,26 @@ fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
 }
 
 #[test]
+fn text_says_when_logic_changed_and_no_test_did() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n")],
+        &[("a.rb", "def f\n  2\nend\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert_eq!(
+        text.lines().nth(1),
+        Some("no test changed: 1 code hunk holds logic (a.rb:2)"),
+        "{text}"
+    );
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n"), ("spec/a_spec.rb", "f\n")],
+        &[("a.rb", "def f\n  2\nend\n"), ("spec/a_spec.rb", "g\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(!text.contains("no test changed"), "{text}");
+}
+
+#[test]
 fn text_shows_a_residual_confidence_only_where_evidence_grades_it() {
     // A near miss carries the refused part's confidence; a plain residual's 1 ranks nothing.
     let before = "class A\n  def a\n    1\n  end\n\n  def b\n    __LINE__\n  end\nend\n";

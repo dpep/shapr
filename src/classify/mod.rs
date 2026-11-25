@@ -236,6 +236,9 @@ pub struct Label {
     pub changed: Claim,
     pub parts: Vec<Part>,
     pub residual: Residual,
+    /// A changed code line lies inside a test item (a Rust `#[test]` fn or
+    /// `#[cfg(test)]` mod): set with the facets, on parsed files.
+    pub tests: bool,
 }
 
 impl Label {
@@ -490,6 +493,7 @@ fn defaults(change: &Change) -> Labels {
                     changed: Claim::of(hunk),
                     parts: Vec::new(),
                     residual: residual.clone(),
+                    tests: false,
                 })
                 .collect()
         })
@@ -562,6 +566,7 @@ mod tests {
         };
         let mut label = Label {
             changed: Claim::of(&hunk),
+            tests: false,
             parts: Vec::new(),
             residual: Residual {
                 lines: Claim::default(),

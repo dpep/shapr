@@ -1286,6 +1286,7 @@ under `shapr norms` and a change's hunks alike.
 | `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
 | `assumptions` | object | Part count per assumption (see [Proof status](#proof-status)), every assumption present; a part with two counts under both. |
 | `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |
+| `logic_without_tests` | int | Hunks in `code` files, in the verdict, holding a residual, when the change touches no test code: no `test` file, and no changed code line inside a Rust `#[test]` fn or `#[cfg(test)]` mod. 0 when it does, and when a code hunk wasn't compared on its trees (`parsed` false), which could hide a test item. Config and manifest edits aren't code logic. The text output says so under the summary line, `no test changed: 2 code hunks hold logic (lib/a.rb:12, lib/b.rb:40)`, naming the first three. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |

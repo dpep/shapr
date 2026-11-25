@@ -241,6 +241,9 @@ pub struct HunkRecord<'a> {
     /// Its file counts toward the verdict ([`FileChange::counts`]).
     #[serde(skip)]
     counted_file: bool,
+    /// It changes test code: a test file, or a line in a test item.
+    #[serde(skip)]
+    tests: bool,
 }
 
 /// A part of a hunk, or its residual (kind `logic`).
@@ -323,6 +326,7 @@ pub struct Summary {
     move_contexts: BTreeMap<&'static str, usize>,
     assumptions: BTreeMap<&'static str, usize>,
     facets: BTreeMap<&'static str, usize>,
+    logic_without_tests: usize,
     files: usize,
     directories: usize,
     subsystems: usize,
@@ -394,6 +398,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 test_review_lines,
                 relocated_note: relocated_note(lines.relocated_lines, &label.residual),
                 counted_file: file.counts(),
+                tests: file.category == Category::Test || label.tests,
             });
         }
         files.push(FileRecord {
@@ -630,6 +635,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         move_contexts,
         assumptions,
         facets,
+        logic_without_tests: logic_without_tests(hunks).len(),
         files: files.len(),
         directories: dirs.len(),
         subsystems: subsystems.len(),
@@ -649,6 +655,18 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         config_trajectory: Vec::new(),
         bounds_hit: Vec::new(),
     }
+}
+
+/// Code hunks holding logic, in a change that touches no test code; none
+/// when a code hunk wasn't compared on its trees, which may hide a test.
+fn logic_without_tests<'h, 'a>(hunks: &'h [HunkRecord<'a>]) -> Vec<&'h HunkRecord<'a>> {
+    let code = |h: &&HunkRecord| h.category == Category::Code && h.verdict.counted();
+    if hunks.iter().any(|h| h.tests) || hunks.iter().filter(code).any(|h| !h.parsed) {
+        return Vec::new();
+    }
+    (hunks.iter().filter(code))
+        .filter(|h| h.parts.iter().any(|p| p.kind == Kind::Logic))
+        .collect()
 }
 
 /// Kamei et al.'s change entropy: −Σ pₖ·log₂ pₖ over each file's share of
@@ -863,6 +881,16 @@ fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::
     let refactor = refactor_text(report);
     if let Some(line) = &refactor {
         emit(out, line)?;
+    }
+    let untested = logic_without_tests(&report.hunks);
+    if !untested.is_empty() {
+        let n = untested.len();
+        let (s, verb) = if n == 1 { ("", "holds") } else { ("s", "hold") };
+        let line = format!(
+            "no test changed: {n} code hunk{s} {verb} logic{}",
+            places(&untested)
+        );
+        emit(out, &line)?;
     }
     claims(out, report, refactor.is_some())?;
     Ok(())

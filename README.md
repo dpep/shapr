@@ -93,6 +93,7 @@ Text output, for a commit that reformats one method's signature and changes anot
 
 ```
 mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
+no test changed: 1 code hunk holds logic (lib/greeter.rb:11)
 claims: refactor in 1 of 1 message
 unproven: claims refactor; 1 hunk not shown structural (lib/greeter.rb:11)
 

@@ -1,0 +1,4 @@
+{
+  "description": "a code hunk with logic and no test file or test item in the change: summary.logic_without_tests counts it",
+  "expect": {"summary": {"logic_without_tests": 1}}
+}
