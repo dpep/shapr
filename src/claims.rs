@@ -182,15 +182,15 @@ impl Claims {
         let mut hints = Vec::new();
         let mut categories: BTreeMap<&'static str, usize> =
             Category::ALL.iter().map(|c| (c.as_str(), 0)).collect();
-        let subjects: BTreeSet<&str> = messages
+        let subjects: BTreeSet<String> = messages
             .iter()
             .filter(|m| m.source == Source::Commit)
-            .map(|m| subject(&m.text))
+            .map(|m| title_key(&m.text))
             .collect();
         for message in messages {
             let mut found = hints_in(message);
             // A pull request titled after its commit says it once.
-            if message.source != Source::Commit && subjects.contains(subject(&message.text)) {
+            if message.source != Source::Commit && subjects.contains(&title_key(&message.text)) {
                 found.retain(|h| h.field == Field::Body);
             }
             let claimed: BTreeSet<Category> = found.iter().filter_map(|h| h.category).collect();
@@ -555,6 +555,15 @@ fn subject(text: &str) -> &str {
         .trim()
 }
 
+/// The subject as a title repeats it: case, spacing and closing punctuation
+/// aside.
+fn title_key(text: &str) -> String {
+    let words: Vec<&str> = subject(text).split_whitespace().collect();
+    let key = words.join(" ").to_lowercase();
+    key.trim_end_matches(|c: char| c.is_ascii_punctuation())
+        .to_string()
+}
+
 /// `type(scope)!: rest` as (type, breaking, rest), for a known type.
 fn conventional(subject: &str) -> Option<(String, bool, &str)> {
     let (head, rest) = subject.split_once(':')?;
@@ -770,5 +779,19 @@ mod tests {
             ]
         );
         assert!(hints("Update NFCReader").is_empty());
+    }
+
+    #[test]
+    fn a_title_repeating_a_subject_in_other_case_spacing_or_punctuation_claims_once() {
+        let message = |source, text: &str| Message {
+            source,
+            commit: None,
+            text: text.to_string(),
+        };
+        let claims = Claims::read(&[
+            message(Source::Commit, "fix lint errors"),
+            message(Source::PullRequest, "  fix LINT  errors.\n\nbody"),
+        ]);
+        assert_eq!(claims.experimental.categories["style"], 1);
     }
 }

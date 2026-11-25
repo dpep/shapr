@@ -783,7 +783,7 @@ against the code rather than instead of it.
 | field | type | meaning |
 |---|---|---|
 | `messages` | int | Messages read: one per commit, plus one for the description. |
-| `hints` | array | Each hint, in message order, once per message. A description whose subject repeats a commit's subject (a pull request titled after its one commit) adds no subject hints. Below. |
+| `hints` | array | Each hint, in message order, once per message. A description whose subject repeats a commit's subject, case, spacing and closing punctuation aside (a pull request titled after its one commit) adds no subject hints. Below. |
 | `experimental` | object | *Experimental*: judgements drawn from the hints. Below. |
 
 Each hint:
