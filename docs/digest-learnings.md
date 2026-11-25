@@ -5,12 +5,16 @@ rounds, and how `--digest` is shaped by them. Newest round last.
 
 ## Method
 
-Each round, every PR is reviewed three times by a fresh reviewer that sees
-only its own input:
+Each PR is reviewed once per arm by a fresh reviewer that sees only its own
+input:
 
 - A: the full JSON (`shapr -j owner/repo#N`)
 - B: the digest (`shapr --digest owner/repo#N`, text)
 - C: no shapr output
+- T: the default text output (`shapr owner/repo#N`), added in round 2
+
+Round 1 ran A, B and C; round 2 ran B and T against round 1's A and C, whose
+inputs don't change; round 3 ran A and B again, for a same-round comparison.
 
 Every arm also gets the PR's title, description and diff (`gh pr diff`): a
 reviewer sees those in practice, and shapr reads its claims from them. The
@@ -191,6 +195,111 @@ What reviewers said, both B and T:
 - Ranking: a near miss first, then lines, then facets. A facet marks an
   idiom rewrite as readily as a risk.
 
+## Round 3: a fresh A against the round-2 digest
+
+Built from main 5a0bd94 plus the digest commits. Both A (the full JSON,
+which round 2 didn't change) and B (the round-2 digest) were rerun with
+fresh reviewers, so B meets an A of its own round and the A arm gets a
+second sample.
+
+| PR | real finding | A | B |
+|---|---|---|---|
+| polyid#109 | `stub_const` dropped | yes | yes |
+| polyid#109 | `where.first` became `find_by` | yes | yes |
+| polyid#107 | eviction test proves nothing | yes | yes |
+| rwr#18 | false "not by the rule declaring this case" | no | yes |
+| rwr#18 | `--json` `case`/`rule` change unannounced | yes | yes |
+| rwr#18 | unrelated CHANGELOG correction mixed in | yes | yes |
+| flipper#1124 | bare `.to_return` | yes | partly: flagged as looking unfinished, called equivalent |
+| rq#36 | DECISIONS.md line not rewrapped | yes | yes |
+| **total** | | **7** | **7** (+1 partial) |
+
+The A arm itself moved between its two samples (8, then 7: round 3's A
+reviewer missed rwr#18's attribution, which round 1's caught), the same
+size as every gap between arms.
+
+What reviewers said: the digest's "the hunk also proves format_only" on
+polyid#107's `cache_spec.rb:318`, the hunk holding the PR's one real
+finding, read as "this hunk is safe" to two reviewers (round 2's T and
+round 3's B), when its structure is one deleted blank line beside six
+lines of removed assertions.
+
+## Round 3 change
+
+- Structure beside logic in a hunk is counted in lines, `beside it 1
+  format_only line`, and `with` is an object of changed lines per kind.
+
+## Stopping
+
+Three rounds. B matched A in both rounds that ran them side by side (8 and
+8, 7 and 7), and in round 2 sat within one finding of round 1's A, the same
+distance A sits from itself across rounds. Another round would measure
+reviewer variance, not the digest: every finding any arm missed was missed
+by some other arm too, and the misses the reviewers attributed to shapr
+are classification gaps (below), not digest gaps.
+
+## Summary
+
+The digest, as text (polyid#109, 797 bytes; its full JSON is 57.5 KB):
+
+```
+dpep/polyid#109: mixed: 19 hunks (6 format_only, 8 logic, 5 restyle); review 31 lines, 25 in tests; structure share 0.47
+claims: style in 1 of 2 messages
+unproven: claims style; 8 hunks are logic (lib/polyid.rb:98, lib/polyid/binary_uuid_type.rb:20, lib/polyid/version.rb:2, 5 more)
+read first:
+  spec/models/entry_points_spec.rb:32  8 lines (test)
+  spec/models/configuration_spec.rb:42  7 lines (test)
+  spec/models/configuration_spec.rb:75  5 lines (test)
+  spec/polyid_spec.rb:43  3 lines (test)
+  lib/polyid.rb:98  2 lines [condition]
+  lib/polyid/binary_uuid_type.rb:20  2 lines
+  lib/polyid/version.rb:2  2 lines
+  spec/spec_helper.rb:45  2 lines (test)
+skip, proven structure: 28 changed lines (6 format_only, 5 restyle); 11 hunks wholly structure
+style: no divergence in 13 hunks checked
+```
+
+Sizes over the 9 PRs: the full JSON 339 KB, the default text output 22 KB,
+the digest 7.5 KB as text (2.2% of the full JSON) and 15.9 KB as JSON
+(4.7%), the diffs 81 KB.
+
+Real findings per arm and round:
+
+| round | A (full JSON) | B (digest) | T (text output) | C (no shapr) |
+|---|---|---|---|---|
+| 1 | 8 | 8 | | 7 |
+| 2 | (round 1's 8) | 7 + 1 partial | 7 | (round 1's 7) |
+| 3 | 7 | 7 + 1 partial | | |
+
+What the evidence supports:
+
+- The digest keeps what reviewers used from the full JSON (the logic hunks
+  and their facets, near-miss reasons, claim conflicts, where the docs
+  hunks are, a style all-clear) at a fiftieth of its size, with no loss of
+  real findings. For an agent reading shapr beside the diff, it is the
+  better input than the full JSON.
+- It does not find more than the default text output, at a third of that
+  output's size, and C, with no shapr output at all, found 7 of 8. On these
+  9 PRs shapr changes where a reviewer looks first and how fast it can rule
+  hunks out more than what it finds. A set of PRs with known, subtle bugs
+  in large diffs would test that harder than this one could.
+- Reviewers drew the same requests from every arm, which point at the
+  classifier, not the presentation: the Classifier notes below.
+
+Open questions:
+
+- Does the digest earn a flag over the text output? It is a third of the
+  size and groups repeated reasons (flipper#1124's 73 hunks become 14
+  items), but reviewers found the same things in both. A cheaper move
+  could be to group repeated reasons in the text output itself.
+- Ranking moved twice and never changed a finding: on small PRs reviewers
+  read every listed hunk. Whether ranking matters on 50-hunk PRs is untested.
+- Should `-j --digest` exist? No reviewer read it; it was kept for agents
+  that parse, and is 2x the text.
+- The digest repeats a residual's confidence nowhere; reviewers of the full
+  JSON read "logic 1.00" on a near miss as overconfident. Worth settling in
+  the full output first.
+
 ## Classifier notes
 
 Issues seen in the rounds that belong to classification, not the digest.
@@ -235,4 +344,11 @@ Issues seen in the rounds that belong to classification, not the digest.
   other dropped defaults. Every reviewer who found it wanted it flagged.
   Proposal: a `default_argument` near miss that empties the argument list
   says so in its reason.
+- A test hunk that removes assertions (polyid#107's eviction test, six
+  expectations to one) is the riskiest hunk in a spec refactor and reads
+  like any other logic. Reviewers in every shapr arm asked for it. Proposal:
+  a facet on a test residual whose assertions (`expect`, `assert*`) drop
+  in count.
+- A regex quantifier widened (rspec-networking#29, `\h{2}` to `\h{1,2}`)
+  has no facet; reviewers wanted "accepts more input" spelled out.
 

@@ -51,8 +51,8 @@ struct Item<'a> {
     at: Vec<Place<'a>>,
     review_lines: usize,
     facets: Vec<&'static str>,
-    /// The structural kinds proven in the same hunk.
-    with: Vec<&'static str>,
+    /// Changed lines per structural kind proven in the same hunk.
+    with: BTreeMap<&'static str, usize>,
     test: bool,
     /// Why the residual isn't the structural kind it resembles.
     note: Option<String>,
@@ -182,10 +182,13 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             at: vec![place(h)],
             review_lines: r.review_lines,
             facets,
-            with: (h.parts.iter())
-                .filter(|p| p.kind != Kind::Logic)
-                .map(|p| p.kind.as_str())
-                .collect(),
+            with: (h.parts.iter()).filter(|p| p.kind != Kind::Logic).fold(
+                BTreeMap::new(),
+                |mut with, p| {
+                    *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
+                    with
+                },
+            ),
             test: h.category == Category::Test || r.facets.contains(&Facet::Test),
             relocated: h.relocated_note.clone(),
             risk: (!r.detail.contains_key("near"), risky),
@@ -276,7 +279,10 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             line.push_str(" (test)");
         }
         if !i.with.is_empty() {
-            line.push_str(&format!("; the hunk also proves {}", i.with.join(", ")));
+            let with: Vec<String> = (i.with.iter())
+                .map(|(k, n)| format!("{n} {k} line{}", plural(*n)))
+                .collect();
+            line.push_str(&format!("; beside it {}", with.join(", ")));
         }
         if let Some(note) = &i.note {
             line.push_str(&format!("; {note}"));

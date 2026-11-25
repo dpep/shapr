@@ -1283,7 +1283,7 @@ file, that share a reason:
 | `at` | string array | The hunks' places. |
 | `review_lines` | int | The residuals' `review_lines`, summed. |
 | `facets` | string array | The residual's facets. |
-| `with` | string array | The structural kinds proven in the same hunk. |
+| `with` | object | Changed lines per structural kind proven in the same hunk, beside the logic. |
 | `test` | bool | In a test file, or carrying the `test` facet. |
 | `note` | string or null | The residual's reason: which structural kind it resembles and why it isn't one. |
 | `relocated` | string or null | The text output's note on lines relocated verbatim. |
