@@ -778,13 +778,17 @@ fn uses(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> usize {
 /// would shadow, or a dynamic reference (for a field, an accessor of the
 /// same name).
 fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
+    if scope == Scope::Method {
+        return (tree.descendants(root)).any(|id| proof::names_method(tree, id, name).is_some());
+    }
     let spelling = tree.semantics.spelling;
     let bare = |s: &str| spelling.bare(s).to_string();
     tree.descendants(root).any(|id| {
         let n = tree.node(id);
         let Some(found) = n.name.as_deref() else {
             return scope != Scope::Local
-                && (literal_names(tree, id, &bare(name)) || directive_names(tree, id, name));
+                && (proof::literal_names(tree, id, &bare(name))
+                    || proof::directive_names(tree, id, name));
         };
         match n.role {
             // A computed name reaches methods (`send(n)`, `define_method`),
@@ -807,38 +811,6 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
             role => found == name && Scope::of(role) == Some(scope),
         }
     })
-}
-
-/// Whether `tree` uses method `name` anywhere: a definition, call or
-/// reference, a dynamic name that could spell it, or a plain literal.
-pub(super) fn mentions_method(tree: &Tree, name: &str) -> bool {
-    conflicts(tree, Tree::ROOT, Scope::Method, name)
-}
-
-/// A plain literal spelling `name` (`:name`, `"name"`, `name:`): DSLs such
-/// as callbacks and `autoload` name methods and constants this way, through
-/// calls no frontend can list.
-pub(super) fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
-    let n = tree.node(id);
-    if n.role != Role::Other || n.comment || !n.children.is_empty() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(tree.text(&n.span));
-    tree.semantics.spelling.literal_spells(&text, name)
-}
-
-/// A directive (a Rust doctest line) holding `name` as a word: its code isn't
-/// parsed into the tree, so any mention may be a use.
-pub(super) fn directive_names(tree: &Tree, id: NodeId, name: &str) -> bool {
-    let n = tree.node(id);
-    if !n.flags.contains(Flags::DIRECTIVE) {
-        return false;
-    }
-    let word = tree.semantics.spelling.bare(name);
-    let word = word.trim_end_matches(tree.semantics.spelling.suffixes);
-    String::from_utf8_lossy(tree.text(&n.span))
-        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|w| w == word)
 }
 
 /// A class, module or constant's name, which the tree also holds as a
