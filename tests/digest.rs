@@ -57,8 +57,9 @@ fn digest_lists_logic_and_counts_structure_to_skip() {
     assert_eq!(digest["skip"]["hunks"], 1);
     assert_eq!(
         digest["outside"]["docs"],
-        serde_json::json!(["README.md:1"])
+        serde_json::json!({"review_lines": 0, "at": ["README.md:1"]})
     );
+    assert_reconciles(&digest);
 
     let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
     assert!(text.contains("read first:\n  a.rb:11 "), "{text}");
@@ -82,6 +83,7 @@ fn digest_groups_hunks_sharing_a_note_and_is_smaller_than_the_report() {
     let read = digest["read_first"].as_array().unwrap();
     assert_eq!(read.len(), 1, "{digest}");
     assert_eq!(read[0]["at"], serde_json::json!(["a.rb:7", "a.rb:16"]));
+    assert_reconciles(&digest);
     assert!(
         out.len() * 4 < full.len(),
         "{} vs {}",
@@ -247,6 +249,7 @@ fn a_group_aggregates_its_members_and_keeps_tests_apart() {
     assert_eq!(fetch["with"], serde_json::json!({"format_only": 2}));
     assert_eq!(at("src/b.rb:2")["test"], false, "{digest}");
     assert_eq!(at("spec/b_spec.rb:3")["test"], true, "{digest}");
+    assert_reconciles(&digest);
 }
 
 #[test]
@@ -284,4 +287,25 @@ fn places_mark_deletions_and_quote_paths_with_separators() {
     let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
     assert!(text.contains("  gone.rb:1 (deleted)  "), "{text}");
     assert!(text.contains("  \"a b,c:d.rb\":2  "), "{text}");
+}
+
+#[test]
+fn hunks_outside_the_verdict_carry_their_review_lines() {
+    // No frontend reads C: its lines are read, outside the verdict.
+    let dir = repo(&[
+        &[("a.rb", BEFORE), ("x.c", "int x = 1;\n")],
+        &[("a.rb", AFTER), ("x.c", "int x = 2;\n")],
+    ]);
+    let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
+    let outside = digest["outside"].as_object().unwrap();
+    let group = outside
+        .values()
+        .next()
+        .unwrap_or_else(|| panic!("{digest}"));
+    assert_eq!(group["at"], serde_json::json!(["x.c:1"]), "{digest}");
+    assert_eq!(group["review_lines"], 2, "{digest}");
+    assert_reconciles(&digest);
+
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(text.contains(", 2 review lines: x.c:1\n"), "{text}");
 }

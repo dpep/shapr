@@ -30,7 +30,7 @@ pub struct Digest<'a> {
     skip: Skip,
     style_checked: usize,
     style: Vec<Style<'a>>,
-    outside: BTreeMap<&'static str, Vec<Place<'a>>>,
+    outside: BTreeMap<&'static str, Outside<'a>>,
 }
 
 /// `file:line`, its line on the before side when DELETED: the hunk only deletes.
@@ -89,7 +89,15 @@ struct More<'a> {
 struct Unproven<'a> {
     at: Place<'a>,
     kind: &'static str,
+    review_lines: usize,
     why: Vec<&'static str>,
+}
+
+/// The hunks of one category outside the verdict.
+#[derive(Serialize, Default)]
+struct Outside<'a> {
+    review_lines: usize,
+    at: Vec<Place<'a>>,
 }
 
 /// Proven structure with no line to read, as counts: what a reviewer can skip.
@@ -122,13 +130,12 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
     let mut unproven_structure = Vec::new();
     let mut style = Vec::new();
     let mut style_checked = 0;
-    let mut outside: BTreeMap<&'static str, Vec<Place>> = BTreeMap::new();
+    let mut outside: BTreeMap<&'static str, Outside> = BTreeMap::new();
     for h in &report.hunks {
         if !h.verdict.counted() {
-            outside
-                .entry(h.category.as_str())
-                .or_default()
-                .push(place(h));
+            let group = outside.entry(h.category.as_str()).or_default();
+            group.review_lines += h.lines.review_lines;
+            group.at.push(place(h));
             continue;
         }
         for p in h.parts.iter().filter(|p| p.kind != Kind::Logic) {
@@ -141,6 +148,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 unproven_structure.push(Unproven {
                     at: place(h),
                     kind: p.kind.as_str(),
+                    review_lines: p.review_lines,
                     why,
                 });
             }
@@ -341,9 +349,11 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         emit(
             out,
             &format!(
-                "unproven {} at {} ({})",
+                "unproven {} at {}, {} line{} ({})",
                 u.kind,
                 places(&[u.at]),
+                u.review_lines,
+                plural(u.review_lines),
                 u.why.join(", ")
             ),
         )?;
@@ -384,10 +394,17 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             ),
         )?;
     }
-    for (category, at) in &d.outside {
+    for (category, group) in &d.outside {
+        let lines = match group.review_lines {
+            0 => String::new(),
+            n => format!(", {n} review line{}", plural(n)),
+        };
         emit(
             out,
-            &format!("outside the verdict, {category}: {}", places(at)),
+            &format!(
+                "outside the verdict, {category}{lines}: {}",
+                places(&group.at)
+            ),
         )?;
     }
     Ok(())

@@ -1277,11 +1277,14 @@ comma or colon is in double quotes there, as is one git quotes.
 | `unproven` | string array | Each claim the code doesn't bear out, as the text output's `unproven:` and `conflict:` lines say it. |
 | `read_first` | array | The lines to read, ranked: residuals, and proven parts that still need reading (`extract`, `inline`, `typing`: their `review_lines` above 0). A residual that nearly proved a structural kind first, then more review lines, then more facets. At most 15; `more` places the rest. Below. |
 | `more` | object | The items left out of `read_first`: `items`, `review_lines`, and `at`, their places. |
-| `unproven_structure` | array | Parts of a structural kind that aren't structure: `at`, `kind`, and `why`, their assumptions and move contexts. |
+| `unproven_structure` | array | Parts of a structural kind that aren't structure: `at`, `kind`, `review_lines`, and `why`, their assumptions and move contexts. |
 | `skip` | object | Proven structure with no line to read (`review_lines` 0), to skip: `hunks` (wholly structure, nothing to read), `changed_lines` in those parts, and `kinds`, part count per kind. |
 | `style_checked` | int | Hunks whose new code was judged against at least one norm (see [Style](#style)). |
 | `style` | array | Each deviation from a diverging norm: `at`, `norm`, `expected`. Empty with `style_checked` above 0: the new code follows the norms around it. |
-| `outside` | object | Per category, the places of the hunks outside the verdict. |
+| `outside` | object | Per category, the hunks outside the verdict: `review_lines`, summed (a file no frontend parses is still read), and `at`, their places. |
+
+Every review line is placed once: `read_first` and `more`, `unproven_structure`
+and `outside` sum to `review_lines`.
 
 Each `read_first` item is one hunk's residual or proven part still to read,
 or several of one kind, in any file, that share a reason and facets, tests
