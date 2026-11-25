@@ -1810,3 +1810,22 @@ fn help_keeps_its_line_breaks() {
         assert!(text.lines().count() > 10, "{args:?}: {text}");
     }
 }
+
+#[test]
+fn a_malformed_hunk_header_is_an_error_not_an_empty_change() {
+    let dir = tempfile::tempdir().unwrap();
+    for header in [
+        "@@ -99999999999999999999999 +1 @@",
+        "@@ -1,x +1 @@",
+        "@@ garbage",
+    ] {
+        let diff = format!("--- a/a.rb\n+++ b/a.rb\n{header}\n-a\n+b\n");
+        let out = shapr_stdin(dir.path(), &[], &diff);
+        assert_eq!(out.status.code(), Some(2), "{header}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("not a diff: malformed hunk header at line 3"),
+            "{stderr}"
+        );
+    }
+}

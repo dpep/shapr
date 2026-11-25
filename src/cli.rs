@@ -423,7 +423,13 @@ fn dispatch() -> ExitCode {
     {
         return fail(format, &format!("the diff is {}", git::MERGE), ERROR);
     }
-    let files = diff::parse(&text);
+    let files = match diff::parse(&text) {
+        Ok(files) => files,
+        Err(diff::Malformed(line)) => {
+            let message = format!("not a diff: malformed hunk header at line {line}");
+            return fail(format, &message, ERROR);
+        }
+    };
     let stdin = matches!(input, Input::Stdin);
     if stdin && files.is_empty() {
         // An empty pipe is usually an upstream failure (`git diff nope | shapr`).

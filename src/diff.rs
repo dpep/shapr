@@ -96,12 +96,17 @@ impl Hunk {
     }
 }
 
-pub fn parse(text: &str) -> Vec<FileDiff> {
+/// A hunk header that doesn't parse, or whose body's line numbers pass
+/// usize: its line in the diff, from 1.
+#[derive(Debug, PartialEq)]
+pub struct Malformed(pub usize);
+
+pub fn parse(text: &str) -> Result<Vec<FileDiff>, Malformed> {
     let mut files: Vec<FileDiff> = Vec::new();
-    let mut lines = text.lines().peekable();
+    let mut lines = text.lines().enumerate().peekable();
     // Inside a `diff --git` header, `---` belongs to the current file.
     let mut in_header = false;
-    while let Some(line) = lines.next() {
+    while let Some((at, line)) = lines.next() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
             let (old, new) = split_git_header(rest);
             files.push(FileDiff {
@@ -124,11 +129,12 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
             }
         } else if line.starts_with("@@ ") {
             in_header = false;
+            let malformed = Malformed(at + 1);
             let Some((old_start, new_start)) = parse_range_header(line) else {
-                continue;
+                return Err(malformed);
             };
             let mut body = Vec::new();
-            while let Some(next) = lines.peek() {
+            while let Some((_, next)) = lines.peek() {
                 match next.as_bytes().first() {
                     Some(b' ' | b'-' | b'+') => body.push(*next),
                     Some(b'\\') => {}
@@ -138,16 +144,15 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
                 }
                 lines.next();
             }
-            // A body whose line numbers pass usize is malformed: dropped.
-            if let (Some(file), Some(hunk)) = (files.last_mut(), hunk(old_start, new_start, &body))
-            {
+            let hunk = hunk(old_start, new_start, &body).ok_or(malformed)?;
+            if let Some(file) = files.last_mut() {
                 file.hunks.push(hunk);
             }
         } else if let Some(file) = files.last_mut().filter(|_| in_header) {
             header_line(file, line);
         }
     }
-    files
+    Ok(files)
 }
 
 fn header_line(file: &mut FileDiff, line: &str) {
@@ -355,7 +360,7 @@ Binary files a/img.png and b/img.png differ
 
     #[test]
     fn parses_files_and_narrows_hunks() {
-        let files = parse(DIFF);
+        let files = parse(DIFF).unwrap();
         assert_eq!(files.len(), 4);
         let a = &files[0];
         assert_eq!(a.path(), "lib/a.rb");
@@ -398,7 +403,8 @@ Binary files a/img.png and b/img.png differ
     #[test]
     fn splits_a_hunk_into_runs_of_changed_lines() {
         let files =
-            parse("--- a/x\n+++ b/x\n@@ -1,7 +1,7 @@\n-a\n+A\n+B\n c\n d\n-e\n f\n-g\n+G\n-h\n");
+            parse("--- a/x\n+++ b/x\n@@ -1,7 +1,7 @@\n-a\n+A\n+B\n c\n d\n-e\n f\n-g\n+G\n-h\n")
+                .unwrap();
         let runs = files[0].hunks[0].runs();
         let sides: Vec<_> = runs
             .iter()
@@ -421,7 +427,8 @@ Binary files a/img.png and b/img.png differ
     fn reads_plain_unified_diffs_and_quoted_paths() {
         let files = parse(
             "--- \"a/sp\\303\\244ce.rb\"\n+++ \"b/sp\\303\\244ce.rb\"\n@@ -1 +1 @@\n-a\n+b\n",
-        );
+        )
+        .unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path(), "späce.rb");
         assert_eq!(files[0].hunks[0].removed, [1]);
@@ -430,18 +437,19 @@ Binary files a/img.png and b/img.png differ
     #[test]
     fn hostile_headers_and_paths_parse_without_panicking() {
         let max = usize::MAX;
+        // Line numbers past usize: malformed, like any header that doesn't
+        // parse.
+        for body in [
+            format!("@@ -{max},0 +1 @@\n+a\n"),
+            format!("@@ -1 +{max} @@\n-a\n+b\n+c\n"),
+            format!("@@ -{max} +1 @@\n a\n-b\n"),
+            "@@ -99999999999999999999999 +1 @@\n-a\n".into(),
+        ] {
+            let text = format!("--- a/a.rb\n+++ b/a.rb\n{body}");
+            assert_eq!(parse(&text).err(), Some(Malformed(3)), "{text}");
+        }
         // (diff, the file's path, its hunks' first after-side lines)
         let cases: &[(String, &str, &[usize])] = &[
-            // Line numbers past usize: the hunk is dropped, like any header
-            // that doesn't parse.
-            (format!("@@ -{max},0 +1 @@\n+a\n"), "a.rb", &[]),
-            (format!("@@ -1 +{max} @@\n-a\n+b\n+c\n"), "a.rb", &[]),
-            (format!("@@ -{max} +1 @@\n a\n-b\n"), "a.rb", &[]),
-            (
-                "@@ -99999999999999999999999 +1 @@\n-a\n".into(),
-                "a.rb",
-                &[],
-            ),
             (format!("@@ -1,{max} +1,{max} @@\n-a\n+b\n"), "a.rb", &[1]),
             (
                 format!("@@ -1 +{} @@\n-a\n+b\n", max - 1),
@@ -451,7 +459,7 @@ Binary files a/img.png and b/img.png differ
         ];
         for (body, path, starts) in cases {
             let text = format!("--- a/a.rb\n+++ b/a.rb\n{body}");
-            let files = parse(&text);
+            let files = parse(&text).unwrap();
             assert_eq!(files[0].path(), *path, "{text}");
             let got: Vec<usize> = files[0].hunks.iter().map(|h| h.after.start).collect();
             assert_eq!(got, *starts, "{text}");
@@ -467,9 +475,13 @@ Binary files a/img.png and b/img.png differ
         ];
         for (quoted, path) in paths {
             let text = format!("--- {quoted}\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n");
-            assert_eq!(parse(&text)[0].path(), path, "{text}");
+            assert_eq!(parse(&text).unwrap()[0].path(), path, "{text}");
             let git = format!("diff --git {quoted} {quoted}\n");
-            assert_eq!(parse(&git)[0].old_path.as_deref(), Some(path), "{git}");
+            assert_eq!(
+                parse(&git).unwrap()[0].old_path.as_deref(),
+                Some(path),
+                "{git}"
+            );
         }
     }
 }
