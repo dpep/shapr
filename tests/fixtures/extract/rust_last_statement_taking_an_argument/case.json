@@ -1,0 +1,7 @@
+{
+  "description": "a Rust method's last statement becomes a call to a new method taking an argument: no code of the caller runs after it",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

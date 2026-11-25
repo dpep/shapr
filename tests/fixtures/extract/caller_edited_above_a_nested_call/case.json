@@ -1,0 +1,7 @@
+{
+  "description": "statements extracted from inside a loop whose header also changed, the new method gaining a guard (the shape of graphql eb230f8ed74b): the chunk is the run standing where the call stands, inside the loop, not the whole loop, so the comparison is as sure as that run is like the body",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "extract", "structure": false, "confidence": 0.88, "detail": {"context": ["caller", "body"]}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "description": "the last statements of a Rust match arm become a call to a new method taking an argument: the arms after it never run after them, so no code of the caller does; the tree doesn't mark a match's arms as alternatives, so a later arm still reads as code following it",
+  "open": true,
+  "expect": {
+    "hunks": {
+      "$every": {
+        "kind": "extract",
+        "parts": [
+          {
+            "kind": "extract",
+            "structure": true
+          }
+        ]
+      }
+    },
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}

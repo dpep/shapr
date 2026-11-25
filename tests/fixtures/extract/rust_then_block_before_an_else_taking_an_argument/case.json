@@ -1,0 +1,7 @@
+{
+  "description": "the last statements of a Rust if's then-block become a call to a new method taking an argument: the else branch beside them never runs after them, so no code of the caller does",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

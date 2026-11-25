@@ -1,0 +1,7 @@
+{
+  "description": "a Rust method called in its caller's tail position, taking an argument, is inlined: the inverse of an extract there",
+  "expect": {
+    "hunks": {"$every": {"kind": "inline", "parts": [{"kind": "inline", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "description": "the last statements of a Rust loop body become a call to a new method taking a local the body declares: it drops at the end of each iteration either way, whatever follows the loop",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -18,6 +18,7 @@ use super::proof::{self, Assumption, Naming, Verified};
 use super::site::CodeLines;
 use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
 use crate::change::{Change, Trees};
+use crate::frontend::Construct;
 use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -275,34 +276,45 @@ fn find(
     let body_kind = calls.node(body).kind;
     let b_stmts = code_children(calls, body);
     let mut context = Vec::new();
-    // An expression first (a binding's value, an argument): the binding or
-    // the call around it stays in the caller. Then a run of statements; then,
-    // when the caller changed beyond the call, the run standing where it is.
-    let (expression, assigned, chunk) = match splice(calls, a_call, call, None, chunks, a_chunk) {
-        Some(chunk) => (true, None, chunk),
-        None => match splice(calls, a_call, stmt, Some(body_kind), chunks, a_chunk) {
-            Some(chunk) => (false, assigned, chunk),
-            None => {
-                context.push(Context::Caller);
-                let run = locate(calls, a_call, call, body_kind, chunks, a_chunk, &b_stmts)
-                    .ok_or("no statements where the call stands")?;
-                (false, assigned, run)
-            }
-        },
-    };
     let args = arguments(calls, call);
-    let flow = Flow::of(chunks, a_chunk, &chunk);
-
     let wired = args
         .as_ref()
         .filter(|args| args.len() == params.len())
         .and_then(|args| Names::wired(&params, args));
-    let exact = wired.and_then(|names| {
-        Matcher::new(calls, chunks, names).body(&b_stmts, &chunk, assigned.as_deref())
-    });
-    let matched = exact.or_else(|| {
-        Matcher::new(calls, chunks, Names::default()).body(&b_stmts, &chunk, assigned.as_deref())
-    });
+    // B's body against a chunk, under the call's wiring and else under any
+    // renaming: (exact, matched), each the renamed node count.
+    let fit = |chunk: &[NodeId], assigned: Option<&str>| {
+        let exact = wired
+            .clone()
+            .and_then(|names| Matcher::new(calls, chunks, names).body(&b_stmts, chunk, assigned));
+        let any = || Matcher::new(calls, chunks, Names::default()).body(&b_stmts, chunk, assigned);
+        (exact, exact.or_else(any))
+    };
+    // An expression (a binding's value, an argument) leaves the binding or
+    // the call around it in the caller; the whole statement moves when B's
+    // body matches only that (`x = b(...)`, B assigning and returning `x`).
+    // A chunk both splices find is a statement. When neither splices, the
+    // caller changed beyond the call: the run standing where it is.
+    let statements = splice(calls, a_call, stmt, Some(body_kind), chunks, a_chunk)
+        .map(|chunk| (false, assigned.clone(), chunk));
+    let expression = splice(calls, a_call, call, None, chunks, a_chunk)
+        .filter(|chunk| statements.as_ref().is_none_or(|(_, _, s)| s != chunk))
+        .map(|chunk| (true, None, chunk));
+    let spliced: Vec<_> = expression.into_iter().chain(statements).collect();
+    let fits = spliced
+        .iter()
+        .position(|(_, v, chunk)| fit(chunk, v.as_deref()).1.is_some());
+    let (expression, assigned, chunk) = match spliced.into_iter().nth(fits.unwrap_or(0)) {
+        Some(found) => found,
+        None => {
+            context.push(Context::Caller);
+            let run = locate(calls, a_call, call, body_kind, chunks, a_chunk, &b_stmts)
+                .ok_or("no statements where the call stands")?;
+            (false, assigned, run)
+        }
+    };
+    let flow = Flow::of(chunks, a_chunk, &chunk);
+    let (exact, matched) = fit(&chunk, assigned.as_deref());
     let nodes = chunk
         .iter()
         .flat_map(|&s| chunks.descendants(s))
@@ -327,6 +339,10 @@ fn find(
     let arg_set: HashSet<&str> = args.iter().flatten().map(String::as_str).collect();
     let free: HashSet<&str> = flow.free.iter().map(String::as_str).collect();
     let assigned_set: HashSet<&str> = assigned.iter().map(String::as_str).collect();
+    // The locals' flow is evidence only about code known to have moved: a
+    // chunk the caller splices around, or one the body matches. A run
+    // located by similarity under a changed body is a guess.
+    let pinned = shared.is_none() || !context.contains(&Context::Caller);
     let block_params: HashSet<&str> = chunks
         .descendants(a_chunk)
         .map(|n| chunks.node(n))
@@ -363,17 +379,31 @@ fn find(
         Err(Risk::BlockParameter)
     } else if rebound {
         Err(Risk::Jump)
-    } else if let Some(why) = shared
-        .is_none()
-        .then(|| miswired(exact.is_some() && free == arg_set, &flow, &assigned_set))
+    } else if let Some(why) = pinned
+        .then(|| misflowed(&flow, &assigned_set))
         .flatten()
+        .or_else(|| {
+            // Only a body that matched pairs each parameter with an argument;
+            // a body that differs leaves the call's line logic instead.
+            let paired = exact.is_some() && free == arg_set;
+            (shared.is_none() && !paired).then(|| Risk::Wiring.reason().to_string())
+        })
     {
-        // Only a body that matched pairs each parameter with an argument;
-        // a body that differs leaves the call's line logic instead.
         wiring = Some(why);
         Err(Risk::Wiring)
     } else if chunks.semantics.scoped_drop
-        && outlives(chunks, &chunk, expression, assigned.as_deref(), &params)
+        && outlives(
+            Around {
+                tree: chunks,
+                frontend,
+                a: a_chunk,
+                body_kind,
+            },
+            &chunk,
+            expression,
+            assigned.as_deref(),
+            args.as_deref().unwrap_or_default(),
+        )
     {
         Err(Risk::Drop)
     } else if mentioned(change, &method, dir, calls, b) == Some(Mention::Named) {
@@ -628,8 +658,8 @@ fn between(tree: &Tree, scope: NodeId, id: NodeId) -> Span {
 /// caller also changed elsewhere: A walked down the call's path, each
 /// level's child on it paired with the other side's child of the same kind
 /// and own text in the gap a longest common subsequence of hashes leaves
-/// around it; at the statement, of the gap's statements the run sharing the
-/// most with B's body.
+/// around it; at the deepest statements it pairs, of the gap's statements
+/// the run sharing the most with B's body.
 fn locate(
     calls: &Tree,
     a_call: NodeId,
@@ -646,13 +676,18 @@ fn locate(
         path.push(calls.node(top).parent?);
     }
     path.reverse();
+    // The deepest statements the walk pairs: the call's own, unless code
+    // around it changed form (a block `if` become a modifier).
+    let mut deepest = None;
     let (mut x, mut y) = (a_call, a_chunk);
     for &child in &path[1..] {
         let (cx, cy) = (code_children(calls, x), code_children(chunks, y));
         if calls.node(x).kind != chunks.node(y).kind || cx.len().saturating_mul(cy.len()) > 10_000 {
-            return None;
+            break;
         }
-        let i = cx.iter().position(|&c| c == child)?;
+        let Some(i) = cx.iter().position(|&c| c == child) else {
+            break;
+        };
         let pairs = lcs(
             cx.len(),
             cy.len(),
@@ -661,17 +696,21 @@ fn locate(
         );
         let lo = pairs.iter().rev().find(|p| p.0 < i).map_or(0, |p| p.1 + 1);
         let hi = pairs.iter().find(|p| p.0 > i).map_or(cy.len(), |p| p.1);
-        let gap = cy.get(lo..hi)?;
+        let Some(gap) = cy.get(lo..hi) else {
+            break;
+        };
         if calls.node(x).kind == body_kind {
-            return best_run(chunks, gap, calls, body);
+            deepest = Some(gap.to_vec());
         }
         let own_x = unmarked(own(calls, child, None));
-        y = *gap.iter().find(|&&c| {
+        let Some(&twin) = gap.iter().find(|&&c| {
             chunks.node(c).kind == calls.node(child).kind && unmarked(own(chunks, c, None)) == own_x
-        })?;
-        x = child;
+        }) else {
+            break;
+        };
+        (x, y) = (child, twin);
     }
-    None
+    best_run(chunks, &deepest?, calls, body)
 }
 
 /// Of `gap`'s contiguous runs, the one sharing the most subtrees with
@@ -716,11 +755,10 @@ fn governs_only(tree: &Tree, scope: NodeId, v: NodeId, b: NodeId) -> bool {
     section == [b]
 }
 
-/// Why values don't flow between the call and the statements the way they
-/// did, naming the local where one is to blame (`{caller}` stands for A's
-/// name): `None` when they do. `wired`: the arguments carry exactly the
-/// statements' free variables into B's parameters.
-fn miswired(wired: bool, flow: &Flow, assigned: &HashSet<&str>) -> Option<String> {
+/// Why the caller's locals don't flow around the call the way they did
+/// around the statements, naming the local to blame (`{caller}` stands for
+/// A's name): `None` when they do.
+fn misflowed(flow: &Flow, assigned: &HashSet<&str>) -> Option<String> {
     let first = |names: &mut dyn Iterator<Item = &str>| names.min().map(str::to_string);
     if let Some(name) = first(&mut flow.clobbers.iter().map(String::as_str)) {
         return Some(format!(
@@ -738,7 +776,7 @@ fn miswired(wired: bool, flow: &Flow, assigned: &HashSet<&str>) -> Option<String
             "the call's result is assigned to {name}, which the statements don't set for {{caller}}"
         ));
     }
-    (!wired).then(|| Risk::Wiring.reason().to_string())
+    None
 }
 
 /// Checks a proven candidate against the repository: a file outside the
@@ -1154,30 +1192,95 @@ fn outside(tree: &Tree, id: NodeId, first: NodeId, last: NodeId) -> Vec<u8> {
     out
 }
 
-/// Whether something the chunk holds lives to the end of its block in one
-/// version and to the end of B in the other: code follows the chunk, and it
-/// binds a local (other than the value returned) or takes arguments, which a
-/// call moves into B. An expression always has its statement's rest after it.
+/// The caller on the chunk side, for [`outlives`].
+#[derive(Clone, Copy)]
+struct Around<'t> {
+    tree: &'t Tree,
+    frontend: Option<&'static dyn crate::frontend::Frontend>,
+    /// A, the caller.
+    a: NodeId,
+    /// The kind of node that holds statements in sequence: B's body's.
+    body_kind: &'t str,
+}
+
+impl Around<'_> {
+    /// Code after `id` runs after it: a later sibling, unless `id` and it
+    /// are alternatives of a branch (an `else`, another match arm).
+    fn followed(&self, id: NodeId) -> bool {
+        let Some(parent) = self.tree.node(id).parent else {
+            return false;
+        };
+        let kids = code_children(self.tree, parent);
+        let Some(at) = kids.iter().position(|&c| c == id) else {
+            return false;
+        };
+        let alternatives = self
+            .frontend
+            .and_then(|fe| fe.construct(self.tree, parent))
+            .is_some_and(|c| matches!(c, Construct::Branch { test } if at >= test));
+        at + 1 < kids.len() && !alternatives
+    }
+
+    /// The scope declaring the local `name` as seen from `at`: the
+    /// statements holding its last definition before `at` that encloses
+    /// it, else A. A pattern binding (`for x`, `if let`) is given the
+    /// statements around it, wider than its own scope.
+    fn declaring(&self, name: &str, at: NodeId) -> NodeId {
+        let tree = self.tree;
+        let start = tree.node(at).extent.start;
+        let enclosing: Vec<NodeId> = tree.ancestors(at).take_while(|&n| n != self.a).collect();
+        tree.descendants(self.a)
+            .filter(|&d| {
+                let node = tree.node(d);
+                node.extent.start < start
+                    && node.role != Role::Reference(NameKind::Variable)
+                    && local_name(node) == Some(name)
+            })
+            .filter_map(|d| {
+                tree.ancestors(d)
+                    .take_while(|&n| n != self.a)
+                    .find(|&n| tree.node(n).kind == self.body_kind)
+            })
+            .filter(|s| enclosing.contains(s))
+            .max_by_key(|&s| tree.node(s).extent.start)
+            .unwrap_or(self.a)
+    }
+}
+
+/// Whether something the chunk holds lives to the end of its scope in one
+/// version and to the end of B in the other: code of the caller runs after
+/// the chunk while it lives. A local the chunk binds (other than the value
+/// returned) lives to the end of its block; an argument, which the call
+/// moves into B, to the end of the scope declaring it. An expression always
+/// has its statement's rest after it.
 fn outlives(
-    tree: &Tree,
+    around: Around<'_>,
     chunk: &[NodeId],
     expression: bool,
     assigned: Option<&str>,
-    params: &[String],
+    args: &[String],
 ) -> bool {
-    let Some((&last, _)) = chunk.split_last() else {
+    let tree = around.tree;
+    let Some(&last) = chunk.last() else {
         return false;
     };
-    let follows = expression
-        || tree
-            .node(last)
-            .parent
-            .is_some_and(|block| code_children(tree, block).last() != Some(&last));
+    // Code runs after the chunk before the walk up from it reaches `scope`.
+    let runs_after = |scope: NodeId| {
+        expression
+            || std::iter::once(last)
+                .chain(tree.ancestors(last))
+                .take_while(|&n| n != scope && n != around.a)
+                .any(|n| around.followed(n))
+    };
     let binds = chunk.iter().flat_map(|&s| tree.descendants(s)).any(|id| {
         let node = tree.node(id);
         node.role.defines() == Some(NameKind::Variable) && node.name.as_deref() != assigned
     });
-    follows && (binds || !params.is_empty())
+    let block = tree.node(last).parent.unwrap_or(around.a);
+    (binds && runs_after(block))
+        || args
+            .iter()
+            .any(|arg| runs_after(around.declaring(arg, chunk[0])))
 }
 
 /// Local variables around the chunk, in the chunk side's A.

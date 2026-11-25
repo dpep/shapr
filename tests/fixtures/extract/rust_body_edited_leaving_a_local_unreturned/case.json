@@ -1,0 +1,7 @@
+{
+  "description": "Rust statements extracted into a new method that also gains a guard, where the caller reads the local they set and the call doesn't return it: a wiring near miss, not an extract with a changed body",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "wiring"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

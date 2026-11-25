@@ -1,0 +1,7 @@
+{
+  "description": "statements extracted from a block `if` that becomes a modifier `if` around the call (the shape of faraday ded4f6ef9ac8): the walk to the call stops where the `if` changed form, and the chunk is located among the statements it reached, an extract that isn't structure",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "extract", "structure": false, "detail": {"context": ["caller", "body"]}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}
