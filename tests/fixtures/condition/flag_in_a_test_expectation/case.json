@@ -1,0 +1,21 @@
+{
+  "description": "a spec's eq(true) becomes eq(payload): an expected value, not a mode, so no flag_computed in test code",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

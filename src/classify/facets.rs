@@ -101,14 +101,15 @@ pub fn run(change: &Change, labels: &mut Labels) {
                 .filter(|_| label.residual.evidence.method == Method::Ast)
             {
                 let hunk = residual(hunk, label);
-                let condition = parsed.facets(&hunk, &mut facets);
+                let test = file.category == Category::Test;
+                let condition = parsed.facets(&hunk, test, &mut facets);
                 if !condition.is_empty() {
                     label.residual.detail.insert(
                         "condition".to_string(),
                         json!(condition.iter().map(|c| c.as_str()).collect::<Vec<_>>()),
                     );
                 }
-                let test = file.category == Category::Test || facets.contains(&Facet::Test);
+                let test = test || facets.contains(&Facet::Test);
                 let (removed, added) = parsed.assertions(&hunk, &label.residual.relocated);
                 if test && added < removed {
                     facets.insert(Facet::RemovesAssertions);
@@ -315,7 +316,14 @@ impl<'a> Parsed<'a> {
 
     /// Adds the hunk's facets; returns what its condition change did, where
     /// the code shows it.
-    fn facets(&self, hunk: &Hunk, facets: &mut BTreeSet<Facet>) -> BTreeSet<ConditionChange> {
+    /// In a test file (`test`) or test item, a `true` or `false` argument is
+    /// an expected value, not a mode: no `flag_computed`.
+    fn facets(
+        &self,
+        hunk: &Hunk,
+        test: bool,
+        facets: &mut BTreeSet<Facet>,
+    ) -> BTreeSet<ConditionChange> {
         let before = Side {
             facts: &self.before,
             changed: &hunk.removed,
@@ -367,7 +375,8 @@ impl<'a> Parsed<'a> {
             self.touched(&before, &skip_before),
             self.touched(&after, &skip_after),
         );
-        let condition = self.condition_changes((&before, &b_ids), (&after, &a_ids));
+        let test = test || facets.contains(&Facet::Test);
+        let condition = self.condition_changes((&before, &b_ids), (&after, &a_ids), test);
         // A computed flag is a branch moved into the callee.
         if !condition.is_empty() {
             facets.insert(Facet::Condition);
@@ -467,6 +476,7 @@ impl<'a> Parsed<'a> {
         &self,
         (before, b): (&Side, &[NodeId]),
         (after, a): (&Side, &[NodeId]),
+        test: bool,
     ) -> BTreeSet<ConditionChange> {
         let (b, a) = (b.to_vec(), a.to_vec());
         let mut out = BTreeSet::new();
@@ -523,7 +533,7 @@ impl<'a> Parsed<'a> {
         if !minus(&gb, &ga).is_empty() {
             out.insert(ConditionChange::GuardRemoved);
         }
-        if self.flag_computed((before, &b), (after, &a)) {
+        if !test && self.flag_computed((before, &b), (after, &a)) {
             out.insert(ConditionChange::FlagComputed);
         }
         out
@@ -585,11 +595,20 @@ impl<'a> Parsed<'a> {
     /// computed value: not a literal, a flag or a constant.
     fn differs_only_at(&self, bt: &Tree, b: NodeId, at: &Tree, a: NodeId, path: &[usize]) -> bool {
         let Some((&i, rest)) = path.split_first() else {
-            let value = at.node(a);
-            return !matches!(
-                self.frontend.construct(at, a),
-                Some(Construct::Literal | Construct::Flag)
-            ) && !matches!(value.role, Role::Reference(NameKind::Constant));
+            // Computed: it reads a variable or calls something.
+            return std::iter::once(a).chain(at.descendants(a)).any(|n| {
+                matches!(
+                    at.node(n).role,
+                    Role::Call(_)
+                        | Role::Reference(
+                            NameKind::Variable
+                                | NameKind::Parameter
+                                | NameKind::Field
+                                | NameKind::Member
+                                | NameKind::Global
+                        )
+                )
+            });
         };
         let (old, new): (Vec<NodeId>, Vec<NodeId>) =
             (bt.code_children(b).collect(), at.code_children(a).collect());
