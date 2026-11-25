@@ -75,8 +75,8 @@ pub const MAX_CHANGE_WORK: usize = 4 * MAX_LINES * MAX_LINES;
 pub const LINE_BYTES: usize = 24;
 
 /// Largest side a file may have and be parsed; the largest Ruby or Rust
-/// file seen in real repositories is about 3 MB, and parsing and comparing
-/// take about a second per megabyte.
+/// file seen in real repositories is about 3 MB, and parsing a side, its
+/// norms and comparing it take up to about a second per megabyte.
 pub const MAX_FILE_BYTES: usize = 4 << 20;
 
 /// Most children one node may have, the widest node of each side
