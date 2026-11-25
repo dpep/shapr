@@ -1560,9 +1560,11 @@ fn untracked_files_a_working_tree_form_leaves_out_are_counted_and_named() {
 
 #[test]
 fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
+    let long = "docs/a/very/long/path/that/would/pad/every/line.md";
     let dir = repo(&[
         &[
             ("README.md", "hi\n"),
+            (long, "hi\n"),
             ("Makefile", "x\n"),
             ("config/x.yml", "a: 1\n"),
             ("config/y.yml", "b: 1  \n"),
@@ -1570,6 +1572,7 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         ],
         &[
             ("README.md", "hello\n"),
+            (long, "hello\n"),
             ("Makefile", "y\n"),
             ("config/x.yml", "a: 2\n"),
             ("config/y.yml", "b: 1\n"),
@@ -1577,18 +1580,17 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         ],
     ]);
     let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
-    let lines: Vec<String> = hunk_lines(&text)
-        .take(5)
-        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-        .collect();
+    // Outside the verdict, one line per description after the listed hunks,
+    // which a long path among them doesn't pad.
+    let lines: Vec<&str> = hunk_lines(&text).collect();
     assert_eq!(
         lines,
         [
-            "Makefile:1 unknown file (outside the verdict)",
-            "README.md:1 docs change (outside the verdict)",
-            "config/x.yml:1 config change",
-            "config/y.yml:1 config change, whitespace only (outside the verdict)",
-            "spec/fixtures/f.rb:1 fixture change (outside the verdict)",
+            "config/x.yml:1  config change",
+            "unknown file (outside the verdict), 1 hunk: Makefile:1",
+            "docs change (outside the verdict), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
+            "config change, whitespace only (outside the verdict), 1 hunk: config/y.yml:1",
+            "fixture change (outside the verdict), 1 hunk: spec/fixtures/f.rb:1",
         ],
         "{text}"
     );

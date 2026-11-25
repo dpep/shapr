@@ -101,7 +101,7 @@ lib/greeter.rb:11  logic             1.00  [literal_only]
                    style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
 ```
 
-Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
+Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Hunks outside the verdict that shapr didn't compare close the list, one line per description with every place: `docs change (outside the verdict), 3 hunks: README.md:3 CHANGELOG.md:7,19`. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
 
 `shapr norms` text output, for a directory where one method breaks the quote style:
 

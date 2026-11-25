@@ -722,20 +722,23 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     if !report.hunks.is_empty() {
         writeln!(out)?;
     }
-    let width = report
-        .hunks
-        .iter()
-        .map(|h| place(h).len())
-        .max()
-        .unwrap_or(0);
+    // Uncompared hunks outside the verdict, one line per description, so
+    // they never crowd out the hunks a reviewer reads.
+    let mut outside: Vec<(String, Vec<digest::Place>)> = Vec::new();
+    let mut listed = Vec::new();
     for hunk in &report.hunks {
-        let outside = if hunk.verdict.counted() {
-            ""
-        } else {
-            " (outside the verdict)"
-        };
+        match uncompared(hunk).filter(|_| !hunk.verdict.counted()) {
+            Some(plain) => match outside.iter_mut().find(|(p, _)| *p == plain) {
+                Some((_, at)) => at.push(digest::place(hunk)),
+                None => outside.push((plain, vec![digest::place(hunk)])),
+            },
+            None => listed.push(hunk),
+        }
+    }
+    let width = listed.iter().map(|h| place(h).len()).max().unwrap_or(0);
+    for hunk in listed {
         if let Some(plain) = uncompared(hunk) {
-            emit(out, &format!("{:width$}  {plain}{outside}", place(hunk)))?;
+            emit(out, &format!("{:width$}  {plain}", place(hunk)))?;
             continue;
         }
         // One line per part; the place names the hunk on its first.
@@ -768,6 +771,15 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         for line in hunk.style.iter().flat_map(crate::norms::text) {
             emit(out, &format!("{:width$}  {line}", ""))?;
         }
+    }
+    for (plain, at) in outside {
+        let n = at.len();
+        let hunks = if n == 1 { "hunk" } else { "hunks" };
+        let at = digest::places(&at);
+        emit(
+            out,
+            &format!("{plain} (outside the verdict), {n} {hunks}: {at}"),
+        )?;
     }
     Ok(())
 }

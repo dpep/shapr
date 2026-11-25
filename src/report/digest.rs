@@ -36,7 +36,7 @@ pub struct Digest<'a> {
 
 /// `file:line`, its line on the before side when DELETED: the hunk only deletes.
 #[derive(Clone, Copy, PartialEq)]
-struct Place<'a>(&'a str, usize, bool);
+pub(super) struct Place<'a>(&'a str, usize, bool);
 
 impl Serialize for Place<'_> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -126,7 +126,7 @@ struct Style<'a> {
 }
 
 /// The hunk's first line, on the after side unless it only deletes.
-fn place<'a>(h: &HunkRecord<'a>) -> Place<'a> {
+pub(super) fn place<'a>(h: &HunkRecord<'a>) -> Place<'a> {
     match h.after.count {
         0 => Place(h.file, h.before.start, true),
         _ => Place(h.file, h.after.start, false),
@@ -288,7 +288,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
 
 /// Places as text, every one, each file's lines together in the order the
 /// files first appear, deletions apart: `a.rb:3,9 a.rb:20 (deleted) b.rb:1`.
-fn places(at: &[Place]) -> String {
+pub(super) fn places(at: &[Place]) -> String {
     let mut files: Vec<(&str, bool, Vec<String>)> = Vec::new();
     for p in at {
         match files
