@@ -12,6 +12,8 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
+pub mod digest;
+
 /// Bumped on any breaking change to a record's fields.
 pub const SCHEMA: u32 = 1;
 

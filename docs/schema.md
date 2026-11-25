@@ -1248,6 +1248,44 @@ two thirds, or with no logic, the line is left out. It names the hunks an
 `unproven` refactor or style claim (see [Claims](#claims)) would count, so
 that line is left out of the text when this one prints; the JSON keeps both.
 
+## `--digest`
+
+*Experimental.* `--digest` narrows the output to what a reviewer reads
+first; it works with every input form. As text, the summary lines come
+first, then the logic to read, ranked, then what shapr couldn't prove, what
+to skip and how the new code diverges from its style. Under `-j` it is one
+compact `digest` object; `-J` doesn't take it. It holds nothing the full
+output doesn't: a consumer that needs the evidence reads the full JSON.
+
+| field | type | meaning |
+|---|---|---|
+| `record` | `"digest"` | |
+| `schema` | int | As in the `meta` record. |
+| `subject` | string or null | The change: a GitHub change's name, or what shapr chose to compare (`meta.subject`). |
+| `verdict`, `hunks`, `review_lines`, `test_review_lines`, `refactor_share` | | As in the `summary` record. |
+| `claims` | string array | The categories the messages claim (`summary.claims.experimental.categories` above 0). |
+| `unproven` | string array | Each claim the code doesn't bear out, as the text output's `unproven:` and `conflict:` lines say it. |
+| `read_first` | array | The logic to read, ranked: code before tests, a residual that nearly proved a structural kind first, then more facets and more lines. At most 10; `more` counts the rest. Below. |
+| `more` | object | `items` and `review_lines` of the logic left out of `read_first`. |
+| `unproven_structure` | array | Parts of a structural kind that aren't structure: `file`, `line` (the hunk's first), `kind`, and `why`, their assumptions and move contexts. |
+| `skip` | object | Proven structure, to skip: `hunks` (wholly structure), `changed_lines` in structure parts, and `kinds`, part count per kind. |
+| `style` | array | Each deviation from a diverging norm (see [Style](#style)): `file`, `line`, `norm`, `expected`. |
+| `outside` | object | Hunk count per category of the hunks outside the verdict. |
+
+Each `read_first` item is one hunk's residual, or the residuals of one
+file's hunks that share a reason:
+
+| field | type | meaning |
+|---|---|---|
+| `file` | string | |
+| `lines` | int array | Each hunk's first line, on the after side unless it only deletes. |
+| `review_lines` | int | The residuals' `review_lines`, summed. |
+| `facets` | string array | The residual's facets. |
+| `beside` | string array | The structural kinds proven in the same hunk. |
+| `test` | bool | In a test file, or carrying the `test` facet. |
+| `note` | string or null | The residual's reason: which structural kind it resembles and why it isn't one. |
+| `relocated` | string or null | The text output's note on lines relocated verbatim. |
+
 ## GitHub input
 
 *Experimental*: the forms below, `meta.source`, the `cache` record and the
