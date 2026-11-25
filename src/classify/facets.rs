@@ -217,8 +217,7 @@ struct Found {
     calls: Calls,
 }
 
-/// Calls one side of the residual makes and the other doesn't, one for one
-/// by name.
+/// Calls one side of the residual makes and the other doesn't, by name.
 #[derive(Default)]
 struct Calls {
     removed: Vec<Call>,
@@ -444,15 +443,16 @@ impl<'a> Parsed<'a> {
         };
         let (old, new) = (self.calls(&before, &b_ids), self.calls(&after, &a_ids));
         let calls = Calls {
-            removed: minus(&old, &new),
-            added: minus(&new, &old),
+            removed: old.difference(&new).cloned().collect(),
+            added: new.difference(&old).cloned().collect(),
         };
         Found { condition, calls }
     }
 
     /// The calls whose own syntax the side's changed lines touch.
-    fn calls(&self, side: &Side, ids: &[NodeId]) -> Vec<Call> {
+    fn calls(&self, side: &Side, ids: &[NodeId]) -> BTreeSet<Call> {
         let tree = side.tree();
+        let spelling = &tree.semantics.spelling;
         (ids.iter().copied())
             .filter(|&id| matches!(tree.node(id).role, Role::Call(_)))
             // A bare word (Ruby's `id`) reads like a local: not listed.
@@ -466,8 +466,10 @@ impl<'a> Parsed<'a> {
                     .any(|&(l, _)| side.touches((l, l)))
             })
             .filter_map(|id| {
-                Some(Call {
-                    name: tree.node(id).name.as_deref()?.to_string(),
+                let name = tree.node(id).name.as_deref()?;
+                // Operators (`==`, `[]`) are what condition reads, not calls.
+                spelling.is_identifier(name).then(|| Call {
+                    name: name.to_string(),
                     setup: self.frontend.construct(tree, id) == Some(Construct::Setup),
                 })
             })
