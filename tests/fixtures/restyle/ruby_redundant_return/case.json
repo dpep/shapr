@@ -1,0 +1,15 @@
+{
+  "description": "a method's last statement returned explicitly, and as its value",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {"kind": {"$not": "logic"}},
+          "$some": {"detail": {"variants": ["Style/RedundantReturn"]}, "kind": "restyle", "structure": true}
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

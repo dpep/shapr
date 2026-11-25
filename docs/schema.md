@@ -241,6 +241,7 @@ spellings:
 | `Style/IfUnlessModifier`, `Style/OneLineConditional`, `Style/WhileUntilModifier` | `x if c`, `if c then x end`, `if c; x; end`, `c ? a : b`; `x while c`, `while c do x end` | `begin x end while c` (do-while); `if !c` vs `unless c`; `c ? true : false` vs `c` |
 | `Style/DefWithParentheses`, `Style/EndlessMethod`, `Style/EmptyMethod`, `Style/SingleLineMethods` | `def f()`, `def f`; `def f = x`, `def f; x; end`, and either over several lines | |
 | `Style/Semicolon` | `a; b`, `a` and `b` on two lines | |
+| `Style/RedundantReturn` | `return x` as a method's last statement, and `x`: a method returns its last statement's value | `return x` in a block (it leaves the method) or before other statements; before an `else` clause, which it skips; `return *a` (a new array) |
 | `Style/SuperArguments` | in a `def`'s own body (not a block's), `super(a, b)` passing every parameter in order, and a bare `super`: both pass each parameter's current value and the method's block. The method's parameters are required and optional positionals and at most a block parameter, and neither call has a block or `&` argument | `super(a)` where the method also takes `b` or `k:`; `super(b, a)`; `super(copy)`; `super(a)` in a block whose parameter is `a`; a bare `super` after the method gains a parameter |
 
 Rust (tree-sitter), named by the rustfmt option or lint:

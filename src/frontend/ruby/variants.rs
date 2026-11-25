@@ -10,7 +10,7 @@
 
 use crate::tree::Canonical;
 use ruby_prism::{Node, Visit};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub const STRING_LITERALS: &str = "Style/StringLiterals";
 pub const HASH_SYNTAX: &str = "Style/HashSyntax";
@@ -37,6 +37,7 @@ pub const EMPTY_METHOD: &str = "Style/EmptyMethod";
 pub const SINGLE_LINE_METHODS: &str = "Style/SingleLineMethods";
 pub const SEMICOLON: &str = "Style/Semicolon";
 pub const SUPER_ARGUMENTS: &str = "Style/SuperArguments";
+pub const REDUNDANT_RETURN: &str = "Style/RedundantReturn";
 
 /// The enclosing prism node, as (kind, start offset).
 pub(super) type Parent = Option<(&'static str, usize)>;
@@ -48,6 +49,8 @@ pub(super) struct Context {
     /// The `super` calls that pass the enclosing method's parameters as
     /// they are, by start offset, each with its canonical form.
     forwarding: HashMap<usize, Vec<u8>>,
+    /// The `return x` statements that end a method's body, by start offset.
+    returns: HashSet<usize>,
 }
 
 /// `node`'s variant and canonical form, when its syntax has other
@@ -62,6 +65,17 @@ pub(super) fn respell(
     let syntax = |variant| Some((variant, Canonical::Syntax(Vec::new())));
     if let Some(def) = node.as_def_node() {
         forwarding(&def, &mut context.forwarding);
+        context.returns.extend(last_return(&def));
+    }
+    // A method returns its last statement's value: `return x` there is `x`.
+    let returning = |at: usize| context.returns.contains(&at);
+    if node.as_return_node().is_some() && returning(node.location().start_offset()) {
+        return Some((REDUNDANT_RETURN, Canonical::Transparent));
+    }
+    if node.as_arguments_node().is_some()
+        && parent.is_some_and(|(kind, at)| kind == "return" && returning(at))
+    {
+        return Some((REDUNDANT_RETURN, Canonical::Transparent));
     }
     if node.as_super_node().is_some() || node.as_forwarding_super_node().is_some() {
         let start = node.location().start_offset();
@@ -321,6 +335,24 @@ fn forwarding(def: &ruby_prism::DefNode<'_>, out: &mut HashMap<usize, Vec<u8>>) 
         out,
     };
     scan.visit(&body);
+}
+
+/// The start of a `return x` that is `def`'s last statement, when it means
+/// `x` there: one plain value, and no `else` clause the return would skip.
+fn last_return(def: &ruby_prism::DefNode<'_>) -> Option<usize> {
+    let body = def.body()?;
+    let statements = match body.as_begin_node() {
+        Some(begin) if begin.else_clause().is_some() => return None,
+        Some(begin) => begin.statements()?,
+        None => body.as_statements_node()?,
+    };
+    let last = statements.body().iter().last()?;
+    let ret = last.as_return_node()?;
+    let arguments: Vec<Node<'_>> = ret.arguments()?.arguments().iter().collect();
+    match arguments.as_slice() {
+        [one] if one.as_splat_node().is_none() => Some(ret.location().start_offset()),
+        _ => None,
+    }
 }
 
 /// The walk behind [`forwarding`], over a method's own scope.
