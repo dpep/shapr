@@ -61,6 +61,8 @@ struct Item<'a> {
     note: Option<String>,
     relocated: Option<String>,
     #[serde(skip)]
+    relocated_lines: usize,
+    #[serde(skip)]
     risk: (bool, usize),
 }
 
@@ -159,11 +161,8 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
         }
         // Placement follows review_lines: proven structure still read is listed.
         for r in (h.parts.iter())
-            .filter(|p| p.kind == Kind::Logic || (p.structure && p.review_lines > 0))
+            .filter(|p| p.review_lines > 0 && (p.kind == Kind::Logic || p.structure))
         {
-            if r.review_lines == 0 {
-                continue;
-            }
             let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
             let reason = r
                 .reason
@@ -171,36 +170,47 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 .map_or(r.reason.as_str(), |rest| rest.trim_start_matches("; "));
             let note = (!reason.is_empty()).then(|| reason.to_string());
             let kind = r.kind.as_str();
-            // Items sharing a reason read as one, across files.
-            if let Some(item) = items
-                .iter_mut()
-                .find(|i| note.is_some() && i.kind == kind && i.note == note && i.facets == facets)
-            {
+            let logic = r.kind == Kind::Logic;
+            let test = h.category == Category::Test || r.facets.contains(&Facet::Test);
+            let mut with = BTreeMap::new();
+            for p in (h.parts.iter()).filter(|p| logic && p.kind != Kind::Logic) {
+                *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
+            }
+            let relocated = if logic { h.lines.relocated_lines } else { 0 };
+            // Items sharing a reason read as one, across files; tests apart,
+            // as a reviewer weighs them apart.
+            if let Some(item) = items.iter_mut().find(|i| {
+                note.is_some()
+                    && (i.kind, &i.note, &i.facets, i.test) == (kind, &note, &facets, test)
+            }) {
                 item.at.push(place(h));
                 item.review_lines += r.review_lines;
+                for (k, n) in with {
+                    *item.with.entry(k).or_insert(0) += n;
+                }
+                item.relocated_lines += relocated;
+                item.relocated = match item.relocated_lines {
+                    0 => None,
+                    n => Some(format!(
+                        "{n} line{} relocated verbatim across {} hunks",
+                        plural(n),
+                        item.at.len()
+                    )),
+                };
                 continue;
             }
             let risky = (r.facets.iter())
                 .filter(|f| !matches!(f, Facet::Test | Facet::LiteralOnly))
                 .count();
-            let logic = r.kind == Kind::Logic;
             items.push(Item {
                 at: vec![place(h)],
                 kind,
                 review_lines: r.review_lines,
                 facets,
-                with: match logic {
-                    true => (h.parts.iter()).filter(|p| p.kind != Kind::Logic).fold(
-                        BTreeMap::new(),
-                        |mut with, p| {
-                            *with.entry(p.kind.as_str()).or_insert(0) += p.changed;
-                            with
-                        },
-                    ),
-                    false => BTreeMap::new(),
-                },
-                test: h.category == Category::Test || r.facets.contains(&Facet::Test),
+                with,
+                test,
                 relocated: h.relocated_note.clone().filter(|_| logic),
+                relocated_lines: relocated,
                 risk: (!r.detail.contains_key("near"), risky),
                 note,
             });

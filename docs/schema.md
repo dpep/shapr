@@ -1280,7 +1280,8 @@ side unless it only deletes) or a style deviation's.
 | `outside` | object | Per category, the places of the hunks outside the verdict. |
 
 Each `read_first` item is one hunk's residual or proven part still to read,
-or several of one kind, in any file, that share a reason:
+or several of one kind, in any file, that share a reason and facets, tests
+apart from code:
 
 | field | type | meaning |
 |---|---|---|
@@ -1288,10 +1289,10 @@ or several of one kind, in any file, that share a reason:
 | `kind` | string | `logic` for residuals, else the structural kind proven. |
 | `review_lines` | int | The parts' `review_lines`, summed. |
 | `facets` | string array | The parts' facets. |
-| `with` | object | Changed lines per structural kind proven in the same hunk, beside the logic; empty for a structural item. |
+| `with` | object | Changed lines per structural kind proven in the item's hunks, beside the logic, summed; empty for a structural item. |
 | `test` | bool | In a test file, or carrying the `test` facet. |
 | `note` | string or null | The part's reason: for a residual, which structural kind it resembles and why it isn't one. |
-| `relocated` | string or null | The text output's note on lines relocated verbatim. |
+| `relocated` | string or null | The text output's note on lines relocated verbatim; for several hunks, their relocated lines summed. |
 
 ## GitHub input
 

@@ -212,3 +212,39 @@ fn structure_with_lines_to_read_is_listed_not_skipped() {
     assert!(text.contains("proven extract, still read"), "{text}");
     assert!(!text.contains("skip,"), "{text}");
 }
+
+#[test]
+fn a_group_aggregates_its_members_and_keeps_tests_apart() {
+    // The same unproven default dropped twice, the second hunk beside a
+    // reindented `end`; and a rename shared by code and its spec.
+    let before = "class F\n  def fetch(key, retries: 3)\n    key\n  end\n\n  def go(x)\n    x.fetch(x, retries: 3)\n  end\n\n\n\n\n\n\n  def stop(x)\n    x.fetch(x, retries: 3)\n  end\nend\n";
+    let after = before
+        .replace("x, retries: 3)\n  end\n\n", "x)\n  end\n\n")
+        .replace("x, retries: 3)\n  end\nend", "x)\n      end\nend");
+    let spec = "describe 'a' do\n  it 'x' do\n    foo(1)\n  end\nend\n";
+    let code = "def go\n  foo(1)\nend\n";
+    let dir = repo(&[
+        &[
+            ("a.rb", before),
+            ("spec/b_spec.rb", spec),
+            ("src/b.rb", code),
+        ],
+        &[
+            ("a.rb", &after),
+            ("spec/b_spec.rb", &spec.replace("foo", "bar")),
+            ("src/b.rb", &code.replace("foo", "bar")),
+        ],
+    ]);
+    let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
+    let read = digest["read_first"].as_array().unwrap();
+    let at = |place: &str| {
+        (read.iter())
+            .find(|i| i["at"].as_array().unwrap().contains(&place.into()))
+            .unwrap_or_else(|| panic!("{place} unplaced: {digest}"))
+    };
+    let fetch = at("a.rb:7");
+    assert_eq!(fetch["at"], serde_json::json!(["a.rb:7", "a.rb:16"]));
+    assert_eq!(fetch["with"], serde_json::json!({"format_only": 2}));
+    assert_eq!(at("src/b.rb:2")["test"], false, "{digest}");
+    assert_eq!(at("spec/b_spec.rb:3")["test"], true, "{digest}");
+}
