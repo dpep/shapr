@@ -560,3 +560,45 @@ fn an_annotated_tag_names_one_commit() {
     let message = error(&shapr(dir.path(), &["-J", "t1"]), 64);
     assert!(message.contains("one commit"), "{message}");
 }
+
+/// A remote name or `extensions.partialclone` value that git would read as an
+/// option (`--upload-pack=…`) is refused, not handed to git.
+#[test]
+fn a_partial_clone_whose_remote_name_is_an_option_fetches_nothing() {
+    for how in ["partialclone", "remote name"] {
+        let (_upstream, clone) = partial_clone();
+        let marker = clone.path().join(".git/ran");
+        let option = format!(
+            "--upload-pack=touch '{}'; git-upload-pack",
+            marker.display()
+        );
+        git(
+            clone.path(),
+            &["config", "--unset", "remote.origin.promisor"],
+        );
+        match how {
+            "partialclone" => git(
+                clone.path(),
+                &["config", "extensions.partialclone", &option],
+            ),
+            _ => {
+                let url = git(clone.path(), &["config", "remote.origin.url"]);
+                git(
+                    clone.path(),
+                    &["config", &format!("remote.{option}.url"), url.trim()],
+                );
+                git(
+                    clone.path(),
+                    &["config", &format!("remote.{option}.promisor"), "true"],
+                );
+                git(
+                    clone.path(),
+                    &["config", "extensions.partialclone", &option],
+                )
+            }
+        };
+        let out = shapr(clone.path(), &["-J", "HEAD"]);
+        assert!(!marker.exists(), "{how}: ran the repository's program");
+        assert_eq!(out.status.code(), Some(2), "{how}: {out:?}");
+    }
+}

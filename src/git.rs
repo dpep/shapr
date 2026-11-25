@@ -690,8 +690,11 @@ impl Git {
     /// Fetches the blobs IDS a partial clone lacks, in one request: `git
     /// grep` would otherwise fetch each one as it reaches it.
     pub fn prefetch(&self, ids: &[&str]) -> Result<()> {
-        let Some(remote) = self.promisor() else {
+        if self.promisor().is_none() {
             return Ok(());
+        }
+        let Some(remote) = self.promisor_name() else {
+            bail!("{}", self.partial_refusal());
         };
         if self.bare.is_none() && !self.fetches() {
             bail!("{}", self.partial_refusal());
@@ -715,9 +718,14 @@ impl Git {
         let mut input = missing.join("\n").into_bytes();
         input.push(b'\n');
         let mut fetch = self.command();
+        // A read-only tool: no auto gc or maintenance in the user's repository.
         fetch.env("GIT_TERMINAL_PROMPT", "0").args([
             "-c",
             "fetch.negotiationAlgorithm=noop",
+            "-c",
+            "gc.auto=0",
+            "-c",
+            "maintenance.auto=false",
             "fetch",
             "--quiet",
             "--no-tags",
@@ -725,6 +733,7 @@ impl Git {
             "--recurse-submodules=no",
             "--filter=blob:none",
             "--stdin",
+            END_OF_OPTIONS,
             &remote,
         ]);
         run_with_input(&mut fetch, &input).map(drop)
@@ -786,6 +795,12 @@ impl Git {
     /// The remote a partial clone fetches missing objects from.
     fn promisor(&self) -> Option<String> {
         self.promisor.get_or_init(|| self.read_promisor()).clone()
+    }
+
+    /// The promisor remote's name when it is a plain name git can't read as
+    /// an option; `None` otherwise, so nothing fetches from it.
+    fn promisor_name(&self) -> Option<String> {
+        self.promisor().filter(|name| plain_name(name))
     }
 
     fn read_promisor(&self) -> Option<String> {
@@ -1054,6 +1069,12 @@ fn truthy(value: &str) -> bool {
 fn cloned(key: &str, value: &str) -> bool {
     let (section, rest) = key.split_once('.').unwrap_or((key, ""));
     let name = rest.rsplit('.').next().unwrap_or(rest);
+    // A remote or branch name reaches git as an argument: `--upload-pack=…`
+    // would be read as an option.
+    let subsection = rest.rsplit_once('.').map(|(sub, _)| sub);
+    if subsection.is_some_and(|sub| !plain_name(sub)) {
+        return false;
+    }
     let plain_url = || {
         let scheme = value.split_once("://").map(|(s, _)| s);
         match scheme {
@@ -1072,14 +1093,27 @@ fn cloned(key: &str, value: &str) -> bool {
                 | "ignorecase"
                 | "precomposeunicode"
                 | "symlinks"
+                | "sparsecheckout"
+                | "sparsecheckoutcone"
         ),
         ("remote", "url") => plain_url(),
         ("remote", n) => matches!(n, "fetch" | "promisor" | "partialclonefilter" | "tagopt"),
         ("branch", n) => matches!(n, "remote" | "merge" | "rebase"),
-        ("extensions", n) => matches!(n, "partialclone" | "objectformat" | "worktreeconfig"),
+        ("extensions", "partialclone") => plain_name(value),
+        ("extensions", n) => matches!(n, "objectformat" | "worktreeconfig"),
         ("user", n) => matches!(n, "name" | "email"),
         _ => false,
     }
+}
+
+/// NAME is a plain remote or branch name: no leading `-`, nothing a shell or
+/// git's option parser reads.
+fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
 /// The oldest git shapr runs: `--end-of-options` came in 2.24.
@@ -1116,7 +1150,7 @@ pub fn check_version() -> Result<()> {
 }
 
 /// Why a partial clone's missing objects stay missing, and the fix.
-pub const PARTIAL: &str = "a partial clone: shapr fetches nothing into a repository it didn't clone (check out without a filter, or fetch the blobs first)";
+pub const PARTIAL: &str = "a partial clone whose config shapr won't fetch with: missing blobs stay missing (check out without a filter, or fetch the blobs first)";
 
 /// Why a merge's combined diff isn't read, and what to run instead.
 pub const MERGE: &str = "a merge: diff it against one parent, R^1..R or R^2..R";
@@ -1400,6 +1434,17 @@ mod tests {
         assert!(!git.resolves(&option));
         assert!(git.files(Some(&option)).is_err());
         assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_sparse_clones_config_fetches_and_an_option_named_remote_doesnt() {
+        assert!(cloned("core.sparsecheckout", "true"));
+        assert!(cloned("core.sparsecheckoutcone", "true"));
+        assert!(cloned("remote.origin.promisor", "true"));
+        assert!(cloned("extensions.partialclone", "origin"));
+        assert!(!cloned("remote.--upload-pack=x.promisor", "true"));
+        assert!(!cloned("extensions.partialclone", "--upload-pack=x"));
+        assert!(!cloned("branch.-x.remote", "origin"));
     }
 
     /// Every git shapr runs is built by `command()`. Test code may spawn its own.

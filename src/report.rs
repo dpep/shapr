@@ -916,7 +916,13 @@ pub(crate) fn clap_text(error: &clap::Error) -> String {
         // clap may quote an argument whole or only its value after `=`.
         let values = std::iter::once(&*arg).chain(arg.split_once('=').map(|(_, v)| v));
         for value in values.filter(|v| v.chars().any(char::is_control)) {
-            text = text.replace(value, &escape(value));
+            if value.chars().all(char::is_control) {
+                // A bare control character matches clap's own line breaks:
+                // escape only where clap quoted it.
+                text = text.replace(&format!("'{value}'"), &format!("'{}'", escape(value)));
+            } else {
+                text = text.replace(value, &escape(value));
+            }
         }
     }
     text
