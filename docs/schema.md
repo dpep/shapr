@@ -612,7 +612,7 @@ commits the form spans that touch the paths.
 | `category` | string | What kind of file: `code`, `test`, `docs`, `config`, `manifest`, `generated`, `vendored`, `binary` or `unknown`. See [Categories](#categories). |
 | `lines_before` | int or null | Lines in the file before the change (Kamei's LT); 0 for an added file; `null` when its content couldn't be read. |
 | `hunks` | int | Hunk records that follow for this file. |
-| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the file's hunks. |
+| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines`, `relocated_lines` | int | Sums over the file's hunks. |
 
 ## `hunk` record
 
@@ -629,6 +629,7 @@ commits the form spans that touch the paths.
 | `code_added`, `code_deleted` | int | Of those, lines carrying code. |
 | `comment_added`, `comment_deleted` | int | Of those, lines carrying a comment, so comment growth is visible. |
 | `review_lines` | int | Changed code lines a reviewer still has to read: the sum of its parts' `review_lines`. 0 in a `docs`, `generated`, `vendored` or `binary` file, and in a hunk whose `verdict` is `none`. |
+| `relocated_lines` | int | Of `review_lines`, the residual's code lines the change removes or adds verbatim in another hunk. See [Relocated lines](#relocated-lines). |
 | `parts` | array | The hunk's parts in the [Parts](#parts) table's order, the residual (`logic`) last. Below. |
 | `style` | object or null | *Experimental.* How the hunk's new code sits against the style norms of the code around it. `null` for a file in a language with no norms (Ruby has them). See [Style](#style). |
 
@@ -642,7 +643,7 @@ Each part:
 | `confidence` | number 0–1 | How strongly the evidence supports the part. See [Confidence](#confidence). |
 | `reason` | string | One short human-readable sentence. Not a contract: don't match on it. A residual's names the structural kind it resembles and why it isn't one, when a pass came close. |
 | `evidence` | object | What the part rests on. Always has `comparison`; other keys depend on the kind. See [Evidence](#evidence). |
-| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)). |
+| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)), and one with lines relocated verbatim carries `relocated` (see [Relocated lines](#relocated-lines)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
 | `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them, or every changed line when it holds no code line (comments or blank lines no part proved, such as a comment edit refused because it moves a line that reads its own position). `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. A part that isn't structure whose picked lines aren't among its own changed ones (an arbitrary moved element left unchanged): all of its lines. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
@@ -891,6 +892,39 @@ Zeitwerk), and an `autoload` or `load` of either file is not a load that
 proves anything. When shown, the statements loading the new file are part
 of the move too.
 
+## Relocated lines
+
+A run of residual (`logic`) lines whose text, whitespace aside, the change
+removes in one hunk and adds in another, in the same file or another, is
+*relocated verbatim*, as git's `--color-moved` shows it. It is a fact about
+the residual, not a structure claim: no line changes part, kind or verdict.
+A reviewer who read the code where it was reads the runs where it landed
+as a comparison; `review_lines` still counts them, and `relocated_lines`
+says how many of those are relocated, so a reader may discount them.
+
+A run is consecutive residual lines on one side of a hunk (blank lines
+inside it are skipped, not compared), matched line for line, in order,
+against consecutive residual lines on the other side of another hunk. It
+needs 3 lines of two words or more (a lone `end`, `}`, `else` or name is
+too common to show anything moved). Matching is unique or nothing: of the
+removed runs matching from a line, the longest wins, and when two are as
+long, or the same text is added in another place too, nothing is recorded.
+A removed line pairs with one added line at most. Only files shapr parsed
+have text to compare.
+
+`detail.relocated` on the residual, one entry per run:
+
+| key | type | meaning |
+|---|---|---|
+| `lines` | line run | The run, on its side of this hunk: added lines when the entry has `from`, removed lines when it has `to`. Blank lines inside it are included. |
+| `from` | object | For added lines: where the change removes them, `file` (the path before the change) and `line` (the first). |
+| `to` | object | For removed lines: where the change adds them, `file` and `line`. |
+
+`relocated_lines` on hunk, file and summary records counts the runs' code
+lines that are in the residual and in `review_lines` (0 where those are).
+The text output notes them under the hunk (`4 lines relocated verbatim from
+lib/report.rb:3`) and in the summary line.
+
 ## Style
 
 *Experimental.* A norm is a style choice a project makes one way, such as
@@ -1135,7 +1169,7 @@ under `shapr norms` and a change's hunks alike.
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
 | `entropy` | number | Kamei's change entropy, −Σ pₖ log₂ pₖ, where pₖ is file k's share of the changed lines (`added + deleted`), over files that aren't generated or vendored. 0 for one file. |
-| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines` | int | Sums over the hunks that aren't generated or vendored. |
+| `added`, `deleted`, `code_added`, `code_deleted`, `comment_added`, `comment_deleted`, `review_lines`, `relocated_lines` | int | Sums over the hunks that aren't generated or vendored. |
 | `test_review_lines` | int | Of `review_lines`, those in test code: every one in a `test` file, and a residual's carrying the `test` facet elsewhere. Reviewers weigh test changes apart from code changes. |
 | `behavior_lines` | int | `review_lines` summed over parts that aren't structure (residuals, moves into new surroundings, parts with assumptions) in hunks whose verdict is `behavior` or `mixed`: the behavior change's size, comments and unchanged moved lines excluded. |
 | `structure_share` | number 0–1 | Changed lines (`added + deleted`) in structure parts of hunks whose verdict is `structure` or `mixed`, over all changed lines, generated and vendored hunks left out; 0 when nothing changed. |

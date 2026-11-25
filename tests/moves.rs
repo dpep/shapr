@@ -473,3 +473,32 @@ fn a_move_reason_counts_the_bodies_that_changed() {
         assert!(reason.contains("1 of 2 with a changed body"), "{reason}");
     }
 }
+
+#[test]
+fn the_text_output_notes_lines_relocated_verbatim() {
+    let steps = "    a = rows.first.keys\n    b = rows.map(&:values)\n    c = a.zip(b)\n";
+    let dir = repo(&[
+        &[
+            ("a.rb", &format!("def a(rows)\n{steps}    c.size\nend\n")),
+            ("b.rb", "def b(rows)\n  rows\nend\n"),
+        ],
+        &[
+            ("a.rb", "def a(rows)\n  b(rows).size\nend\n"),
+            (
+                "b.rb",
+                &format!("def b(rows)\n  rows.compact!\n{steps}    c\nend\n"),
+            ),
+        ],
+    ]);
+    let out = shapr(dir.path(), &["HEAD~1..HEAD"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("3 lines relocated verbatim from a.rb:2"),
+        "{text}"
+    );
+    assert!(
+        text.contains("3 lines relocated verbatim to b.rb:3"),
+        "{text}"
+    );
+    assert!(text.contains(", 6 relocated verbatim"), "{text}");
+}

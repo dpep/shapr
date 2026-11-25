@@ -173,6 +173,7 @@ pub struct LineCounts {
     pub comment_added: usize,
     pub comment_deleted: usize,
     pub review_lines: usize,
+    pub relocated_lines: usize,
 }
 
 impl LineCounts {
@@ -184,6 +185,7 @@ impl LineCounts {
         self.comment_added += other.comment_added;
         self.comment_deleted += other.comment_deleted;
         self.review_lines += other.review_lines;
+        self.relocated_lines += other.relocated_lines;
     }
 
     fn changed(&self) -> usize {
@@ -226,6 +228,9 @@ pub struct HunkRecord<'a> {
     /// Of `review_lines`, those in test code.
     #[serde(skip)]
     test_review_lines: usize,
+    /// The text output's note on its relocated lines.
+    #[serde(skip)]
+    relocated_note: Option<String>,
 }
 
 /// A part of a hunk, or its residual (kind `logic`).
@@ -343,6 +348,9 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 parts.iter_mut().for_each(|p| p.review_lines = 0);
             }
             lines.review_lines = parts.iter().map(|p| p.review_lines).sum();
+            if lines.review_lines > 0 {
+                lines.relocated_lines = relocated_lines(file, &label.residual);
+            }
             let test_review_lines = if file.category == Category::Test {
                 lines.review_lines
             } else {
@@ -369,6 +377,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 parts,
                 style: None,
                 test_review_lines,
+                relocated_note: relocated_note(lines.relocated_lines, &label.residual),
             });
         }
         files.push(FileRecord {
@@ -461,7 +470,7 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             confidence: r.confidence,
             reason: r.reason.clone(),
             evidence: EvidenceRecord::of(&r.evidence),
-            detail: r.detail.clone(),
+            detail: relocated_detail(r),
             facets: r.facets.clone(),
             assumptions: Vec::new(),
             // Comments or blank lines no part proved are read whole: a line
@@ -475,6 +484,54 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
         });
     }
     out
+}
+
+/// The residual's detail, with its relocated runs (`detail.relocated`).
+fn relocated_detail(r: &classify::Residual) -> Map<String, Value> {
+    let mut detail = r.detail.clone();
+    if !r.relocated.is_empty() {
+        let runs = r.relocated.iter().map(|m| {
+            let lines = Lines {
+                start: *m.lines.start(),
+                count: m.lines.end() - m.lines.start() + 1,
+            };
+            let end = serde_json::json!({"file": m.path, "line": m.line});
+            let way = if m.added { "from" } else { "to" };
+            serde_json::json!({"lines": lines, way: end})
+        });
+        detail.insert("relocated".into(), runs.collect());
+    }
+    detail
+}
+
+/// The residual's code lines in relocated runs.
+fn relocated_lines(file: &FileChange, r: &classify::Residual) -> usize {
+    let Ok(trees) = &file.trees else { return 0 };
+    let code = |m: &classify::Relocation| {
+        let (tree, lines) = match m.added {
+            true => (&trees.after, &r.lines.after),
+            false => (&trees.before, &r.lines.before),
+        };
+        let lines = m.lines.clone().filter(|l| lines.contains(l));
+        lines.filter(|&l| tree.line(l).code).count()
+    };
+    r.relocated.iter().map(code).sum()
+}
+
+/// `N lines relocated verbatim from FILE:LINE`, naming the first run's
+/// other end and how many more there are.
+fn relocated_note(lines: usize, r: &classify::Residual) -> Option<String> {
+    let first = r.relocated.first().filter(|_| lines > 0)?;
+    let way = if first.added { "from" } else { "to" };
+    let more = match r.relocated.len() - 1 {
+        0 => String::new(),
+        n => format!(" and {n} more place{}", if n == 1 { "" } else { "s" }),
+    };
+    let s = if lines == 1 { "" } else { "s" };
+    let (path, line) = (quote_path(&first.path), first.line);
+    Some(format!(
+        "{lines} line{s} relocated verbatim {way} {path}:{line}{more}"
+    ))
 }
 
 fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> Summary {
@@ -699,6 +756,9 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             );
             emit(out, line.trim_end())?;
         }
+        if let Some(note) = &hunk.relocated_note {
+            emit(out, &format!("{:width$}  {note}", ""))?;
+        }
         for line in hunk.style.iter().flat_map(crate::norms::text) {
             emit(out, &format!("{:width$}  {line}", ""))?;
         }
@@ -732,7 +792,7 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         .map(|(v, n)| format!("{n} {v}"))
         .collect();
     let line = format!(
-        "{lead}{}: {} hunk{} ({}){}; review {} line{}{}{}{}",
+        "{lead}{}: {} hunk{} ({}){}; review {} line{}{}{}{}{}",
         s.verdict.as_str(),
         s.hunks,
         if s.hunks == 1 { "" } else { "s" },
@@ -751,6 +811,10 @@ fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         match s.test_review_lines {
             0 => String::new(),
             n => format!(", {n} in tests"),
+        },
+        match s.lines.relocated_lines {
+            0 => String::new(),
+            n => format!(", {n} relocated verbatim"),
         },
         match (s.lines.comment_added, s.lines.comment_deleted) {
             (0, 0) => String::new(),

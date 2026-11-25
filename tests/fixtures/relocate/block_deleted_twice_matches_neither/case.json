@@ -1,0 +1,7 @@
+{
+  "description": "a block deleted from two places and added once: which one it came from is a guess, so neither is recorded",
+  "expect": {
+    "hunks": {"$every": {"relocated_lines": 0}},
+    "summary": {"relocated_lines": 0}
+  }
+}
