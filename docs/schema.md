@@ -744,7 +744,7 @@ A refactoring that holds apart from what changed around it or in it is a part th
 | `caller` | The caller changed beyond the call. The chunk is the run of statements standing where the call stands: the caller is walked down to the call's statement, each level's children aligned by their trees, and of the statements the other side holds there, the run sharing the most subtrees with the new method's body. The caller's other changed code is `logic`. |
 | `body` | The new method's body differs from the chunk, sharing at least half their subtrees (`evidence.similarity`, a Dice coefficient, at least 0.5, as for a move whose body changed). Code either side holds that the other doesn't is `logic`, and so is the call's line: which value each argument carries is proven only through a body that matches. |
 
-Such a part claims only lines no earlier part holds, so two methods extracted from one caller are two parts. The risks below still refuse it, except `wiring`, which is checked only against a body that matches.
+Such a part explains, in the caller, only the chunk, the call and code both sides keep (a kept line git shows moving), and in the container only the caller, the new method and what stands between the new method and its neighbors (its comments, blank lines, its own `private`). It claims only lines no earlier part holds, so two methods extracted from one caller are two parts. The risks below still refuse it, except `wiring`, which is checked only against a body that matches.
 
 `detail` on each part:
 

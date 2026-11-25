@@ -156,8 +156,11 @@ struct Found {
 struct Region {
     /// The container of A and B.
     scope: Span,
-    /// Siblings that changed for reasons of their own.
+    /// Siblings that changed for reasons of their own, and code a
+    /// refactoring that isn't structure doesn't explain.
     holes: Vec<Span>,
+    /// Within each outer span, only the inner ones explain.
+    only: Vec<(Span, Vec<Span>)>,
     /// A and B: a hunk changing code here belongs to the refactoring.
     touch: Vec<Span>,
 }
@@ -170,7 +173,12 @@ impl Region {
     /// Inside the container but not in a sibling that changed on its own:
     /// any change here is the refactoring, or diff noise in equal code.
     fn explains(&self, at: &usize) -> bool {
-        self.scope.contains(at) && !self.holes.iter().any(|h| h.contains(at))
+        self.scope.contains(at)
+            && !self.holes.iter().any(|h| h.contains(at))
+            && self
+                .only
+                .iter()
+                .all(|(outer, inner)| !outer.contains(at) || inner.iter().any(|i| i.contains(at)))
     }
 }
 
@@ -255,7 +263,14 @@ fn find(
     )
     .ok_or("the methods' container changed")?;
     // A bare `private` added (or removed) with B, governing only B, is B's.
-    changed.0.retain(|&v| !governs_only(calls, scope, v, b));
+    let (mut own_visibility, mut kept_changes) = (Vec::new(), Vec::new());
+    for v in changed.0 {
+        match governs_only(calls, scope, v, b) {
+            true => own_visibility.push(v),
+            false => kept_changes.push(v),
+        }
+    }
+    changed.0 = kept_changes;
     let (params, body) = method_body(calls, b).ok_or("unsupported parameters or body")?;
     let body_kind = calls.node(body).kind;
     let b_stmts = code_children(calls, body);
@@ -384,30 +399,62 @@ fn find(
     };
     // The caller beyond the call, and with a changed body the call too,
     // explain nothing: those lines are logic.
-    let (mut call_spot, mut chunk_spot) = (Vec::new(), Vec::new());
+    // In A, only the chunk, the call and code both sides keep explain; in
+    // the container, only A and B with what stands between B and its
+    // neighbors (its comments, blank lines, its own `private`).
+    let (mut call_spot, mut chunk_spot, mut call_only, mut chunk_only) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if !context.is_empty() {
-        differ(
-            (calls, a_call, &[stmt], &mut call_spot),
-            (chunks, a_chunk, &chunk, &mut chunk_spot),
+        let (mut keep_x, mut keep_y) = (Vec::new(), Vec::new());
+        kept(
+            (calls, a_call, &[stmt], &mut keep_x),
+            (chunks, a_chunk, &chunk, &mut keep_y),
         );
+        if shared.is_none() {
+            keep_x.push(calls.node(stmt).extent.clone());
+        }
+        if let (Some(first), Some(last)) = (chunk.first(), chunk.last()) {
+            keep_y.push(chunks.node(*first).extent.start..chunks.node(*last).extent.end);
+        }
+        call_only.push((calls.node(a_call).extent.clone(), keep_x));
+        chunk_only.push((chunks.node(a_chunk).extent.clone(), keep_y));
+        let mut around = vec![calls.node(a_call).extent.clone()];
+        around.extend(
+            own_visibility
+                .iter()
+                .chain([&b])
+                .map(|&n| between(calls, scope, n)),
+        );
+        call_only.push((calls.node(scope).extent.clone(), around));
+        chunk_only.push((
+            chunks.node(chunk_scope).extent.clone(),
+            vec![chunks.node(a_chunk).extent.clone()],
+        ));
     }
     if let Some(shared) = &shared {
-        call_spot.push(calls.node(stmt).extent.clone());
         call_spot.extend(shared.unshared.1.iter().cloned());
         chunk_spot.extend(shared.unshared.0.iter().cloned());
     }
     let region =
-        |tree: &Tree, scope: NodeId, holes: &[NodeId], spot: Vec<Span>, touch: &[NodeId]| {
+        |tree: &Tree, scope: NodeId, holes: &[NodeId], spot: Vec<Span>, only, touch: &[NodeId]| {
             let mut holes: Vec<Span> = holes.iter().map(|&n| tree.node(n).extent.clone()).collect();
             holes.extend(spot);
             Region {
                 scope: tree.node(scope).extent.clone(),
                 holes,
+                only,
                 touch: touch.iter().map(|&n| tree.node(n).extent.clone()).collect(),
             }
         };
-    let call_side = region(calls, scope, &changed.0, call_spot, &[a_call, b]);
-    let chunk_side = region(chunks, chunk_scope, &changed.1, chunk_spot, &[a_chunk]);
+    let call_side = region(calls, scope, &changed.0, call_spot, call_only, &[a_call, b]);
+    let chunk_side = region(
+        chunks,
+        chunk_scope,
+        &changed.1,
+        chunk_spot,
+        chunk_only,
+        &[a_chunk],
+    );
     let regions = match dir {
         Dir::Extract => [chunk_side, call_side],
         Dir::Inline => [call_side, chunk_side],
@@ -493,40 +540,23 @@ fn common(from_tree: &Tree, from: &[NodeId], to_tree: &Tree, to: &[NodeId]) -> (
     (inside, outside)
 }
 
-/// The code of `x` and `y` that differs, skipping `skip` on each side: each
-/// level's children aligned by a longest common subsequence of hashes, and
-/// in each gap, children of the same kind and own text paired in order and
-/// compared in turn; what stays unpaired differs whole.
-fn differ(
+/// The code `x` and `y` keep, skipping `skip` on each side: each level's
+/// children aligned by a longest common subsequence of hashes, and in each
+/// gap, children of the same kind and own text paired in order and compared
+/// in turn. A node's own text counts where it is the same.
+fn kept(
     (tx, x, skip_x, out_x): (&Tree, NodeId, &[NodeId], &mut Vec<Span>),
     (ty, y, skip_y, out_y): (&Tree, NodeId, &[NodeId], &mut Vec<Span>),
 ) {
-    if tx.node(x).hash == ty.node(y).hash && skip_x.is_empty() && skip_y.is_empty() {
-        return;
-    }
-    let own_x = unmarked(own(tx, x, None));
-    if own_x != unmarked(own(ty, y, None)) {
-        tx.walk_own(x, |p| {
-            if let Piece::Text(t) = p {
-                out_x.push(t)
-            }
-        });
-        ty.walk_own(y, |p| {
-            if let Piece::Text(t) = p {
-                out_y.push(t)
-            }
-        });
+    if unmarked(own(tx, x, None)) == unmarked(own(ty, y, None)) {
+        out_x.extend(own_code(tx, x));
+        out_y.extend(own_code(ty, y));
     }
     let kids = |t: &Tree, id: NodeId, skip: &[NodeId]| -> Vec<NodeId> {
         t.code_children(id).filter(|c| !skip.contains(c)).collect()
     };
     let (cx, cy) = (kids(tx, x, skip_x), kids(ty, y, skip_y));
-    let whole = |t: &Tree, ids: &[NodeId], out: &mut Vec<Span>| {
-        out.extend(ids.iter().map(|&c| t.node(c).extent.clone()));
-    };
     if cx.len().saturating_mul(cy.len()) > 10_000 {
-        whole(tx, &cx, out_x);
-        whole(ty, &cy, out_y);
         return;
     }
     let pairs = lcs(
@@ -535,29 +565,63 @@ fn differ(
         |l, r| tx.node(cx[l]).hash == ty.node(cy[r]).hash,
         |_| 1,
     );
-    let mut bounds: Vec<(usize, usize)> = pairs.iter().map(|&(l, r)| (l, r)).collect();
+    let mut bounds = pairs.clone();
     bounds.push((cx.len(), cy.len()));
     let (mut i, mut j) = (0, 0);
     for (l, r) in bounds {
-        let (gx, gy) = (&cx[i..l], &cy[j..r]);
-        let mut rest_y: Vec<NodeId> = gy.to_vec();
-        for &a in gx {
+        let mut rest_y: Vec<NodeId> = cy[j..r].to_vec();
+        for &a in &cx[i..l] {
             let kind = tx.node(a).kind;
             let text = unmarked(own(tx, a, None));
-            match rest_y
+            let twin = rest_y
                 .iter()
-                .position(|&b| ty.node(b).kind == kind && unmarked(own(ty, b, None)) == text)
-            {
-                Some(at) => {
-                    let b = rest_y.remove(at);
-                    differ((tx, a, skip_x, out_x), (ty, b, skip_y, out_y));
-                }
-                None => out_x.push(tx.node(a).extent.clone()),
+                .position(|&b| ty.node(b).kind == kind && unmarked(own(ty, b, None)) == text);
+            if let Some(at) = twin {
+                let b = rest_y.remove(at);
+                kept((tx, a, skip_x, out_x), (ty, b, skip_y, out_y));
             }
         }
-        whole(ty, &rest_y, out_y);
+        if l < cx.len() {
+            out_x.push(tx.node(cx[l]).extent.clone());
+            out_y.push(ty.node(cy[r]).extent.clone());
+        }
         (i, j) = (l + 1, r + 1);
     }
+}
+
+/// The runs of a node's own text that are code: no whitespace, no comment.
+fn own_code(tree: &Tree, id: NodeId) -> Vec<Span> {
+    let mut out: Vec<Span> = Vec::new();
+    tree.walk_own(id, |piece| {
+        if let Piece::Text(text) = piece {
+            for at in text {
+                if tree.source[at].is_ascii_whitespace() || tree.in_comment(at) {
+                    continue;
+                }
+                match out.last_mut() {
+                    Some(run) if run.end == at => run.end = at + 1,
+                    _ => out.push(at..at + 1),
+                }
+            }
+        }
+    });
+    out
+}
+
+/// From the end of the code sibling before `id` in `scope` to the start of
+/// the one after it.
+fn between(tree: &Tree, scope: NodeId, id: NodeId) -> Span {
+    let siblings = code_children(tree, scope);
+    let at = siblings.iter().position(|&c| c == id);
+    let before = at
+        .and_then(|i| i.checked_sub(1))
+        .map_or(tree.node(scope).extent.start, |i| {
+            tree.node(siblings[i]).extent.end
+        });
+    let after = at
+        .and_then(|i| siblings.get(i + 1))
+        .map_or(tree.node(scope).extent.end, |&n| tree.node(n).extent.start);
+    before..after
 }
 
 /// The statements standing where the call's statement stands, when the
