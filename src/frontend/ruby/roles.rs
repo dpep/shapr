@@ -1,7 +1,7 @@
 //! Which prism nodes play which [`Role`], and the names prism doesn't record
 //! on the node itself.
 
-use crate::frontend::Construct;
+use crate::frontend::{Construct, Pattern};
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree, Visibility};
 use ruby_prism::Node;
 use std::collections::{HashMap, HashSet};
@@ -535,6 +535,46 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
     })
 }
 
+/// A regexp literal's pattern: `/body/flags` or `%r{body}flags`, an escaped
+/// delimiter unescaped (`\/` is `/` either way). Interpolated ones are
+/// another node and aren't read.
+pub(super) fn pattern(tree: &Tree, id: NodeId) -> Option<Pattern> {
+    let node = tree.node(id);
+    if node.kind != "regular_expression" {
+        return None;
+    }
+    let text = std::str::from_utf8(tree.text(&node.span)).ok()?;
+    let (open, rest) = match text.strip_prefix("%r") {
+        Some(rest) => {
+            let open = rest.chars().next()?;
+            (open, &rest[open.len_utf8()..])
+        }
+        None => ('/', text.strip_prefix('/')?),
+    };
+    let close = match open {
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        '<' => '>',
+        c => c,
+    };
+    let end = rest.rfind(close)?;
+    let flags = &rest[end + close.len_utf8()..];
+    let mut body = String::new();
+    let mut chars = rest[..end].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek().is_some_and(|&n| n == open || n == close) {
+            continue;
+        }
+        body.push(c);
+    }
+    Some(Pattern {
+        body,
+        flags: flags.to_string(),
+        extended: flags.contains('x'),
+    })
+}
+
 /// A call asserting in a test: RSpec's `expect` (and `expect_*`),
 /// `is_expected` and Minitest's `assert`, `assert_*`, `refute`, `refute_*` on
 /// `self`; `should` and `should_not` on any receiver.
@@ -569,5 +609,22 @@ mod tests {
         for word in SENDERS.iter().chain(CONSTANT_WORDS).chain(FIELD_WORDS) {
             assert!(DYNAMIC.contains(word), "{word}");
         }
+    }
+
+    fn patterns(source: &str) -> Vec<(String, String, bool)> {
+        use crate::frontend::{Frontend, Ruby};
+        let tree = Ruby.parse(source.as_bytes().to_vec());
+        (tree.descendants(Tree::ROOT))
+            .filter_map(|id| pattern(&tree, id))
+            .map(|p| (p.body, p.flags, p.extended))
+            .collect()
+    }
+
+    #[test]
+    fn a_regexp_literal_is_its_body_and_flags() {
+        let p = |b: &str, f: &str, x| (b.to_string(), f.to_string(), x);
+        assert_eq!(patterns("x = /a\\/b{2}/i\n"), [p("a/b{2}", "i", false)]);
+        assert_eq!(patterns("x = %r{a/(b)\\}}x\n"), [p("a/(b)}", "x", true)]);
+        assert!(patterns("x = /a#{y}/\nz = \"a{2}\"\n").is_empty());
     }
 }

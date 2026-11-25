@@ -115,6 +115,7 @@ src/
                     run parts join the whole hunk's
     facets.rs       facets on the residual's lines (condition, signature, ...), from
                     Frontend::construct; runs after the passes and changes no part
+    facets/regex.rs whether one regular expression provably matches whatever another did
     proof.rs        Assumption (a part's unverified reliance), the Outside trait detectors check
                     uses through, and the public-surface rule
   claims.rs         summary.claims: hints read from commit messages and --message, and
@@ -145,7 +146,7 @@ tests/              end to end against throwaway git repos: cli.rs (input, outpu
 
 A frontend implements `Frontend` (`language`, `handles`, `parse`,
 `construct`: which nodes are a branch, comparison, literal, error construct,
-parameter list or test item, for facets; `search_globs`: the files a name of
+parameter list, test item or assertion, for facets; `pattern`: a literal regular expression's body and modifiers, for `regex_widened`; `search_globs`: the files a name of
 the language can be used from; `dispatch_words`: the method names a call
 can reach a method, constant or field by a computed name through; `library`: whether a path is library code
 other packages depend on, from the repository's layout; `called_by_name`: whether a framework

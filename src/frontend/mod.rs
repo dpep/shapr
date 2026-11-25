@@ -66,6 +66,11 @@ pub trait Frontend: Sync {
     /// `true`, `false`, or an empty collection.
     fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool;
 
+    /// The regular expression `id` writes out, when it is a literal one: a
+    /// Ruby regexp literal, a string Rust passes to `Regex::new`. For
+    /// `regex_widened`.
+    fn pattern(&self, tree: &Tree, id: NodeId) -> Option<Pattern>;
+
     /// Code inside `id` may run with another `self` than the code around it
     /// (a Ruby block, which `instance_eval` can rebind, or a class body).
     fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool;
@@ -163,6 +168,18 @@ pub struct Arguments {
     /// Offsets of the call's own bytes that delimit its argument list
     /// (Ruby's parentheses), which a call passing none may leave out.
     pub delimiters: Vec<usize>,
+}
+
+/// A literal regular expression, as [`Frontend::pattern`] reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pattern {
+    /// The pattern's source, its delimiters and their escapes removed.
+    pub body: String,
+    /// Its modifiers as written (Ruby's `/i`), compared as a whole.
+    pub flags: String,
+    /// Whitespace and `#` comments in the body are insignificant (Ruby's
+    /// `/x`), so the body can't be read as written.
+    pub extended: bool,
 }
 
 /// A language construct that tells one kind of logic change from another.

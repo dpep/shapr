@@ -1,0 +1,4 @@
+{
+  "description": "an extended-mode regexp (/x) can't be read as written: regex_changed, not regex_widened",
+  "expect": {"hunks": [{"kind": "logic", "parts": [{"kind": "logic", "facets": {"$some": "regex_changed", "$every": {"$not": "regex_widened"}}}]}]}
+}

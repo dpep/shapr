@@ -1,0 +1,5 @@
+{
+  "description": "a regexp's quantifiers widened, \\h{2} to \\h{1,2}: regex_widened",
+  "source": {"repo": "https://github.com/dpep/rspec-networking", "commit": "5991905", "license": "MIT"},
+  "expect": {"hunks": [{"kind": "logic", "parts": [{"kind": "logic", "facets": {"$some": "regex_widened"}}]}]}
+}

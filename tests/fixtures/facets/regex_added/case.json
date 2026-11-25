@@ -1,0 +1,14 @@
+{
+  "description": "a regexp added where none was changes no regexp: no regex facet",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": {
+          "$every": {"facets": {"$every": {"$not": "regex_widened"}}},
+          "$some": {"facets": {"$every": {"$not": "regex_changed"}}}
+        }
+      }
+    ]
+  }
+}
