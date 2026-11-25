@@ -1,0 +1,46 @@
+{
+  "description": "a loose extract claims the call, the new method and the caller's code both sides keep (git shows the kept `puts \"end\"` moving), not a comment the caller dropped elsewhere",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "extract",
+            "structure": false,
+            "lines": {
+              "before": [
+                {
+                  "start": 8,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 4,
+                  "count": 5
+                }
+              ]
+            }
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "start": 3,
+                  "count": 2
+                }
+              ],
+              "after": [
+                {
+                  "start": 3,
+                  "count": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

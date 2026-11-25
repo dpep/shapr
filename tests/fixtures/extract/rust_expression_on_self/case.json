@@ -1,0 +1,7 @@
+{
+  "description": "a let's initializer becomes a call to a new method on self returning it",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}

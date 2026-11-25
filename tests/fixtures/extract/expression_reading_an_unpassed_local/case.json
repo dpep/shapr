@@ -1,0 +1,21 @@
+{
+  "description": "an expression extract passing width where the expression read pad is wiring, not an extract",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "detail": {
+              "near": "extract",
+              "risk": "wiring"
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

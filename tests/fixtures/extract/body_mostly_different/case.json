@@ -1,0 +1,6 @@
+{
+  "description": "a new method replacing statements it mostly doesn't share (under half of its subtrees): logic, not an extract",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic", "parts": {"$every": {"kind": "logic"}}}}
+  }
+}

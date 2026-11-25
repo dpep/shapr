@@ -1,0 +1,6 @@
+{
+  "description": "statements leave one method and the call to the new method holding them lands in another: they run at another point, so not an extract",
+  "expect": {
+    "hunks": {"$every": {"parts": {"$every": {"kind": "logic"}}}}
+  }
+}

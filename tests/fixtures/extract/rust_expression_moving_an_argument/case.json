@@ -1,0 +1,7 @@
+{
+  "description": "a Rust expression extract taking an argument moves the value into the new method, where it is dropped earlier: logic, near an extract",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "drop"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

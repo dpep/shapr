@@ -1,0 +1,22 @@
+{
+  "description": "an expression holding return returns from the new method instead of the caller: logic, near an extract, as sure as the comparison that found the near extract (4 nodes of the 16 that saturate size)",
+  "expect": {
+    "hunks": {
+      "$some": {
+        "parts": {
+          "$some": {
+            "kind": "logic",
+            "confidence": 0.25,
+            "detail": {
+              "near": "extract",
+              "risk": "jump"
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

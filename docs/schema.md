@@ -66,8 +66,8 @@ nothing proven is one `logic` part.
 | `default_argument` | yes, unless it has `assumptions` | A call drops or adds an argument that restates its parameter's literal default, and the method it calls is the only one the call can reach. See [Default arguments](#default-arguments). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering other statements (`require`s, Gemfile `gem` lines, callbacks, validations, `include`s, other DSL calls) is a `reorder`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
-| `extract` | yes, unless it has `assumptions` | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
-| `inline` | yes, unless it has `assumptions` | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
+| `extract` | yes, unless it has `assumptions` or its `detail.context` is non-empty | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. One whose caller changed beyond the call, or whose new method's body differs from the statements, is an `extract` part that isn't structure, the lines that differ `logic` beside it. See [Extract and inline](#extract-and-inline). |
+| `inline` | yes, unless it has `assumptions` or its `detail.context` is non-empty | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
 | `logic` | no | The residual: anything else. A line shapr can't prove structural is `logic`. |
 
 Each part is proven against the whole of both trees, residual included, so
@@ -176,6 +176,7 @@ What the search can't settle stays on the part:
 | `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. Also a definition moved from a gem's `lib/` into a new file that other files load after the old one: another package may load the old file alone ([New files](#new-files)). |
 | `runtime_check` | A `typing` part holds a type annotation a runtime may check: sorbet-runtime checks a `sig`, `T.let`, `T.cast` and `T.bind`, raises on a `nil` in `T.must`, and enforces `abstract!` and its kin, so a value the new types reject raises where the old code ran. See [Typing](#typing). |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
+| `computed_name` | An `extract` or `inline` whose method a name computed at runtime could spell (`send(n)`, `public_send("get_#{k}")`, `define_method(n)`), in a file of the change on the side where the method doesn't exist or in a file outside the change at its after revision: a call it makes may reach the method, or one it defines may replace it. A literal spelling of the name (`send(:name)`) is a `collision` instead. |
 
 A part with assumptions is reported with `structure: false` and its lines
 to read: every code line for a `rename`, `extract` or `inline`, each moved
@@ -734,7 +735,16 @@ Each part:
 
 ## Extract and inline
 
-An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and the methods' container still holds the same other code, in order, apart from siblings that changed on their own. A bare `private`, `protected` or `public` line added or removed with the new method, whose section holds nothing but it, is part of the refactoring. A sibling's changed lines aren't part of the refactoring: they stay `logic`, beside the refactoring's part when they share its hunk. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets a part, or none does (when another part already explains a line it would).
+An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and the methods' container still holds the same other code, in order, apart from siblings that changed on their own. A bare `private`, `protected` or `public` line added or removed with the new method, whose section holds nothing but it, is part of the refactoring. A sibling's changed lines aren't part of the refactoring: they stay `logic`, beside the refactoring's part when they share its hunk. The chunk is one expression when the call stands where it stood (a binding's value, an argument, a returned value: `model = b(key)`), the binding or call around it staying in the caller; otherwise a run of statements. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets a part, or none does (when another part already explains a line it would).
+
+A refactoring that holds apart from what changed around it or in it is a part that isn't structure, its `detail.context` naming each difference, and the lines that differ stay `logic` beside it:
+
+| context | meaning |
+|---|---|
+| `caller` | The caller changed beyond the call. The chunk is the run of statements standing where the call stands: the caller is walked down to the call's statement, each level's children aligned by their trees, and of the statements the other side holds there, the run sharing the most subtrees with the new method's body. The caller's other changed code is `logic`. |
+| `body` | The new method's body differs from the chunk, sharing at least half their subtrees (`evidence.similarity`, a Dice coefficient, at least 0.5, as for a move whose body changed). Code either side holds that the other doesn't is `logic`, and so is the call's line: which value each argument carries is proven only through a body that matches. |
+
+Such a part explains, in the caller, only the chunk, the call and code both sides keep (a kept line git shows moving), and in the container only the caller, the new method and what stands between the new method and its neighbors (its comments, blank lines, its own `private`). It claims only lines no earlier part holds, so two methods extracted from one caller are two parts. The risks below still refuse it, except `wiring`, which is checked only against a body that matches.
 
 `detail` on each part:
 
@@ -743,6 +753,7 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 | `method` | string | The method created (`extract`) or removed (`inline`). |
 | `caller` | string | The method the chunk left or joined. |
 | `hunks` | int array | `id`s of every hunk the refactoring touches, this one included. |
+| `context` | string array | What differs around the refactoring or in it (the table above); empty for a part that is structure. A near miss's residual doesn't carry it. |
 
 `evidence` keys beside `comparison`:
 
@@ -751,18 +762,19 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 | `statements` | int | Statements in the chunk. |
 | `nodes` | int | Syntax nodes in the chunk: its size. |
 | `params` | int | The method's parameters. |
-| `verbatim` | number 0–1 | Share of the chunk's nodes that match the method's body without renaming a parameter. |
+| `verbatim` | number 0–1 | Share of the chunk's nodes that match the method's body without renaming a parameter; with context `body`, that lie in a subtree the body shares. |
+| `similarity` | number 0–1 | Dice coefficient of the chunk's and the body's subtrees; 1 when the body matches. |
 | `returns` | bool | The call's result is assigned: a value flows back to the caller. |
 | `searched` | int or null | Files the repository search read for the method's name outside the change; `null` when no search ran. |
 
-Confidence is `size × (1 + verbatim) / 2`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
+Confidence is `size × (1 + verbatim) / 2 × similarity`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
 
-A hunk that matches this shape but would change behavior stays `logic`, and its residual says why in `detail`, beside `method`, `caller` and `hunks`:
+A hunk that matches this shape but would change behavior stays `logic`, and its residual says why in `detail`, beside `method`, `caller` and `hunks`. Its `confidence` is the one the part would have had, as for a part refused for moving a read of its own position: how surely the comparison found the near match, not how surely the code changes behavior (a 4-node chunk holding `return` is 0.25).
 
 | key | type | meaning |
 |---|---|---|
 | `near` | string | `"extract"` or `"inline"`. |
-| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. Also when the caller reads its frame anywhere (`binding`, `$1`): the chunk's locals and matches leave it, or arrive; and in Ruby when the chunk or the call sits in a block (or another body opening its own `self`) inside the caller, since `instance_eval`, `class_exec` or a DSL may run it with another `self`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`, a plain literal such as `:name`, as a `method_missing` compares): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call; or a file outside the change holds the name at the after revision (a subclass's method of that name, a caller of the removed method), which the `reason` names. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
+| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. Also when the caller reads its frame anywhere (`binding`, `$1`): the chunk's locals and matches leave it, or arrive; and in Ruby when the chunk or the call sits in a block (or another body opening its own `self`) inside the caller, since `instance_eval`, `class_exec` or a DSL may run it with another `self`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`, a plain literal such as `:name`, as a `method_missing` compares): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call; or a file outside the change holds the name at the after revision (a subclass's method of that name, a caller of the removed method), which the `reason` names. A name computed at runtime that could spell it is not a collision but the part's `computed_name` assumption. `"drop"` (Rust): code follows the chunk in its block (always, for an expression) and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
 
 
 ## Facets
@@ -852,7 +864,9 @@ where to look.
 Each part's confidence is computed from the evidence, not assigned per kind.
 
 - `comparison` `"ast"`: 1 for `format_only`, `comment_only` and `logic`. Tree
-  comparison is exact, so it settles those three. `rename`, `move`,
+  comparison is exact, so it settles those three. A `logic` residual with
+  `detail.near` instead carries the confidence of the near match it refused
+  (see [Extract and inline](#extract-and-inline)). `rename`, `move`,
   `extract` and `inline` compute their own score: see
   [Renames](#renames), [Moves](#moves) and
   [Extract and inline](#extract-and-inline).

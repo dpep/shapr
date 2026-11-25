@@ -1,0 +1,7 @@
+{
+  "description": "a send spelling the new method's name literally already reaches a method of that name: a collision, logic",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "collision"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

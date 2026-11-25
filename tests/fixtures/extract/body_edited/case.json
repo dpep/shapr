@@ -1,0 +1,39 @@
+{
+  "description": "statements extracted into a new method that also gains a guard: an extract part that isn't structure (context body); the guard, and the call whose arguments a changed body leaves unproven, logic beside it",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "extract",
+            "structure": false,
+            "detail": {
+              "method": "print_header",
+              "context": [
+                "body"
+              ]
+            }
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [],
+              "after": [
+                {
+                  "start": 4,
+                  "count": 1
+                },
+                {
+                  "start": 10,
+                  "count": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

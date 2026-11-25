@@ -31,17 +31,21 @@ pub enum Assumption {
     /// A moved unit matched several others equally well, so which one it
     /// came from is a guess.
     AmbiguousMatch,
+    /// A name computed at runtime (`send(n)`) could spell the method a
+    /// part adds or removes, so a call it makes may reach it.
+    ComputedName,
     /// The part changes only type annotations, and a runtime may check them
     /// (sorbet-runtime): a value they reject raises.
     RuntimeCheck,
 }
 
 impl Assumption {
-    pub const ALL: [Assumption; 5] = [
+    pub const ALL: [Assumption; 6] = [
         Assumption::UnseenUses,
         Assumption::SearchCapped,
         Assumption::PublicApi,
         Assumption::AmbiguousMatch,
+        Assumption::ComputedName,
         Assumption::RuntimeCheck,
     ];
 
@@ -51,6 +55,7 @@ impl Assumption {
             Assumption::SearchCapped => "search_capped",
             Assumption::PublicApi => "public_api",
             Assumption::AmbiguousMatch => "ambiguous_match",
+            Assumption::ComputedName => "computed_name",
             Assumption::RuntimeCheck => "runtime_check",
         }
     }
@@ -285,12 +290,6 @@ pub(super) fn names_method(tree: &Tree, id: NodeId, name: &str) -> Option<Naming
     }
 }
 
-/// Whether `tree` uses method `name` anywhere: a definition, call or
-/// reference, a dynamic name that could spell it, or a plain literal.
-pub(super) fn mentions_method(tree: &Tree, name: &str) -> bool {
-    (tree.descendants(Tree::ROOT)).any(|id| names_method(tree, id, name).is_some())
-}
-
 /// A plain literal spelling `name` (`:name`, `"name"`, `name:`): DSLs such
 /// as callbacks and `autoload` name methods and constants this way, through
 /// calls no frontend can list.
@@ -331,7 +330,8 @@ mod tests {
                 Assumption::UnseenUses
                 | Assumption::SearchCapped
                 | Assumption::PublicApi
-                | Assumption::AmbiguousMatch => {}
+                | Assumption::AmbiguousMatch
+                | Assumption::ComputedName => {}
                 Assumption::RuntimeCheck => {
                     assert_eq!(i, Assumption::ALL.len() - 1, "the last variant")
                 }
