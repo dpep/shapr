@@ -1671,3 +1671,41 @@ fn a_counted_file_shapr_didnt_compare_stays_in_the_verdict() {
     assert_eq!(hunk["parsed"], false, "{hunk:#}");
     assert_eq!(hunk["verdict"], "behavior", "{hunk:#}");
 }
+
+/// The caps see more than line counts: code packed onto one long line, a
+/// body too wide to align, and a file too large to parse are each logic
+/// inside the verdict, not a hang.
+#[test]
+fn long_lines_wide_bodies_and_large_files_are_not_compared() {
+    let methods =
+        |n: usize| -> Vec<String> { (0..n).map(|i| format!("def m{i}(x) = x + {i}")).collect() };
+    let mut shuffled = methods(4000);
+    shuffled.reverse();
+    let one_line = |ms: &[String]| format!("class K; {}; end\n", ms.join("; "));
+    let wide: String = methods(5000).iter().map(|m| format!("{m}\n")).collect();
+    let large = format!("x = \"{}\"\n", "a".repeat(5 << 20));
+    let cases = [
+        (
+            "one line",
+            one_line(&methods(4000)),
+            one_line(&shuffled),
+            "changed bytes",
+        ),
+        ("wide", wide.clone(), format!("{wide}x = 1\n"), "children"),
+        ("large", large.clone(), format!("{large}x = 1\n"), "bytes"),
+    ];
+    for (name, before, after, why) in cases {
+        let start = std::time::Instant::now();
+        let report = classify(&[("lib/a.rb", &before)], &[("lib/a.rb", &after)]);
+        let hunk = &hunks(&report)[0];
+        assert_eq!(hunk["parsed"], false, "{name}");
+        assert_eq!(hunk["verdict"], "behavior", "{name}");
+        let reason = lead(hunk)["reason"].as_str().unwrap();
+        assert!(reason.contains(why), "{name}: {reason}");
+        assert!(
+            start.elapsed().as_secs() < 10,
+            "{name}: {:?}",
+            start.elapsed()
+        );
+    }
+}

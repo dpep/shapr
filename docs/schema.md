@@ -485,12 +485,18 @@ A parsed file isn't compared, and its hunks are `logic` (verdict
 `behavior`) with `parsed: false` and a reason saying why, when its code nests deeper than
 10,000 levels, or when it is too big to compare: its changed lines (removed
 plus added) pass 8,000 (4,000 lines rewritten in place, or 8,000 added),
-or the change's compared files' changed lines, squared and summed, pass
-256,000,000, charged smallest file first (so files named to sort first
-can't push a small edit out). Comparison grows with the square of the changed
-lines: removed lines are paired with added ones, and a file only added has
-its declarations compared with each other; a 4,000-line file shuffled, or
-8,000 one-line methods added, take seconds.
+or its changed bytes pass 192,000 (24 bytes, about a one-line method, count
+as a line, so code packed onto a few long lines costs what it would on lines
+of its own), or the change's compared files' sizes (changed lines, or changed
+bytes in lines, whichever is more), squared and summed, pass 256,000,000,
+charged smallest file first (so files named to sort first can't push a small
+edit out); or when a side is over 4 MiB, or its widest node's children times
+the other side's pass 16,777,216 (aligning two bodies builds a table of
+that size). Comparison grows with the square of the changed code: removed
+lines are paired with added ones, and a file only added has its
+declarations compared with each other; a 4,000-line file shuffled, or 8,000
+one-line methods added, take seconds. The largest Ruby or Rust file seen in
+real repositories is about 3 MB.
 
 The rules above
 are stated in Ruby's terms; for Rust:
