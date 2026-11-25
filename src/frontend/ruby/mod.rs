@@ -93,6 +93,7 @@ impl Frontend for Ruby {
             entered: Entered::default(),
             parents: Vec::new(),
             gaps: Vec::new(),
+            receivers: Vec::new(),
         }
         .visit(&result.node());
         if let Some(data) = result.data_loc() {
@@ -291,6 +292,9 @@ struct Walker<'b> {
     /// Per open node, the stretches of an interpolated heredoc's body no
     /// part holds, in order, to report as leaves between its parts.
     gaps: Vec<Vec<Span>>,
+    /// Per open node, the span of its receiver when it is a call: a unary
+    /// operator's call starts at the operator, before its receiver.
+    receivers: Vec<Option<Span>>,
 }
 
 /// The node an enter hook just saw, as (kind, start, end), for the
@@ -360,21 +364,19 @@ impl<'pr> Visit<'pr> for Walker<'_> {
             .open(kind, span(&node.location()), name.as_deref(), role);
         let parent = self.parents.last().copied();
         let statement = parent.is_some_and(|(k, _)| k == "statements");
-        // The leftmost child of a call is its receiver.
-        let receiver = parent.is_some_and(|(k, start)| {
-            (k == "call" || k.starts_with("call_") || k.starts_with("index_"))
-                && start == node.location().start_offset()
-        });
+        let receiver = self.receivers.last().cloned().flatten() == Some(span(&node.location()));
         let flags = self.roles.flags(&node) | self.sorbet.flags(&node, statement, receiver);
         self.builder.flag(flags);
         self.respell(&node);
         self.parents.push((kind, node.location().start_offset()));
         self.gaps.push(heredoc_gaps(&node, self.builder.source()));
+        self.receivers.push(receiver_of(&node));
     }
 
     fn visit_branch_node_leave(&mut self) {
         self.gaps_before(usize::MAX);
         self.gaps.pop();
+        self.receivers.pop();
         self.parents.pop();
         self.builder.close();
     }
@@ -396,6 +398,30 @@ impl<'pr> Visit<'pr> for Walker<'_> {
             self.respell(&node);
         }
     }
+}
+
+/// The span of a call's receiver, in any of prism's call forms.
+fn receiver_of(node: &Node<'_>) -> Option<Span> {
+    let receiver = if let Some(n) = node.as_call_node() {
+        n.receiver()
+    } else if let Some(n) = node.as_call_operator_write_node() {
+        n.receiver()
+    } else if let Some(n) = node.as_call_and_write_node() {
+        n.receiver()
+    } else if let Some(n) = node.as_call_or_write_node() {
+        n.receiver()
+    } else if let Some(n) = node.as_call_target_node() {
+        Some(n.receiver())
+    } else if let Some(n) = node.as_index_operator_write_node() {
+        n.receiver()
+    } else if let Some(n) = node.as_index_and_write_node() {
+        n.receiver()
+    } else if let Some(n) = node.as_index_or_write_node() {
+        n.receiver()
+    } else {
+        node.as_index_target_node().map(|n| n.receiver())
+    };
+    receiver.map(|r| span(&r.location()))
 }
 
 /// The bytes of an interpolated heredoc's body outside its parts: the
