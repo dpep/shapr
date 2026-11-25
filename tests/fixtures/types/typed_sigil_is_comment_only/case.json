@@ -1,0 +1,20 @@
+{
+  "description": "changing a file's typed sigil changes what Sorbet checks, not what Ruby runs: comment_only",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "comment_only",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "comment_only",
+            "structure": true
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}

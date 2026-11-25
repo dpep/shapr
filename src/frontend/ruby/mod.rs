@@ -13,15 +13,15 @@ use ruby_prism::{Location, Node, Visit};
 
 pub struct Ruby;
 
-/// Magic-comment keys Ruby or Sorbet act on, normalized (lowercase, `_`).
-/// prism reports every `# key: value` comment, so the key decides.
+/// Magic-comment keys Ruby acts on, normalized (lowercase, `_`). prism
+/// reports every `# key: value` comment, so the key decides. Sorbet's
+/// `typed` sigil is a comment: a type checker reads it, Ruby doesn't.
 const MAGIC_KEYS: &[&str] = &[
     "frozen_string_literal",
     "encoding",
     "coding",
     "warn_indent",
     "shareable_constant_value",
-    "typed",
 ];
 
 /// Ruby DSL files without an extension, as RuboCop includes them by default.
@@ -432,8 +432,10 @@ mod tests {
             .iter()
             .filter(|n| n.kind == "directive" && !n.comment)
             .count();
-        assert_eq!(directives, 3);
-        assert_eq!(kinds(&tree, true), ["comment", "comment"]);
+        assert_eq!(directives, 2);
+        // Sorbet's sigil: a type checker reads it, Ruby doesn't.
+        assert_eq!(kinds(&tree, true), ["comment", "comment", "comment"]);
+        assert!(tree.line(3).comment && !tree.line(3).code);
         assert!(tree.line(1).code && !tree.line(1).comment);
         assert!(tree.line(2).comment && !tree.line(2).code);
     }

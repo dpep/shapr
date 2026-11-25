@@ -41,8 +41,8 @@ Every field below is always present. Fields that can be `null` say so.
   line can do both (`x = 1 # note`), and a blank line does neither. A magic
   comment (`# frozen_string_literal: true`) and a first-line shebang
   (`#!/usr/bin/env ruby`) are code. Type annotations in comments (RBS
-  inline `#:`, YARD tags) are comments: a type checker reads them, Ruby
-  doesn't. In a file shapr didn't
+  inline `#:`, YARD tags) and Sorbet's `# typed:` sigil are comments: a
+  type checker reads them, Ruby doesn't. In a file shapr didn't
   parse, every changed line counts as code.
 
 ## Parts
