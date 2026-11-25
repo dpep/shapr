@@ -28,3 +28,7 @@ tempfile = "3"
 undocumented_unsafe_blocks = "deny"
 dbg_macro = "deny"
 todo = "deny"
+
+[profile.release]
+# An arithmetic overflow panics (exit 2) instead of wrapping into a wrong report.
+overflow-checks = true
