@@ -278,12 +278,19 @@ fn leading_globals(args: &[String]) -> usize {
     let mut at = 0;
     while let Some(word) = args.get(at) {
         if let Some(long) = word.strip_prefix("--") {
-            let switch =
-                |a: &clap::Arg| a.get_long() == Some(long) && !a.get_action().takes_values();
-            if !globals.iter().any(switch) {
+            let (long, attached) = match long.split_once('=') {
+                Some((long, _)) => (long, true),
+                None => (long, false),
+            };
+            let Some(flag) = globals.iter().find(|a| a.get_long() == Some(long)) else {
                 break;
+            };
+            // A switch given a value is clap's error to report.
+            match (flag.get_action().takes_values(), attached) {
+                (true, false) => at += 2,
+                (true, true) | (false, false) => at += 1,
+                (false, true) => break,
             }
-            at += 1;
         } else if let Some(letters) = word.strip_prefix('-').filter(|l| !l.is_empty()) {
             let (flags, takes_next) = cluster(letters, &globals);
             if flags.contains(&None) {
@@ -1074,8 +1081,11 @@ mod tests {
                     false => vec![format!("-{short}")],
                 });
             }
-            if let (Some(long), false) = (flag.get_long(), value) {
-                forms.push(vec![format!("--{long}")]);
+            if let Some(long) = flag.get_long() {
+                forms.push(match value {
+                    true => vec![format!("--{long}"), "x".to_string()],
+                    false => vec![format!("--{long}")],
+                });
             }
             for mut args in forms {
                 let leading = args.len();

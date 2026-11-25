@@ -664,6 +664,19 @@ fn global_format_flags_may_precede_norms() {
 }
 
 #[test]
+fn a_global_flag_with_a_value_may_precede_norms() {
+    let dir = repo(&[&[("a.rb", "A = 'a'\n")]]);
+    for args in [
+        &["--norm-threshold", "0.7", "-J", "norms", "a.rb"][..],
+        &["--norm-threshold=0.7", "-J", "norms", "a.rb"],
+    ] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {out:?}");
+        assert!(records(&out).iter().any(|r| r["record"] == "summary"));
+    }
+}
+
+#[test]
 fn help_and_usage_name_every_kind_and_both_commands() {
     let dir = tempfile::tempdir().unwrap();
     let help = shapr(dir.path(), &["--help"]);
