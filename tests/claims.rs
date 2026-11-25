@@ -191,7 +191,7 @@ fn claims_show_in_text_output() {
         "{text}"
     );
     assert!(
-        text.contains("unproven: claims refactor; 1 hunk not shown structural"),
+        text.contains("unproven: claims refactor; 1 hunk not shown structural (gate.rb:3)"),
         "{text}"
     );
 }

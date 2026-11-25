@@ -202,7 +202,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
         at: rest.iter().flat_map(|i| i.at.iter().copied()).collect(),
     };
     let claims = s.claims.experimental.categories.iter();
-    let unproven = super::conflicts(&s.claims, false)
+    let unproven = super::conflicts(report, false)
         .into_iter()
         .map(|(label, line)| format!("{label}: {line}"))
         .collect();
