@@ -365,11 +365,15 @@ fn find(
         Err(Risk::Jump)
     } else if let Some(why) = shared
         .is_none()
-        .then(|| miswired(exact.is_some() && free == arg_set, &flow, &assigned_set))
+        .then(|| {
+            // Only a body that matched pairs each parameter with an argument;
+            // a body that differs leaves the call's line logic instead.
+            let paired = exact.is_some() && free == arg_set;
+            misflowed(&flow, &assigned_set)
+                .or_else(|| (!paired).then(|| Risk::Wiring.reason().to_string()))
+        })
         .flatten()
     {
-        // Only a body that matched pairs each parameter with an argument;
-        // a body that differs leaves the call's line logic instead.
         wiring = Some(why);
         Err(Risk::Wiring)
     } else if chunks.semantics.scoped_drop
@@ -716,11 +720,10 @@ fn governs_only(tree: &Tree, scope: NodeId, v: NodeId, b: NodeId) -> bool {
     section == [b]
 }
 
-/// Why values don't flow between the call and the statements the way they
-/// did, naming the local where one is to blame (`{caller}` stands for A's
-/// name): `None` when they do. `wired`: the arguments carry exactly the
-/// statements' free variables into B's parameters.
-fn miswired(wired: bool, flow: &Flow, assigned: &HashSet<&str>) -> Option<String> {
+/// Why the caller's locals don't flow around the call the way they did
+/// around the statements, naming the local to blame (`{caller}` stands for
+/// A's name): `None` when they do.
+fn misflowed(flow: &Flow, assigned: &HashSet<&str>) -> Option<String> {
     let first = |names: &mut dyn Iterator<Item = &str>| names.min().map(str::to_string);
     if let Some(name) = first(&mut flow.clobbers.iter().map(String::as_str)) {
         return Some(format!(
@@ -738,7 +741,7 @@ fn miswired(wired: bool, flow: &Flow, assigned: &HashSet<&str>) -> Option<String
             "the call's result is assigned to {name}, which the statements don't set for {{caller}}"
         ));
     }
-    (!wired).then(|| Risk::Wiring.reason().to_string())
+    None
 }
 
 /// Checks a proven candidate against the repository: a file outside the
