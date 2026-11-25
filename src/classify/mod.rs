@@ -352,7 +352,21 @@ pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     runs::refine(change, outside, &mut labels);
     facets::run(change, &mut labels);
     relocate::run(change, &mut labels);
+    debug_assert!(aligned(change, &labels), "per-hunk lists out of step");
     labels
+}
+
+/// Every per-hunk list holds one entry per hunk: the report zips them, and
+/// a zip drops the extras silently.
+fn aligned(change: &Change, labels: &Labels) -> bool {
+    labels.len() == change.files.len()
+        && change.files.iter().zip(labels).all(|(file, labels)| {
+            let n = file.diff.hunks.len();
+            labels.len() == n
+                && file.ids.len() == n
+                && file.whitespace_only.len() == n
+                && (file.trees.as_ref().ok()).is_none_or(|t| t.sites.len() == n)
+        })
 }
 
 /// Every pass over every hunk; each residual is what no part claims.
