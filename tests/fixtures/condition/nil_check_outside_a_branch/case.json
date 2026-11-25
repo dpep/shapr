@@ -1,0 +1,26 @@
+{
+  "description": "a nil check returned, not branched on: no guard, no condition",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": {
+              "$every": {
+                "$not": "condition"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

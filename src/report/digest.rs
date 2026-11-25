@@ -1,7 +1,7 @@
 //! `--digest`: the report narrowed to what a reviewer reads first. A view
 //! over the [`Report`]; it computes nothing the full output doesn't hold.
 
-use super::{HunkRecord, Report, Verdict, compared, emit, quote_path, summary_text};
+use super::{HunkRecord, Report, Verdict, compared, emit, facet_labels, quote_path, summary_text};
 use crate::change::Category;
 use crate::classify::{Facet, Kind};
 use crate::norms::Direction;
@@ -85,6 +85,9 @@ struct Item<'a> {
     relocated_lines: usize,
     #[serde(skip)]
     risk: (bool, usize),
+    /// The facets with their detail, for text.
+    #[serde(skip)]
+    labels: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -196,6 +199,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             .filter(|p| p.review_lines > 0 && (p.kind == Kind::Logic || p.structure))
         {
             let facets: Vec<&'static str> = r.facets.iter().map(|f| f.as_str()).collect();
+            let labels = facet_labels(r);
             let reason = r
                 .reason
                 .strip_prefix(crate::classify::PLAIN_LOGIC)
@@ -213,7 +217,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             // as a reviewer weighs them apart.
             if let Some(item) = items.iter_mut().find(|i| {
                 note.is_some()
-                    && (i.kind, &i.note, &i.facets, i.test) == (kind, &note, &facets, test)
+                    && (i.kind, &i.note, &i.labels, i.test) == (kind, &note, &labels, test)
             }) {
                 item.at.push(place(h));
                 item.review_lines += r.review_lines;
@@ -245,6 +249,7 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
                 relocated_lines: relocated,
                 risk: (!r.detail.contains_key("near"), risky),
                 note,
+                labels,
             });
         }
     }
@@ -336,8 +341,8 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         if i.kind != Kind::Logic.as_str() {
             line.push_str(&format!(", proven {}, still read", i.kind));
         }
-        if !i.facets.is_empty() {
-            line.push_str(&format!(" [{}]", i.facets.join(", ")));
+        if !i.labels.is_empty() {
+            line.push_str(&format!(" [{}]", i.labels.join(", ")));
         }
         if i.test && !i.facets.contains(&"test") {
             line.push_str(" (test)");

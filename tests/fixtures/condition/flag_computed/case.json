@@ -1,0 +1,22 @@
+{
+  "description": "a boolean literal argument becomes a computed value (rq#36's Lock::take(path, false) to fresh): condition carries flag_computed beside the comparison added",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "flag_computed"
+              ]
+            },
+            "facets": {
+              "$some": "condition"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

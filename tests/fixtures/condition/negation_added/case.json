@@ -1,0 +1,22 @@
+{
+  "description": "a Rust branch's test is negated: condition with negation_added",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "negation_added"
+              ]
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "description": "an emptiness guard stays while its branch tests more: condition, but no guard added or removed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": {
+              "$some": "condition"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

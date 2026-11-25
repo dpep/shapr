@@ -1,0 +1,22 @@
+{
+  "description": "a comparison keeps its operands and changes its operator: condition with operator_changed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "operator_changed"
+              ]
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "description": "a boolean literal argument flips to the other literal: literal_only, not a computed flag",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": [
+              "literal_only"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

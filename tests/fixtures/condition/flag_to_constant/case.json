@@ -1,0 +1,26 @@
+{
+  "description": "a boolean literal argument becomes a constant: fixed, not computed per call, so no flag_computed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": {
+              "$every": {
+                "$not": "condition"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

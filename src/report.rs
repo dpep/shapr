@@ -764,7 +764,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         }
         // One line per part; the place names the hunk on its first.
         for (i, part) in hunk.parts.iter().enumerate() {
-            let facets: Vec<&str> = part.facets.iter().map(|f| f.as_str()).collect();
+            let facets = facet_labels(part);
             let reason = match part.reason.strip_prefix(classify::PLAIN_LOGIC) {
                 Some(rest) => rest.trim_start_matches("; "),
                 None => &part.reason,
@@ -1038,6 +1038,22 @@ fn conflicts(report: &Report, refactor: bool) -> Vec<(&'static str, String)> {
         ));
     }
     out
+}
+
+/// The part's facets for text: each with what its detail of the same name
+/// says, `condition (flag_computed)`.
+pub(crate) fn facet_labels(part: &PartRecord) -> Vec<String> {
+    (part.facets.iter())
+        .map(|f| {
+            let said: Vec<&str> = (part.detail.get(f.as_str()))
+                .and_then(Value::as_array)
+                .map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect());
+            match said.is_empty() {
+                true => f.as_str().to_string(),
+                false => format!("{} ({})", f.as_str(), said.join(", ")),
+            }
+        })
+        .collect()
 }
 
 /// The text column's confidence: blank for a residual the tree comparison

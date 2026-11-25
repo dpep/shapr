@@ -1,0 +1,26 @@
+{
+  "description": "a call with a boolean literal is replaced by a call to another method with a computed argument: no pairing, no flag_computed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": {
+              "$every": {
+                "$not": "condition"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
