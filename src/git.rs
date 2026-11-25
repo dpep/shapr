@@ -172,8 +172,10 @@ impl Git {
         let mut cmd = self.command();
         if self.fetches() {
             // The blobs the diff needs, from the promisor remote; fail, never prompt.
+            // A read-only tool: the lazy fetch runs no auto gc or maintenance.
             cmd.env_remove("GIT_NO_LAZY_FETCH")
-                .env("GIT_TERMINAL_PROMPT", "0");
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .args(["-c", "gc.auto=0", "-c", "maintenance.auto=false"]);
         }
         let out = run(cmd
             .args([
@@ -1069,10 +1071,10 @@ fn truthy(value: &str) -> bool {
 fn cloned(key: &str, value: &str) -> bool {
     let (section, rest) = key.split_once('.').unwrap_or((key, ""));
     let name = rest.rsplit('.').next().unwrap_or(rest);
-    // A remote or branch name reaches git as an argument: `--upload-pack=…`
-    // would be read as an option.
+    // A remote's name reaches git as an argument: `--upload-pack=…` would be
+    // read as an option. A branch's name never does.
     let subsection = rest.rsplit_once('.').map(|(sub, _)| sub);
-    if subsection.is_some_and(|sub| !plain_name(sub)) {
+    if section == "remote" && subsection.is_some_and(|sub| !plain_name(sub)) {
         return false;
     }
     let plain_url = || {
@@ -1098,7 +1100,9 @@ fn cloned(key: &str, value: &str) -> bool {
         ),
         ("remote", "url") => plain_url(),
         ("remote", n) => matches!(n, "fetch" | "promisor" | "partialclonefilter" | "tagopt"),
-        ("branch", n) => matches!(n, "remote" | "merge" | "rebase"),
+        ("branch", "remote") => plain_name(value),
+        ("branch", n) => matches!(n, "merge" | "rebase"),
+        ("index", "sparse") => true,
         ("extensions", "partialclone") => plain_name(value),
         ("extensions", n) => matches!(n, "objectformat" | "worktreeconfig"),
         ("user", n) => matches!(n, "name" | "email"),
@@ -1444,7 +1448,9 @@ mod tests {
         assert!(cloned("extensions.partialclone", "origin"));
         assert!(!cloned("remote.--upload-pack=x.promisor", "true"));
         assert!(!cloned("extensions.partialclone", "--upload-pack=x"));
-        assert!(!cloned("branch.-x.remote", "origin"));
+        assert!(cloned("branch.fix#12+wip.remote", "origin"));
+        assert!(!cloned("branch.main.remote", "--upload-pack=x"));
+        assert!(cloned("index.sparse", "true"));
     }
 
     /// Every git shapr runs is built by `command()`. Test code may spawn its own.
