@@ -20,7 +20,7 @@
 //! unchanged (git may slide a removal across identical lines), except the
 //! unit's lines that changed in the move, which stay logic.
 
-use super::align::{Alignments, Side, key, lcs, namespace_name, size, transparent};
+use super::align::{Alignments, Side, key, lcs, namespace_name, qualifiers, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
 use super::proof::Search;
@@ -646,10 +646,12 @@ fn members(tree: &Tree, node: NodeId) -> impl Iterator<Item = NodeId> + '_ {
 }
 
 /// A namespace's header: its code beside the body (the name, a superclass,
-/// a Rust attribute), as hashes.
+/// a Rust attribute) and its qualifiers (an inner attribute), as hashes.
 fn header(tree: &Tree, node: NodeId) -> Vec<u64> {
     let code = tree.code_children(node).filter(|&c| !transparent(tree, c));
-    code.map(|c| tree.node(c).hash).collect()
+    code.chain(qualifiers(tree, node))
+        .map(|c| tree.node(c).hash)
+        .collect()
 }
 
 /// The namespaces enclosing `node`, outermost first.

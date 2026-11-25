@@ -190,7 +190,8 @@ attribute macro, which reads its tokens; no rename passes into it),
 method; rename blocks only that family's names by it), `TYPING` (a statement that only
 declares types: Sorbet's `sig`, `extend T::Sig`), `TYPE_CAST` (a call returning its first
 positional argument: `T.let`, `T.must`), `UNCHECKED` (an annotation no runtime checks once its
-type library is loaded: `T.unsafe`, `checked: false`) and `DIRECTIVE` (set by the builder for
+type library is loaded: `T.unsafe`, `checked: false`), `HEADER` (a statement in a namespace's body
+that qualifies the namespace, part of its owner key: Rust's `#![cfg(unix)]`) and `DIRECTIVE` (set by the builder for
 `directive`). The core never reads a node's `kind`
 string or source text to learn what the language means.
 
