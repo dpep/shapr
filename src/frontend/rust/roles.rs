@@ -908,6 +908,13 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         "call_expression" | "tuple_struct_pattern" if first_named("Err") => Construct::Error,
         "parameters" => Construct::Parameters,
         "function_item" | "mod_item" if test_item(tree, id) => Construct::Test,
+        "macro_invocation"
+            if matches!(name, Some(n) if ["assert", "debug_assert", "prop_assert"]
+                .iter()
+                .any(|p| n.starts_with(p))) =>
+        {
+            Construct::Assertion
+        }
         _ => return None,
     })
 }

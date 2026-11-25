@@ -196,3 +196,17 @@ fn rust_an_argument_under_question_mark_is_not_error_handling() {
     let after = before.replace("parse(s)", "parse(s.trim())");
     assert_eq!(one("lib.rs", before, &after), Vec::<String>::new());
 }
+
+/// What counts as an assertion, through `removes_assertions`'s counts.
+#[test]
+fn assertions_are_counted_by_name_and_receiver() {
+    let before = "class GateTest\n  def test_open\n    assert_equal 1, x\n    refute_nil y\n    x.should eq(1)\n    is_expected.to be(1)\n    expect_any_instance_of(G).to receive(:open)\n    g.expects(:open)\n    queue.expect(1)\n    assertion_count\n  end\nend\n";
+    let after = "class GateTest\n  def test_open\n    go\n  end\nend\n";
+    let report = classify(
+        &[("test/gate_test.rb", before)],
+        &[("test/gate_test.rb", after)],
+    );
+    let part = lead(&hunks(&report)[0]).clone();
+    assert_eq!(part["detail"]["assertions"]["removed"], 5, "{part:#}");
+    assert_eq!(part["detail"]["assertions"]["added"], 0, "{part:#}");
+}

@@ -1,0 +1,8 @@
+{
+  "description": "a spec example moved verbatim to another file keeps its assertions: neither hunk carries removes_assertions",
+  "expect": {
+    "hunks": {
+      "$every": {"parts": {"$every": {"facets": {"$every": {"$not": "removes_assertions"}}}}}
+    }
+  }
+}

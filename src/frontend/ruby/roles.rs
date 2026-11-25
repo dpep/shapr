@@ -527,11 +527,29 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
             Construct::Error
         }
         "rescue" | "rescue_modifier" | "ensure" => Construct::Error,
+        "call" if matches!(name, Some(n) if assertion(n, node.role)) => Construct::Assertion,
         "integer" | "float" | "rational" | "imaginary" | "string" | "symbol" | "true" | "false"
         | "nil" | "regular_expression" => Construct::Literal,
         "parameters" => Construct::Parameters,
         _ => return None,
     })
+}
+
+/// A call asserting in a test: RSpec's `expect` (and `expect_*`),
+/// `is_expected` and Minitest's `assert`, `assert_*`, `refute`, `refute_*` on
+/// `self`; `should` and `should_not` on any receiver.
+fn assertion(name: &str, role: Role) -> bool {
+    let on_self = matches!(role, Role::Call(Receiver::Implicit | Receiver::SelfRef));
+    match name {
+        "should" | "should_not" => true,
+        "expect" | "is_expected" | "assert" | "refute" => on_self,
+        _ => {
+            on_self
+                && ["expect_", "assert_", "refute_"]
+                    .iter()
+                    .any(|p| name.starts_with(p))
+        }
+    }
 }
 
 /// Methods that compare or negate.

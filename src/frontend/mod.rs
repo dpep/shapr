@@ -182,6 +182,9 @@ pub enum Construct {
     Parameters,
     /// An item that only tests run (Rust's `#[test]` fn, `#[cfg(test)]` mod).
     Test,
+    /// A test's assertion (`expect`, `assert_equal`, `assert_eq!`), counted
+    /// once per call or macro.
+    Assertion,
 }
 
 static FRONTENDS: &[&dyn Frontend] = &[&Ruby, &Rust];

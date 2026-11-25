@@ -1,0 +1,17 @@
+{
+  "description": "a spec hunk that drops five of six expectations carries removes_assertions with the counts",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {"$some": "removes_assertions"},
+            "detail": {"assertions": {"removed": 5, "added": 0}}
+          }
+        ]
+      }
+    ]
+  }
+}
