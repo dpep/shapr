@@ -192,9 +192,9 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
             note,
         });
     }
-    // A near miss of a structural kind first, then the most facets and the
-    // most lines.
-    items.sort_by_key(|i| (i.risk.0, std::cmp::Reverse((i.risk.1, i.review_lines))));
+    // A near miss of a structural kind first, then the most lines, then the
+    // most facets: a facet alone marks a rewrite as readily as a risk.
+    items.sort_by_key(|i| (i.risk.0, std::cmp::Reverse((i.review_lines, i.risk.1))));
     let rest = items.split_off(items.len().min(SHOWN));
     let more = More {
         items: rest.len(),

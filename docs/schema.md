@@ -1267,7 +1267,7 @@ side unless it only deletes) or a style deviation's.
 | `verdict`, `hunks`, `review_lines`, `test_review_lines`, `refactor_share` | | As in the `summary` record. |
 | `claims` | string array | The categories the messages claim (`summary.claims.experimental.categories` above 0). |
 | `unproven` | string array | Each claim the code doesn't bear out, as the text output's `unproven:` and `conflict:` lines say it. |
-| `read_first` | array | The logic to read, ranked: a residual that nearly proved a structural kind first, then more facets, then more lines. At most 15; `more` places the rest. Below. |
+| `read_first` | array | The logic to read, ranked: a residual that nearly proved a structural kind first, then more review lines, then more facets. At most 15; `more` places the rest. Below. |
 | `more` | object | The logic left out of `read_first`: `items`, `review_lines`, and `at`, their places. |
 | `unproven_structure` | array | Parts of a structural kind that aren't structure: `at`, `kind`, and `why`, their assumptions and move contexts. |
 | `skip` | object | Proven structure, to skip: `hunks` (wholly structure), `changed_lines` in structure parts, and `kinds`, part count per kind. |

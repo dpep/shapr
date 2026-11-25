@@ -137,6 +137,60 @@ Size after the change: 7.1 KB over the 9 PRs (2.1% of the full JSON):
 grouping saved more on flipper#1124 than the placements and style line
 added elsewhere.
 
+## Round 2: the round-1 digest against the default text output
+
+Built from main fa8549f plus the digest commits (main's 5a0bd94, merged
+during the round, changes only help text). A and C inputs don't change
+between rounds, so rerunning them would only measure reviewer variance; this
+round spent those 18 reviewers on B (the round-1 digest) and a new arm, T,
+the default text output (`shapr owner/repo#N`), to ask whether a new mode
+earns its place over the text shapr already prints. Compared against round
+1's A and C.
+
+| PR | real finding | A (r1) | B | T | C (r1) |
+|---|---|---|---|---|---|
+| polyid#109 | `stub_const` dropped | yes | yes | yes | yes |
+| polyid#109 | `where.first` became `find_by` | yes | yes | yes | yes |
+| polyid#107 | eviction test proves nothing | yes | yes | yes | yes |
+| rwr#18 | false "not by the rule declaring this case" | yes | partly: named only as an untested case | yes | no |
+| rwr#18 | `--json` `case`/`rule` change unannounced | yes | yes | yes | yes |
+| rwr#18 | unrelated CHANGELOG correction mixed in | yes | yes | no | yes |
+| flipper#1124 | bare `.to_return` | yes | yes | yes | yes |
+| rq#36 | DECISIONS.md line not rewrapped | yes | yes | yes | yes |
+| **total** | | **8** | **7** (+1 partial) | **7** | **7** |
+
+Sizes over the 9 PRs: B 7.1 KB, T 22 KB, A 339 KB.
+
+Reading: every arm lands within one finding of every other, and the misses
+differ by arm (B and C missed rwr#18's attribution, T its CHANGELOG mix),
+which is what reviewer variance looks like on a set this small. The digest
+holds its findings at a third of the text output's size and a fiftieth of
+the full JSON's, but nothing here says it finds more.
+
+What reviewers said, both B and T:
+
+- Grouping worked: B's flipper#1124 reviewer reached `cloud_spec.rb:51`
+  through its own line in the list; T's reviewer found it by scanning for
+  the lines whose reason was empty among 60 identical ones.
+- "unproven: claims docs; 8 hunks not shown structural" is hard to parse
+  and doesn't say which hunks (B and T, as in round 1).
+- polyid#109's `lib/polyid.rb:98` (`x.nil? ? true : x` to `x.nil? || x`)
+  still ranked first on its `condition` facet, over the 7- and 8-line test
+  hunks holding the PR's two real findings.
+- Wanted from shapr itself, not the digest: an expression extract
+  (polyid#100, again), a rename through an ivar symbol (polyid#104, again),
+  "a rewrite leaves a call with no arguments" (flipper#1124, both arms), a
+  regex quantifier widened (rspec-networking#29), and a test hunk that
+  removes assertions (polyid#107).
+
+## Round 2 changes
+
+- The text output's `unproven:` and `conflict:` lines name the first three
+  hunks behind the claim, as the `refactor:` line does. This is shapr's own
+  output, not only the digest.
+- Ranking: a near miss first, then lines, then facets. A facet marks an
+  idiom rewrite as readily as a risk.
+
 ## Classifier notes
 
 Issues seen in the rounds that belong to classification, not the digest.
@@ -176,4 +230,9 @@ Issues seen in the rounds that belong to classification, not the digest.
 - polyid#107's rename near miss, "renames strip_uuid to create, but
   strip_uuid's definition isn't renamed", where the helper was deleted and
   its calls replaced: a reviewer read it as a dangling reference.
+- A rewrite that leaves a call with no arguments (flipper#1124's bare
+  `.to_return`, an empty WebMock response sequence) reads like the 72
+  other dropped defaults. Every reviewer who found it wanted it flagged.
+  Proposal: a `default_argument` near miss that empties the argument list
+  says so in its reason.
 

@@ -127,7 +127,7 @@ shapr norms -j lib | jq -r '.steps[].edits[].diff' | git apply
 
 Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a file of unknown category, or a test in a language shapr doesn't parse, they are outside the verdict (`unknown`). Code shapr parses but didn't compare (too big, nested too deep) stays inside the verdict as `logic`. Text output names them by category instead: `README.md:1  docs change (outside the verdict)`, `config/app.yml:3  config change`, `spec/fixtures/cart.rb:1  fixture change (outside the verdict)`, `Makefile:1  unknown file (outside the verdict)`.
 
-Experimental: `--digest` keeps the summary lines and narrows the rest to what a reviewer reads first: the logic hunks ranked (near misses of a structural kind first, then facets and size), hunks sharing a reason as one line, structure shapr couldn't prove and why, proven structure as counts to skip, style divergences (or that there are none), and where the hunks outside the verdict are. Under `-j` it is one compact object ([docs/schema.md](docs/schema.md#--digest)), a small fraction of the full JSON.
+Experimental: `--digest` keeps the summary lines and narrows the rest to what a reviewer reads first: the logic hunks ranked (near misses of a structural kind first, then size and facets), hunks sharing a reason as one line, structure shapr couldn't prove and why, proven structure as counts to skip, style divergences (or that there are none), and where the hunks outside the verdict are. Under `-j` it is one compact object ([docs/schema.md](docs/schema.md#--digest)), a small fraction of the full JSON.
 
 ## Usage log
 
