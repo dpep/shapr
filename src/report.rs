@@ -787,8 +787,8 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
 }
 
 /// The change's verdict and counts, then claims: the text output's first lines.
-/// The summary lines; STANDALONE names the subject even when the caller typed
-/// it, for output read without the command line.
+/// STANDALONE names the subject even when the caller typed it, for output
+/// read without the command line.
 fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::Result<()> {
     let s = &report.summary;
     // Parts in hunks inside the verdict; "outside the verdict" counts the rest.

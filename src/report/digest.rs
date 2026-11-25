@@ -9,7 +9,7 @@ use serde::{Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
-/// Logic items listed before the rest are only placed.
+/// Items listed before the rest are only placed.
 const SHOWN: usize = 15;
 
 #[derive(Serialize)]
@@ -75,10 +75,10 @@ struct Item<'a> {
     kind: &'static str,
     review_lines: usize,
     facets: Vec<&'static str>,
-    /// Changed lines per structural kind proven in the same hunk.
+    /// Changed lines per structural kind proven beside the logic, over its hunks.
     with: BTreeMap<&'static str, usize>,
     test: bool,
-    /// Why the residual isn't the structural kind it resembles.
+    /// The part's reason: for a residual, why it isn't the kind it resembles.
     note: Option<String>,
     relocated: Option<String>,
     #[serde(skip)]
