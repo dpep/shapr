@@ -143,7 +143,7 @@ impl Frontend for Rust {
         &["*.rs"]
     }
 
-    fn called_by_name(&self, _: &str, _: &dyn Fn(&str) -> bool) -> bool {
+    fn called_by_name(&self, _: &str, _: &[&str]) -> bool {
         false
     }
 

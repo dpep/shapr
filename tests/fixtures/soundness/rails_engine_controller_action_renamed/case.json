@@ -1,0 +1,15 @@
+{
+  "description": "a public action renamed in a Rails engine's controller (lib/blog/engine.rb, its dummy app's config/application.rb not at the top) (index to list): routes and the implicit template reach it by name, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

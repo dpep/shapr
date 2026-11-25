@@ -1,0 +1,15 @@
+{
+  "description": "two methods swapped below their class's method_added hook: the hook sees them in the other order, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

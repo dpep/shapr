@@ -1193,7 +1193,8 @@ pub(super) fn visibility(tree: &Tree, node: NodeId) -> Option<Visibility> {
 /// whose body runs later, every statement that runs code counts (not a
 /// declaration or a bare `private`): a `require` or a call may read it. So
 /// does it for a method where definitions run ([`crate::tree::Semantics::definitions_run`]),
-/// as does a sibling defining a definition hook (`method_added`).
+/// as does a sibling defining a definition hook (`method_added`) and, below
+/// one, every other method.
 fn dependencies(tree: &Tree, node: NodeId) -> Vec<(u64, bool)> {
     let Some(parent) = tree.node(node).parent else {
         return Vec::new();
@@ -1227,16 +1228,30 @@ struct Needs<'t> {
     /// A method body runs later; anything else runs where it stands, so a
     /// statement beside it may need it (or change it) by the time it runs.
     runs_now: bool,
+    /// A method defined after a definition hook: the hook sees every method
+    /// definition after it in order, so their order among themselves counts.
+    hooked: bool,
 }
 
 impl<'t> Needs<'t> {
     fn of(tree: &'t Tree, node: NodeId) -> Self {
+        let runs_now = tree.node(node).role != Role::Definition(NameKind::Method);
+        let hooks = tree.semantics.definition_hooks;
+        let hooked = !runs_now
+            && tree.node(node).parent.is_some_and(|p| {
+                tree.node(p)
+                    .children
+                    .iter()
+                    .take_while(|&&c| c != node)
+                    .any(|&c| declared_name(tree, c).is_some_and(|n| hooks.contains(&n)))
+            });
         Needs {
             tree,
             node,
             declared: declared_name(tree, node),
             reads: mentions(tree, node),
-            runs_now: tree.node(node).role != Role::Definition(NameKind::Method),
+            runs_now,
+            hooked,
         }
     }
 
@@ -1252,7 +1267,7 @@ impl<'t> Needs<'t> {
         ((self.runs_now || semantics.definitions_run) && !inert(tree, other))
             || (hook(theirs) && !self.runs_now)
             || expands(tree, other)
-            || (hook(self.declared) && other_method)
+            || ((hook(self.declared) || self.hooked) && other_method)
             || self.declared.is_some_and(|d| {
                 theirs == Some(d) || mentions(tree, other).iter().any(|m| spells(m, d))
             })

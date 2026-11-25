@@ -4,6 +4,7 @@
 //! once, so every frontend gets the same semantics.
 
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::{Range, RangeInclusive};
 
@@ -204,6 +205,9 @@ impl Flags {
     /// A [`Role::DynamicName`] that reaches a constant, not a method (Ruby's
     /// `const_get(n)`, `n.constantize`).
     pub const CONSTANT: Flags = Flags(1 << 8);
+    /// A [`Role::DynamicName`] that reaches a field, not a method (Ruby's
+    /// `instance_variable_get(n)`).
+    pub const FIELD: Flags = Flags(1 << 9);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
@@ -458,6 +462,9 @@ pub struct Tree {
     lines: Vec<LineFacts>,
     /// The deepest nesting of nodes below the root.
     pub depth: usize,
+    /// Per node, whether it has text of its own ([`Tree::has_own_text`]),
+    /// found on first ask: a sweep of a wide node's span is costly to repeat.
+    own_text: Vec<OnceCell<bool>>,
 }
 
 /// What a source line carries, ignoring whitespace.
@@ -547,6 +554,11 @@ impl Tree {
     /// child's extent holds: an operator, a keyword, punctuation.
     pub fn own_offsets(&self, id: NodeId) -> impl Iterator<Item = usize> + '_ {
         self.own_offsets_in(id, &self.node(id).span)
+    }
+
+    /// Whether [`Tree::own_offsets`] holds any byte.
+    pub fn has_own_text(&self, id: NodeId) -> bool {
+        *self.own_text[id.0 as usize].get_or_init(|| self.own_offsets(id).next().is_some())
     }
 
     /// [`Tree::own_offsets`] inside `within`.
@@ -946,7 +958,9 @@ impl TreeBuilder {
             },
             verbatim: disjoint(self.verbatim),
             comments: Vec::new(),
+            own_text: Vec::new(),
         };
+        tree.own_text = vec![OnceCell::new(); tree.nodes.len()];
         tree.comments = disjoint(
             (tree.nodes.iter())
                 .filter(|n| n.comment)

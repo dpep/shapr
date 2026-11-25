@@ -1,0 +1,15 @@
+{
+  "description": "an instance variable renamed in a class that reads a field by a computed name (instance_variable_get of a variable), which may spell the old one: not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

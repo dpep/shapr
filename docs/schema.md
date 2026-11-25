@@ -77,10 +77,13 @@ new code also defines): the part is then not claimed and its lines stay
 A part is structure only when it is proven: see [Proof status](#proof-status).
 
 Code that reads its own position (`__LINE__`, Rust's `line!()`, `column!()`
-and `dbg!`) or the call stack's (Ruby's `caller` and `caller_locations`,
+and `dbg!`) or the call stack's (Ruby's `caller` and `caller_locations`, bare or on
+`Kernel`, and `Thread.current.backtrace` or `backtrace_locations`;
 Rust's `Location::caller()`) changes value when it moves. A hunk holding such a read, or one
 above it in the file when the lines added and removed above the read don't
-balance, proves no structure: its lines are `logic`, with `detail.near`
+balance, proves no structure, unless the read keeps its line and column (an
+edit after it on its own line; reads pair up in order, and when a change
+adds or removes one, every read counts as moved): its lines are `logic`, with `detail.near`
 naming the kind it would have been and the confidence of the comparison
 that proved it. A shifted line an exception's backtrace
 reports is not checked, as every line added above any raise would shift it;
@@ -184,7 +187,8 @@ class's method or instance variable of the same name, `Rack::Test::Methods`
 for a constant `Methods`) blocks the operation. A method's name is searched
 without its `?`, `!` or `=`. A file that reaches a method by a name built
 at runtime (`send(n)`, `public_send("get_#{k}")`, `define_method`), or a
-class or constant by one (`const_get(n)`, `n.constantize`), is read too, once per run (every file of the language is parsed for them), and held
+class or constant by one (`const_get(n)`, `n.constantize`), or a field
+(`instance_variable_get(n)`), is read too, once per run (every file of the language is parsed for them), and held
 to the same rule as in the change: a computed name that could spell the old
 one (`get_*` spells `get_total`; a bare `send(n)` spells any) is a use. The
 name as a whole word in any other file code may read (config such as YAML
@@ -329,7 +333,10 @@ every name that differs passes these checks:
   `qualified_const_get`, `const_defined?`, `constantize`,
   `safe_constantize`) counts the same way for a class, module or constant,
   matched on the name's last `::` segment (`const_get("Zoo::#{x}")` could be
-  any constant).
+  any constant), and a field lookup by one (`instance_variable_get`,
+  `instance_variable_set`, `instance_variable_defined?`,
+  `remove_instance_variable` and their `class_variable` forms) for an
+  instance or class variable: `instance_variable_get("@#{n}")` could be any.
 - A local isn't renamed in a scope that reads locals by name at runtime
   (`binding`, `eval`, `local_variables`, a string `instance_eval`; an ERB
   template's `result(binding)`), and a method isn't renamed when it reads its
@@ -339,11 +346,13 @@ every name that differs passes these checks:
   and global variables aren't renamed.
 - Neither name of a method rename is a [reserved name](#reserved-names): the
   language calls those without a call site shapr can see.
-- A public method of a Rails application's controller, mailer, job or
-  channel (a file under `app/controllers/`, `app/mailers/`, `app/jobs/` or
-  `app/channels/` beside `config/application.rb`) isn't renamed: routes,
-  templates, `deliver_later` and `perform_later` reach it by name. A job or
-  mailer class elsewhere is a documented limit.
+- A public method of a Rails application's or engine's controller, mailer,
+  job or channel (a file under `app/controllers/`, `app/mailers/`,
+  `app/jobs/` or `app/channels/` of a directory, at any depth, holding
+  `config/application.rb` or an engine's `lib/**/engine.rb`) isn't renamed:
+  routes, templates, `deliver_later` and `perform_later` reach it by name. A
+  job or mailer class elsewhere, and an engine declared in another file, are
+  documented limits.
 - A class or module (in Rust a struct, enum, union, trait or `mod`) renames
   like a constant, held to every rule here: in a library's public surface
   it assumes `public_api`. It isn't renamed in a Ruby repository that loads
@@ -662,7 +671,7 @@ A hunk that matches this shape but would change behavior stays `logic`, and its 
 | key | type | meaning |
 |---|---|---|
 | `near` | string | `"extract"` or `"inline"`. |
-| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. Also when the caller reads its frame anywhere (`binding`, `$1`): the chunk's locals and matches leave it, or arrive. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`, a plain literal such as `:name`, as a `method_missing` compares): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call; or a file outside the change holds the name at the after revision (a subclass's method of that name, a caller of the removed method), which the `reason` names. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
+| `risk` | string | `"jump"`: the chunk holds code bound to its method or its place: `return`, `break`, `next`, `redo`, `retry`, `yield`, `super`, `block_given?` or a blockless `proc`/`lambda`/`Proc.new` (control flow and the method's block); `binding`, `eval`, `local_variables` or a string `instance_eval`/`class_eval` (the method's locals by name); `__method__`, `caller`, `caller_locations`, `$~`, `$_` or a match reference (`$1`, `$&`) (the method's frame); `__LINE__` or Rust's `line!()`/`column!()` (the code's line); and in Rust `?`, `.await`, `break`, `continue` or a macro outside std. Also when the caller reads its frame anywhere (`binding`, `$1`): the chunk's locals and matches leave it, or arrive; and in Ruby when the chunk or the call sits in a block (or another body opening its own `self`) inside the caller, since `instance_eval`, `class_exec` or a DSL may run it with another `self`. `"block_parameter"`: it uses the caller's `&block`. `"wiring"`: the arguments aren't exactly the chunk's free variables in parameter order, the chunk assigns a local of the caller, or a value used after the chunk isn't returned. `"collision"`: the method's name is a [reserved name](#reserved-names), or already appears, in any file of the change, on the side where the method doesn't exist (a def, a call, a `send`, a plain literal such as `:name`, as a `method_missing` compares): defining it would capture that use, removing it would break it; or another def of the name is on the method's own side, so the method takes part in dispatch beyond its one call; or a file outside the change holds the name at the after revision (a subclass's method of that name, a caller of the removed method), which the `reason` names. `"drop"` (Rust): code follows the chunk in its block and the chunk binds a local other than the returned one, or takes arguments, so a value would be dropped at another point. `"tiny"`: under 8 nodes. |
 
 
 ## Facets
@@ -783,7 +792,7 @@ its new place differs. Its `context` names each difference:
 | `module` | Rust, across files: each file is a module, so the paths it resolves and its own path change. |
 | `owner` | A different enclosing class, module or `impl` (a Rust namespace's attributes count: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`). |
 | `visibility` | A method in a different visibility section: it crossed a bare `private`, `protected`, `public` or `module_function`. A constant or class isn't affected by one. |
-| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition. Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
+| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition and, below one, every other method of its class (the hook sees them in order). Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
 | `directives` | Across files, different file-level directives (`# frozen_string_literal`). |
 | `position` | The unit reads its own line (`__LINE__`, Rust's `line!()`), or its own file (`__FILE__`, `__dir__`, `require_relative`, Rust's `file!()`) and moved to another file. |
 

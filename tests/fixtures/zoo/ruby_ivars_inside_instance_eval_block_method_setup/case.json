@@ -17,6 +17,5 @@
         "$not": "structure"
       }
     }
-  },
-  "open": true
+  }
 }

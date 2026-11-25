@@ -236,7 +236,7 @@ pub(super) fn transparent(tree: &Tree, id: NodeId) -> bool {
     if node.role != Role::Other || node.children.is_empty() {
         return false;
     }
-    tree.own_offsets(id).next().is_none()
+    !tree.has_own_text(id)
 }
 
 /// Non-comment nodes in the subtree.

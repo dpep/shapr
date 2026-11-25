@@ -130,10 +130,13 @@ A frontend implements `Frontend` (`language`, `handles`, `parse`,
 `construct`: which nodes are a branch, comparison, literal, error construct,
 parameter list or test item, for facets; `search_globs`: the files a name of
 the language can be used from; `dispatch_words`: the method names a call
-can reach a method by a computed name through; `library`: whether a path is library code
-other packages depend on, from the repository's layout; and for `default_argument`, `signature`,
-`arguments`, `plain_literal` and `rebinds_self`: a def's parameters, a call's arguments, a
-literal with no shared identity, a node whose code may run with another `self`) and reports
+can reach a method, constant or field by a computed name through; `library`: whether a path is library code
+other packages depend on, from the repository's layout; `called_by_name`: whether a framework
+calls a file's public methods by name, given the repository's paths (a Rails root's
+`app/controllers/`); `load`: how a statement loads another file, for moves into new files;
+`rebinds_self`: a node whose code may run with another `self`, for `default_argument` and
+extract; and for `default_argument`, `signature`, `arguments` and `plain_literal`: a def's
+parameters, a call's arguments, a literal with no shared identity) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
 language reads as code), `error`. The builder computes everything the core
@@ -150,7 +153,12 @@ calls without a visible call: rename refuses them, extract and inline call
 them a `collision`), and `spelling` (sigils, name suffixes, symbol and quote
 marks: how a name is spelled in source, for masking names and reading
 literals), and `private_by_default` (definitions are private unless marked
-`PUBLIC`: Rust; otherwise visibility comes from `Visibility` roles).
+`PUBLIC`: Rust; otherwise visibility comes from `Visibility` roles), and
+`definitions_run` (a definition takes effect when its statement runs, so
+load-time code beside it may observe it: Ruby) with `definition_hooks`
+(methods the runtime calls on each definition after them, `method_added`:
+a move keeps a method's order with a hook and, below one, with every other
+method).
 `TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
 whitespace. `TreeBuilder::respell(variant, canonical)` gives a node with
@@ -169,7 +177,11 @@ it, naming a member as well as a local: Rust's `S { a }`, Ruby's `{x:}`; no
 rename of that name passes through it),
 `SPELLS` (a macro call that may spell its tokens out as text: `stringify!`,
 `dbg!`, a message-less `assert!`, a macro outside std; also an item under an
-attribute macro, which reads its tokens; no rename passes into it) and `DIRECTIVE` (set by the builder for
+attribute macro, which reads its tokens; no rename passes into it),
+`CLASS_VALUE` (a constant whose value is a new class: `Point = Struct.new(:x)`),
+`CONSTANT` and `FIELD` (a computed `DynamicName` that reaches a constant,
+`const_get(n)`, or a field, `instance_variable_get(n)`, rather than a
+method; rename blocks only that family's names by it) and `DIRECTIVE` (set by the builder for
 `directive`). The core never reads a node's `kind`
 string or source text to learn what the language means.
 
@@ -179,12 +191,12 @@ string or source text to learn what the language means.
 | `Bind` | `x = 1` (local write) | `let x = v;` (simple, untyped), `x = v` | extract: the call's result bound to a local; otherwise a local definition (`Role::defines`) |
 | `Reference(NameKind)` | variable reads, constant reads and paths | locals, uppercase paths (`Constant`), types (`Class`), path prefixes (`Module`), `a.b` (`Member`), a fn named as a value (`Method`) | rename: every use of a name |
 | `Call(Receiver)` | a method call; `Implicit` (`go`), `SelfRef` (`self.go`), `Explicit` (receiver is the first child) | `f()` `Implicit`; `self.f()`, `Self::f()` `SelfRef`; `x.f()`, `a::f()` `Explicit` | extract/inline: a call to the new method replacing the statements |
-| `DynamicName` | a string or symbol argument to `send`, `public_send`, `__send__`, `method`, `define_method`, `respond_to?`, `instance_variable_get`/`set`, `const_get`, `alias_method`, `attr*`, a visibility call, and both names of `alias`; `name` is the literal's value. The arguments of a method-reaching call whose name is computed (`send(n)`, `define_method("get_#{x}")`), with `name` a pattern (`*`, `get_*`; `tree::spells`) | none | rename: an old name still mentioned here blocks it, as a pattern that could spell it blocks a method's; extract: a collision |
+| `DynamicName` | a string or symbol argument to a dispatch word (`send`, `public_send`, `__send__`, `try`, `method`, `define_method`, `respond_to?`, `method_defined?`, `instance_variable_get`/`set`/`defined?`, `remove_instance_variable` and the `class_variable` forms, `const_get`, `constantize`, `alias_method`, `attr*`, a visibility call), and both names of `alias`; `name` is the literal's value. The arguments of such a call whose name is computed (`send(n)`, `define_method("get_#{x}")`, `const_get(n)`, `instance_variable_get("@#{n}")`), with `name` a pattern (`*`, `get_*`, `@*`; `tree::spells`) flagged `CONSTANT` or `FIELD` when it reaches no method | none | rename: an old name still mentioned here blocks it, as a pattern that could spell it blocks a method's; extract: a collision |
 | `Opaque` | none | identifiers in macro token trees and attributes, `{name}` in their strings, `S { a }` | rename: conflicts with any scope, follows a passing rename; extract: reads a same-named local |
 | `Exposes` | none | an outer attribute that may read its item's name (`#[no_mangle]`, `#[pyfunction]`, `#[derive(Debug)]`; anything off the nameless lists) | rename: the item, or a method under an `impl` carrying one, isn't renamed |
 | `Annotation` | none | types, generics, where clauses, visibility | extract: skipped in a new method's signature; typed params are plain |
 | `Visibility(Visibility)` | `public`, `protected`, `private`, `module_function` with no receiver: bare, `private def x`, or `private :x` | none (per item, part of its text; a changed `pub` is logic) | move: a def crossing a visibility boundary |
-| `Hazard(Hazard)` | `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` (both forms), `block_given?`/`iterator?` and a blockless `proc`/`lambda`/`Proc.new` (`BlockGiven`); `binding`, `eval`, `local_variables`, a string `*_eval` (`Binding`); `__method__`, `caller`, `$~`, `$1` (`Frame`); `__LINE__` (`Line`); `__FILE__`, `__dir__`, `require_relative` (`File`) | `return`, `?`, `break`, `continue` (`Next`), `.await` (`Await`), `yield`, a macro outside std (`Macro`), and those keywords inside macro tokens; `line!`/`column!` (`Line`), `file!`/`module_path!` (`File`) | every operation, through `classify::hazard::blocks`: extract/inline stop at code that changes meaning in a new method (all but `File`, as B stays in the file); rename at `Binding` in a local's scope, `Frame` in a renamed method; move at `Line`, and `File` across files (context `position`). Block-parameter use is a `Reference` whose name matches a `Definition(BlockParameter)` |
+| `Hazard(Hazard)` | `return`, `break`, `next`, `redo`, `retry`, `yield`, `super` (both forms), `block_given?`/`iterator?` and a blockless `proc`/`lambda`/`Proc.new` (`BlockGiven`); `binding`, `eval`, `local_variables`, a string `*_eval` (`Binding`); `__method__`, `$~`, `$1` (`Frame`); `caller`, `caller_locations`, also on `Kernel`, `Thread.current.backtrace`/`backtrace_locations` (`Stack`); `__LINE__` (`Line`); `__FILE__`, `__dir__`, `require_relative` (`File`) | `return`, `?`, `break`, `continue` (`Next`), `.await` (`Await`), `yield`, a macro outside std (`Macro`), and those keywords inside macro tokens; `Location::caller()` (`Stack`); `line!`/`column!` (`Line`), `file!`/`module_path!` (`File`) | every operation, through `classify::hazard::blocks`: extract/inline stop at code that changes meaning in a new method (all but `File`, as B stays in the file); rename at `Binding` in a local's scope, `Frame` and `Stack` in a renamed method; move at `Line` and `Stack`, and `File` across files (context `position`); a line shift (`Op::Shift`, any hunk moving the read's line or column) at `Line` and `Stack`. Block-parameter use is a `Reference` whose name matches a `Definition(BlockParameter)` |
 
 `NameKind` says what sort of name a definition or reference is, and so its
 scope and rename rules:

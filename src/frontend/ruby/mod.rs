@@ -168,17 +168,34 @@ impl Frontend for Ruby {
         ]
     }
 
-    /// A Rails application's controllers, mailers, jobs and channels: routes,
-    /// `deliver_later`, `perform_later` and clients reach their public methods
-    /// by name, and a template by the action's name.
-    fn called_by_name(&self, path: &str, exists: &dyn Fn(&str) -> bool) -> bool {
+    /// A Rails application's or engine's controllers, mailers, jobs and
+    /// channels: routes, `deliver_later`, `perform_later` and clients reach
+    /// their public methods by name, and a template by the action's name.
+    /// The Rails root is the directory holding `app/`, wherever it sits: an
+    /// application has `config/application.rb` there, an engine
+    /// `lib/**/engine.rb`.
+    fn called_by_name(&self, path: &str, paths: &[&str]) -> bool {
         const DIRS: &[&str] = &[
             "app/controllers/",
             "app/mailers/",
             "app/jobs/",
             "app/channels/",
         ];
-        DIRS.iter().any(|d| path.starts_with(d)) && exists("config/application.rb")
+        let rails = |root: &str| {
+            paths
+                .iter()
+                .filter_map(|p| p.strip_prefix(root))
+                .any(|rest| {
+                    rest == "config/application.rb"
+                        || rest
+                            .strip_prefix("lib/")
+                            .is_some_and(|r| r.ends_with("/engine.rb"))
+                })
+        };
+        (0..path.len())
+            .filter(|&i| i == 0 || path.as_bytes()[i - 1] == b'/')
+            .filter(|&i| DIRS.iter().any(|d| path[i..].starts_with(d)))
+            .any(|i| rails(&path[..i]))
     }
 
     /// A gem's code: under `lib/` beside a `*.gemspec`.
@@ -426,18 +443,52 @@ mod tests {
         assert!(tree.line(2).comment && !tree.line(2).code);
     }
 
+    /// The one table of computed-name families: each dispatch word's
+    /// computed name is a pattern flagged with what it reaches (a method,
+    /// constant or field), which rename blocks that family's names by. A new
+    /// word lands here with its family.
     #[test]
-    fn only_dispatch_words_reach_a_method_by_a_computed_name() {
-        let computed = |call: &str| {
-            parse(&format!("{call}(\"get_#{{n}}\")\n"))
-                .nodes
-                .iter()
-                .any(|n| n.role == Role::DynamicName && n.name.as_deref() == Some("get_*"))
+    fn every_dispatch_word_computes_a_name_in_its_family() {
+        use crate::tree::Flags;
+        const CONSTANT: &[&str] = &[
+            "const_get",
+            "qualified_const_get",
+            "const_defined?",
+            "constantize",
+            "safe_constantize",
+        ];
+        const FIELD: &[&str] = &[
+            "instance_variable_get",
+            "instance_variable_set",
+            "instance_variable_defined?",
+            "remove_instance_variable",
+            "class_variable_get",
+            "class_variable_set",
+            "class_variable_defined?",
+            "remove_class_variable",
+        ];
+        let computed = |source: String| {
+            let tree = parse(&source);
+            let n = tree.nodes.iter().find(|n| n.role == Role::DynamicName)?;
+            Some((n.name.as_deref()?.to_string(), n.flags))
         };
-        for word in Ruby.dispatch_words() {
-            assert!(computed(word), "{word}");
+        for &word in Ruby.dispatch_words() {
+            let (pattern, family) = match word {
+                w if CONSTANT.contains(&w) => ("get_*", Flags::CONSTANT),
+                w if FIELD.contains(&w) => ("@get_*", Flags::FIELD),
+                _ => ("get_*", Flags::default()),
+            };
+            let (name, flags) = computed(format!("{word}(\"get_#{{n}}\")\n")).expect(word);
+            assert_eq!(name, pattern, "{word}");
+            for f in [Flags::CONSTANT, Flags::FIELD] {
+                assert_eq!(flags.contains(f), family == f, "{word}");
+            }
         }
-        assert!(!computed("puts"));
+        for &word in FIELD {
+            let (name, flags) = computed(format!("{word}(n, v)\n")).expect(word);
+            assert!(name == "@*" && flags.contains(Flags::FIELD), "{word}");
+        }
+        assert_eq!(computed("puts(\"get_#{n}\")\n".to_string()), None);
     }
 
     #[test]
@@ -670,6 +721,14 @@ mod tests {
             jumps("__method__\ncaller\ncaller_locations\n$~\n$1\n$&\n"),
             [Frame, Stack, Stack, Frame, Frame, Frame]
         );
+        assert_eq!(
+            jumps(
+                "Kernel.caller\n::Kernel.caller_locations(0)\nThread.current.backtrace_locations\n"
+            ),
+            [Stack; 3]
+        );
+        // Another object's stack: an exception's, another thread's.
+        assert!(jumps("e.backtrace\nt.backtrace_locations\nx.caller\n").is_empty());
         assert_eq!(
             jumps("__LINE__\n__FILE__\n__dir__\nrequire_relative 'a'\n"),
             [Line, File, File, File]

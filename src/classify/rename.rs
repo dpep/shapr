@@ -15,7 +15,6 @@ use super::proof::{self, Assumption, Search, Verified};
 use super::site::{self, CodeLines};
 use super::{Claim, Confidence, Kind, Labels, Outside, Part};
 use crate::change::{Change, Trees};
-use crate::frontend;
 use crate::tree::{Flags, Hazard, NameKind, NodeId, Role, Tree, spells};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -628,7 +627,7 @@ fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
     if trees.before.semantics.file_scoped {
         return false;
     }
-    let zeitwerk = match outside.uses(file.diff.path(), "Zeitwerk") {
+    let zeitwerk = match outside.literal(file.diff.path(), "Zeitwerk") {
         proof::Search::Done {
             found, mentioned, ..
         } => !found.is_empty() || !mentioned.is_empty(),
@@ -639,12 +638,9 @@ fn autoloads(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
 
 /// A renamed definition is a public method a framework calls by name.
 fn framework_calls(change: &Change, facts: &Facts, outside: &dyn Outside) -> bool {
-    let exists = |path: &str| outside.read(path).is_some();
     facts.definitions.iter().any(|&(f, id)| {
         let file = &change.files[f];
-        let path = file.diff.path();
-        let called = frontend::for_path(path).is_some_and(|fe| fe.called_by_name(path, &exists));
-        called
+        outside.called_by_name(file.diff.path())
             && file
                 .trees
                 .as_ref()
@@ -792,11 +788,15 @@ fn conflicts(tree: &Tree, root: NodeId, scope: Scope, name: &str) -> bool {
         };
         match n.role {
             // A computed name reaches methods (`send(n)`, `define_method`),
-            // or constants (`const_get(n)`, `n.constantize`).
+            // constants (`const_get(n)`, `n.constantize`) or fields
+            // (`instance_variable_get(n)`).
             Role::DynamicName if found.contains('*') => {
-                let reaches = match n.flags.contains(Flags::CONSTANT) {
-                    true => Scope::Constant,
-                    false => Scope::Method,
+                let reaches = if n.flags.contains(Flags::CONSTANT) {
+                    Scope::Constant
+                } else if n.flags.contains(Flags::FIELD) {
+                    Scope::Field
+                } else {
+                    Scope::Method
                 };
                 scope == reaches && spells(found, name)
             }
