@@ -1,0 +1,4 @@
+{
+  "description": "a code hunk with logic beside a changed spec file: logic_without_tests is 0",
+  "expect": {"summary": {"logic_without_tests": 0}}
+}

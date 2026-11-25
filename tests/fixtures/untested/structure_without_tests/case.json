@@ -1,0 +1,4 @@
+{
+  "description": "a reformat with no test in the change: no logic, so logic_without_tests is 0",
+  "expect": {"summary": {"verdict": "structure", "logic_without_tests": 0}}
+}

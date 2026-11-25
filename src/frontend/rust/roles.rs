@@ -2,7 +2,7 @@
 //! own text (the name it declares or calls) instead of as a child.
 
 use super::{Walker, is_comment, kind, span, trailing};
-use crate::frontend::{Construct, Pattern};
+use crate::frontend::{Construct, Pattern, Surface};
 use crate::tree::{Canonical, Flags, Hazard, NameKind, NodeId, Receiver, Role, Tree};
 use std::collections::HashSet;
 use tree_sitter::Node;
@@ -895,9 +895,10 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         {
             Construct::Comparison
         }
-        "unary_expression" if own() == "!" => Construct::Comparison,
+        "unary_expression" if own() == "!" => Construct::Negation,
         "integer_literal" | "float_literal" | "string_literal" | "raw_string_literal"
-        | "char_literal" | "boolean_literal" => Construct::Literal,
+        | "char_literal" => Construct::Literal,
+        "boolean_literal" => Construct::Flag,
         "try_expression" => Construct::Error,
         "macro_invocation" if matches!(name, Some(n) if ERROR_MACROS.contains(&n)) => {
             Construct::Error
@@ -906,6 +907,9 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
             Construct::Error
         }
         "call_expression" | "tuple_struct_pattern" if first_named("Err") => Construct::Error,
+        "call_expression" if matches!(name, Some("is_none" | "is_some" | "is_empty")) => {
+            Construct::Guard
+        }
         "parameters" => Construct::Parameters,
         "function_item" | "mod_item" if test_item(tree, id) => Construct::Test,
         "macro_invocation"
@@ -918,6 +922,99 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         _ => return None,
     })
 }
+
+/// Rust's printed, logged and panicked text, and serde's keys.
+pub(super) fn surface(tree: &Tree, id: NodeId) -> Option<Surface> {
+    let node = tree.node(id);
+    let name = node.name.as_deref();
+    match node.kind {
+        "macro_invocation" if matches!(name, Some(n) if TEXT_MACROS.contains(&n)) => {
+            Some(Surface::Text)
+        }
+        "call_expression" if matches!(name, Some("expect" | "context")) => Some(Surface::Text),
+        "attribute_item" => match attribute(tree, id) {
+            (head, _) if head == "error" => Some(Surface::Text),
+            (head, _) if head == "serde" && serialized(tree, node.parent?) => {
+                Some(Surface::Key(vec![id]))
+            }
+            _ => None,
+        },
+        "struct_item" | "enum_item" if serialized(tree, id) => Some(Surface::Serialized),
+        // Its name and attributes; a field's type, a variant's fields aside.
+        "field_declaration" | "enum_variant" => Some(Surface::Key(
+            tree.code_children(id)
+                .filter(|&c| {
+                    let c = tree.node(c);
+                    c.role != Role::Annotation
+                        && !matches!(
+                            c.kind,
+                            "field_declaration_list" | "ordered_field_declaration_list"
+                        )
+                })
+                .collect(),
+        )),
+        _ => None,
+    }
+}
+
+/// Whether item `id` derives serde's `Serialize` or `Deserialize`.
+fn serialized(tree: &Tree, id: NodeId) -> bool {
+    let item = tree.node(id);
+    matches!(item.kind, "struct_item" | "enum_item")
+        && (tree.code_children(id))
+            .filter(|&c| tree.node(c).kind == "attribute_item")
+            .any(|c| {
+                let (head, args) = attribute(tree, c);
+                head == "derive"
+                    && args.split(',').any(|d| {
+                        let d = d.trim();
+                        matches!(d.rsplit("::").next(), Some("Serialize" | "Deserialize"))
+                    })
+            })
+}
+
+/// An attribute's path's last segment and its arguments' text:
+/// `#[serde(rename = "a")]` is `("serde", "rename = \"a\"")`.
+fn attribute(tree: &Tree, id: NodeId) -> (String, String) {
+    let text = String::from_utf8_lossy(tree.text(&tree.node(id).extent)).into_owned();
+    let inner = text
+        .trim_start_matches('#')
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim();
+    let path: String = inner
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+        .collect();
+    let args = inner[path.len()..]
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')');
+    let head = path.rsplit("::").next().unwrap_or_default().to_string();
+    (head, args.to_string())
+}
+
+/// Macros that print, log, panic or build an error from a message.
+const TEXT_MACROS: &[&str] = &[
+    "println",
+    "eprintln",
+    "print",
+    "eprint",
+    "write",
+    "writeln",
+    "panic",
+    "unreachable",
+    "todo",
+    "unimplemented",
+    "bail",
+    "ensure",
+    "anyhow",
+    "trace",
+    "debug",
+    "info",
+    "warn",
+    "error",
+];
 
 /// Macros that panic or return an error.
 const ERROR_MACROS: &[&str] = &[

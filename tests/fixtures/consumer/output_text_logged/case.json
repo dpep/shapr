@@ -1,0 +1,17 @@
+{
+  "description": "a message a logger writes changes: output_text",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "output_text"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

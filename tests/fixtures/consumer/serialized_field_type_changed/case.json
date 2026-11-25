@@ -1,0 +1,18 @@
+{
+  "description": "a Serialize struct's field changes type, keeping its name: the key stays, no serialized_key",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "parts": {
+          "$every": {
+            "facets": {
+              "$every": {
+                "$not": "serialized_key"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

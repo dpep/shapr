@@ -738,7 +738,7 @@ Each part:
 | `confidence` | number 0–1 | How strongly the evidence supports the part. See [Confidence](#confidence). |
 | `reason` | string | One short human-readable sentence. Not a contract: don't match on it. A residual's names the structural kind it resembles and why it isn't one, when a pass came close. |
 | `evidence` | object | What the part rests on. Always has `comparison`; other keys depend on the kind. See [Evidence](#evidence). |
-| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)), and one with lines relocated verbatim carries `relocated` (see [Relocated lines](#relocated-lines)); one with the `removes_assertions` facet carries `assertions` (see [Facets](#facets)). |
+| `detail` | object | Kind-specific facts about the change, such as rename pairs. Empty (`{}`) unless the kind's section documents it. A residual that resembles a structural kind it couldn't be proven to be carries `near` (see [Extract and inline](#extract-and-inline) and [Confidence](#confidence)), and one with lines relocated verbatim carries `relocated` (see [Relocated lines](#relocated-lines)); one with the `removes_assertions` facet carries `assertions`, one with `condition` may carry `condition`, one with `removes_setup` carries `removes_setup`, and a test residual that stops making a call carries `calls` (see [Facets](#facets)). |
 | `facets` | string array | What kind of logic change the residual is, in the table's order; empty for every other part. See [Facets](#facets). |
 | `assumptions` | string array | What the part relies on that shapr couldn't verify, in the [Proof status](#proof-status) table's order; empty for a proven part and for the residual. |
 | `review_lines` | int | Of its lines, the code lines a reviewer still has to read. A residual: all of them, or every changed line when it holds no code line (comments or blank lines no part proved, such as a comment edit refused because it moves a line that reads its own position). `format_only`, `comment_only`, `rename`, `default_argument`, and a `move` that is structure: 0. A `rename` or `default_argument` with assumptions: all of them. A `move` into new surroundings or with assumptions: the moved definition's first code line, where the new surroundings show. A part that isn't structure whose picked lines aren't among its own changed ones (an arbitrary moved element left unchanged): all of its lines. `extract` and `inline`: all of them; they are structure but still need reading. Any part: 0 where the hunk's `review_lines` is 0 by its category or a `none` verdict. |
@@ -811,15 +811,48 @@ none. They need both sides parsed cleanly (`evidence.comparison` `"ast"`).
 | `adds_definition` | A method, class or module that didn't exist. | A definition whose own syntax (the line naming it) is on a residual line, and whose name, qualified by its enclosing definitions, the other side of the file doesn't define. A Rust `impl` is named by its header. |
 | `removes_definition` | A method, class or module that no longer exists. | The same, before side. A method renamed and edited, where the rename isn't proven, both adds and removes. |
 | `signature` | An existing method's interface. | A method on both sides, touched by the residual, whose parameter list or annotations (Rust: return type, generics, visibility) differ, whitespace aside. |
-| `condition` | What the code branches on. | A conditional (`if`, `unless`, `while`, `until`, `case`, `when`, `in`; Rust `if`, `while`, `match`, a match arm) whose test sits on a changed line, or a comparison or boolean operator (`==`, `<`, `>=`, `&&`, `and`, `!`, …) whose operator does, is on one side and not the other: added, removed, or testing something else. A line added inside a branch's body is not a condition change. |
+| `condition` | What the code branches on. | A conditional (`if`, `unless`, `while`, `until`, `case`, `when`, `in`; Rust `if`, `while`, `match`, a match arm) whose test sits on a changed line, or a comparison or boolean operator (`==`, `<`, `>=`, `&&`, `and`, `!`, …) whose operator does, is on one side and not the other: added, removed, or testing something else. A line added inside a branch's body is not a condition change. Also a call passing `true` or `false` on one side and a computed value in its place on the other (`flag_computed`, below). `detail.condition` says what changed, where the code shows it ([below](#condition-detail)). |
 | `error_handling` | How errors are raised, propagated or recovered. | An error construct with its own syntax on a changed line is on one side and not the other, compared by kind, name, operator text and the classes it names. Ruby: `raise`/`fail`, `rescue` (clause and modifier), `ensure`. Rust: `?`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`, `bail!`, `ensure!`, `anyhow!`, `Err(…)` built or matched, and `unwrap`, `expect`, `unwrap_err`, `expect_err`, `map_err`, `ok_or`, `ok_or_else`, `unwrap_or`, `unwrap_or_else`, `unwrap_or_default`, `context`, `with_context`. Changing an argument under a `?` is not. |
 | `literal_only` | Only literal values changed: config-like. | The changed regions are equal once every literal (number, string, symbol, boolean, nil, regexp; a string's text inside an interpolation) and comment is masked, and hold the same number of literals, but not the same code reordered (swapped match arms or arguments). A symbol naming code (`send(:x)`, or one spelling a field, `:@x`; see `DynamicName` in the rename rules) is not a literal here. |
 | `removes_assertions` | Test code left with fewer assertions than it had. | The residual is in a `test` file or carries the `test` facet, and fewer assertions start on its added lines than on its removed ones, lines [relocated](#relocated-lines) verbatim to or from another hunk aside. `detail.assertions` holds the two counts, `removed` and `added`: of the residual's changed lines, not the whole test. An assertion is a call or macro: Ruby's `expect`, `expect_*`, `is_expected`, `assert`, `assert_*`, `refute`, `refute_*` with no receiver but `self`, and `should`/`should_not` on any; Rust's `assert*!`, `debug_assert*!` and `prop_assert*!` (one in a macro's tokens isn't seen). |
 | `regex_widened` | A regular expression now accepts more input. | A literal regular expression (Ruby's `/.../` or `%r{...}`, not interpolated; a string Rust passes first to `Regex::new`) starts on a changed line on each side, the two not equal, and the new one is proven to match everything the old one did: the same pattern with each piece kept or widened, by at least one step that accepts more where it is: a quantifier's range grows (`\h{2}` to `\h{1,2}`, `+` to `*`), a character class gains members or a negated one loses them, a character becomes a class holding it or `.`, an alternation gains a branch, an anchor (`^`, `$`, `\A`, `\z`, `\Z`, `\b`, `\B`, `\G`) is dropped. With several changed, they pair in order and each must widen. The modifiers must be the same, not extended (`/x`), and the pattern free of what breaks the proof: negative lookaround, atomic groups, possessive quantifiers, backreferences, conditionals, inline flags, `\p{...}`, POSIX or nested classes. "More" is local: under a search a pattern can already match everything (`\Aa*`). |
 | `regex_changed` | A regular expression changed, not shown to widen. | As `regex_widened`, where the proof doesn't hold: narrower, rewritten, or beyond the proof. A regular expression only added or only removed is neither. |
+| `output_text` | Text a reader sees changed: printed, logged or raised. | A call, macro or attribute that prints, logs or raises its arguments as a message touches a changed line on each side, the two unequal and equal once every literal under it is masked (a literal inside another call it prints the result of isn't masked), with the old one gone from the after side: the message changed, the call didn't. Ruby: `puts`, `print`, `printf`, `warn`, `abort`, `raise`, `fail` with no receiver; `puts`, `print`, `printf` on any; `debug`, `info`, `warn`, `error`, `fatal`, `unknown` on a receiver named `logger` (`@logger`, `Rails.logger`). Rust: `println!`, `eprintln!`, `print!`, `eprint!`, `write!`, `writeln!`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`, `bail!`, `ensure!`, `anyhow!`, the `log` macros (`trace!` to `error!`), `.expect(...)`, `.context(...)`, and a `#[error(...)]` attribute. A print added or removed outright isn't one. |
+| `serialized_key` | A key a serializer writes was added, removed or renamed. | Inside a serialized definition, the keys whose names touch a changed line differ between the sides, compared by the nodes naming them. Rust: a struct or enum deriving serde's `Serialize` or `Deserialize`; its fields and variants, each named by its name and attributes (its type aside), and its own `#[serde(...)]` attributes. Ruby: a method named `to_h`, `to_hash`, `as_json`, `to_json` or `serializable_hash`; the keys of hash literals in it (not a call's keyword arguments). A field's type or a pair's value changing is not one; a whole serialized definition added or removed is `adds_definition` or `removes_definition`. |
+| `removes_setup` | Test code stopped stubbing or setting up something. | The residual is in a `test` file or carries the `test` facet, and a stub or hook call starts on its removed lines whose name its added lines don't call. Ruby, with no receiver: `before`, `around`, `prepend_before`, `append_before`, `allow`, `allow_any_instance_of`, `stub_const`, `hide_const`, `double`, `instance_double`, `class_double`, `object_double`, `spy`, `instance_spy`, `stub_request`, `travel_to`, `freeze_time`. `detail.removes_setup` names them, sorted. A hook respelled (`before { }` to `before do end`) is the same call. |
 
 Code inside a definition the residual adds or removes doesn't add `condition` or
 `error_handling`: `adds_definition` already says all of it is new.
+
+### Condition detail
+
+A `condition` residual carries `detail.condition`, a string array in this
+order, when the code shows what changed; absent when it shows none of these
+(an operand rewritten, a branch added testing something else):
+
+| value | when |
+|---|---|
+| `operator_changed` | A comparison on a changed line has the same operands on the other side and another operator (`>` to `>=`, `&&` to `\|\|`). |
+| `negation_added` | A negation (`!x`, Ruby's `not x`) is on the after side whose operand, unnegated, is on the before side's changed lines. |
+| `negation_removed` | The same, the other way. |
+| `guard_added` | A branch's test (an `if`, a modifier `if`/`unless`, a `when`, a match arm, ...) holds a check for a missing or empty value that the before side doesn't: Ruby `nil?`, `empty?`, `blank?`, `present?` with a receiver; Rust `is_none()`, `is_some()`, `is_empty()`. A check outside a branch's test isn't one. |
+| `guard_removed` | The same, the other way. |
+| `flag_computed` | A call passing `true` or `false` as a positional argument on the before side is, on the after side, the same call (name, receiver, every other argument) passing a computed value there, neither call left unchanged on the other side: one that reads a variable, field or parameter or calls something (`&[]` and constants don't). The callee now decides on runtime state. This alone adds `condition`. Not in a test file or test item, where `eq(true)` is an expected value. |
+
+The text output shows it beside the facet: `[condition (flag_computed)]`.
+
+### Test calls
+
+A test residual (in a `test` file or carrying `test`) that no longer makes
+some call carries `detail.calls`: `removed`, the names of calls whose own
+syntax is on its removed lines and whose name its added lines don't call,
+and `added`, the reverse, each sorted and listed once. Operators (`==`,
+`[]`) aren't listed: `condition` reads those. A bare Ruby word with no receiver or arguments (`id`), which reads like a local, isn't listed. `where(...).first` to
+`find_by(...)` is `{"removed": ["first", "where"], "added": ["find_by"]}`; a
+`.sort` dropped before a comparison is `{"removed": ["sort"], "added": []}`.
+Absent when nothing was removed. The text output shows it after the facets,
+`calls -first -where +find_by`.
+Any facet whose name is also a key of `detail` holding strings shows that way.
 
 Facets describe; they don't judge intent. A fix and a feature both change
 conditions. Claims about intent come from messages, kept apart from the code's
@@ -899,6 +932,10 @@ Each part's confidence is computed from the evidence, not assigned per kind.
   (the line cap), falling in proportion to the region's lines that hold a
   syntax error: `0.5 × (1 − lines with an error / lines in both regions)`.
 - `comparison` `"none"`: 0. The `logic` part is the safe default, not a finding.
+
+The text output leaves the column blank for a `logic` part with `comparison`
+`"ast"` and no `detail.near`: its 1 is the same for every such part, so it
+ranks nothing. The JSON keeps it.
 
 ## Moves
 
@@ -1282,6 +1319,7 @@ under `shapr norms` and a change's hunks alike.
 | `move_contexts` | object | `move` part count per `context` (see [Moves](#moves)), every context present; a part with two contexts counts under both. |
 | `assumptions` | object | Part count per assumption (see [Proof status](#proof-status)), every assumption present; a part with two counts under both. |
 | `facets` | object | Residual count per facet (see [Facets](#facets)), every facet present; a residual with two facets counts under both. |
+| `logic_without_tests` | int | Hunks in `code` files, in the verdict, holding a residual, when the change touches no test code: no `test` file, and no changed code line inside a Rust `#[test]` fn or `#[cfg(test)]` mod. 0 when it does, and when a code hunk wasn't compared on its trees (`parsed` false), which could hide a test item. Config and manifest edits aren't code logic. The text output says so under the summary line, `no test changed: 2 code hunks hold logic (lib/a.rb:12, lib/b.rb:40)`, naming the first three. |
 | `files` | int | Files changed (Kamei's NF). |
 | `directories` | int | Distinct directories holding them (ND); the repo root counts as one. |
 | `subsystems` | int | Distinct top-level directories (NS); files at the root count as one. |
@@ -1310,7 +1348,9 @@ that line is left out of the text when this one prints; the JSON keeps both.
 *Experimental.* `--digest` narrows the output to what a reviewer reads
 first; it works with every input form. As text, the summary lines come
 first, then the logic to read, ranked, then what shapr couldn't prove, what
-to skip, the style check and the hunks outside the verdict. Under `-j` it is
+to skip, the style check and the hunks the verdict doesn't count, per
+category: `not classified (docs): README.md:1` when shapr compared none of
+them, else the verdict they carry, `verdict unknown (generated): ...`. Under `-j` it is
 one compact `digest` object; `-J` doesn't take it. It holds nothing the full
 output doesn't: a consumer that needs the evidence reads the full JSON.
 A place is a `"file:line"` string, the line a hunk's first or a style
@@ -1335,7 +1375,7 @@ comma or colon is in double quotes there, as is one git quotes.
 | `skip` | object | Proven structure with no line to read (`review_lines` 0), to skip: `hunks` (wholly structure, nothing to read), `changed_lines` in those parts, and `kinds`, part count per kind. |
 | `style_checked` | int | Hunks whose new code was judged against at least one norm (see [Style](#style)). |
 | `style` | array | Each deviation from a diverging norm: `at`, `norm`, `expected`. Empty with `style_checked` above 0: the new code follows the norms around it. |
-| `outside` | object | Per category, the hunks outside the verdict: `review_lines`, summed (a file no frontend parses is still read), and `at`, their places. |
+| `outside` | object | Per category, the hunks the verdict doesn't count (verdict `none` or `unknown`): `review_lines`, summed (a file no frontend parses is still read), and `at`, their places. |
 
 Every review line is placed once: `read_first` and `more`, `unproven_structure`
 and `outside` sum to `review_lines`.

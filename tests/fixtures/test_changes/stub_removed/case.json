@@ -1,0 +1,22 @@
+{
+  "description": "a spec drops a stub_const around the model it builds (polyid#109): removes_setup names it",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "removes_setup"
+            },
+            "detail": {
+              "removes_setup": [
+                "stub_const"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

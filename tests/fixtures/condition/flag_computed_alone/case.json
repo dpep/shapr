@@ -1,0 +1,22 @@
+{
+  "description": "a Ruby boolean literal argument becomes a call's result, nothing else changing: the call's mode now depends on runtime state, so condition with flag_computed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "flag_computed"
+              ]
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

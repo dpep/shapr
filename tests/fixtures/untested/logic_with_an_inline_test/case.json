@@ -1,0 +1,4 @@
+{
+  "description": "a Rust logic hunk beside an edit inside the file's own #[cfg(test)] module: test code changed, so logic_without_tests is 0",
+  "expect": {"hunks": [{"kind": "logic"}, {"kind": "logic"}], "summary": {"logic_without_tests": 0}}
+}

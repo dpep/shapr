@@ -241,6 +241,9 @@ pub struct HunkRecord<'a> {
     /// Its file counts toward the verdict ([`FileChange::counts`]).
     #[serde(skip)]
     counted_file: bool,
+    /// It changes test code: a test file, or a line in a test item.
+    #[serde(skip)]
+    tests: bool,
 }
 
 /// A part of a hunk, or its residual (kind `logic`).
@@ -323,6 +326,7 @@ pub struct Summary {
     move_contexts: BTreeMap<&'static str, usize>,
     assumptions: BTreeMap<&'static str, usize>,
     facets: BTreeMap<&'static str, usize>,
+    logic_without_tests: usize,
     files: usize,
     directories: usize,
     subsystems: usize,
@@ -394,6 +398,7 @@ pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta
                 test_review_lines,
                 relocated_note: relocated_note(lines.relocated_lines, &label.residual),
                 counted_file: file.counts(),
+                tests: file.category == Category::Test || label.tests,
             });
         }
         files.push(FileRecord {
@@ -630,6 +635,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         move_contexts,
         assumptions,
         facets,
+        logic_without_tests: logic_without_tests(hunks).len(),
         files: files.len(),
         directories: dirs.len(),
         subsystems: subsystems.len(),
@@ -649,6 +655,18 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         config_trajectory: Vec::new(),
         bounds_hit: Vec::new(),
     }
+}
+
+/// Code hunks holding logic, in a change that touches no test code; none
+/// when a code hunk wasn't compared on its trees, which may hide a test.
+fn logic_without_tests<'h, 'a>(hunks: &'h [HunkRecord<'a>]) -> Vec<&'h HunkRecord<'a>> {
+    let code = |h: &&HunkRecord| h.category == Category::Code && h.verdict.counted();
+    if hunks.iter().any(|h| h.tests) || hunks.iter().filter(code).any(|h| !h.parsed) {
+        return Vec::new();
+    }
+    (hunks.iter().filter(code))
+        .filter(|h| h.parts.iter().any(|p| p.kind == Kind::Logic))
+        .collect()
 }
 
 /// Kamei et al.'s change entropy: −Σ pₖ·log₂ pₖ over each file's share of
@@ -726,8 +744,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     if !report.hunks.is_empty() {
         writeln!(out)?;
     }
-    // Uncompared hunks outside the verdict, one line per description, so
-    // they never crowd out the hunks a reviewer reads.
+    // Hunks not classified, one line per description after the rest.
     let mut outside: Vec<(String, Vec<digest::Place>)> = Vec::new();
     let mut listed = Vec::new();
     for hunk in &report.hunks {
@@ -747,7 +764,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         }
         // One line per part; the place names the hunk on its first.
         for (i, part) in hunk.parts.iter().enumerate() {
-            let facets: Vec<&str> = part.facets.iter().map(|f| f.as_str()).collect();
+            let facets = facet_labels(part);
             let reason = match part.reason.strip_prefix(classify::PLAIN_LOGIC) {
                 Some(rest) => rest.trim_start_matches("; "),
                 None => &part.reason,
@@ -756,15 +773,20 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             if !facets.is_empty() {
                 detail.push(format!("[{}]", facets.join(", ")));
             }
+            detail.extend(calls_text(part));
             if !hunk.verdict.counted() && i == 0 {
-                detail.push(format!("({}: outside the verdict)", hunk.category.as_str()));
+                detail.push(format!(
+                    "({}: verdict {})",
+                    hunk.category.as_str(),
+                    hunk.verdict.as_str()
+                ));
             }
             detail.retain(|d| !d.is_empty());
             let line = format!(
-                "{:width$}  {:<17} {:.2}  {}",
+                "{:width$}  {:<17} {:4}  {}",
                 if i == 0 { place(hunk) } else { String::new() },
                 part.kind.as_str(),
-                part.confidence.get(),
+                confidence(part),
                 detail.join(" "),
             );
             emit(out, line.trim_end())?;
@@ -780,10 +802,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         let n = at.len();
         let hunks = if n == 1 { "hunk" } else { "hunks" };
         let at = digest::places(&at);
-        emit(
-            out,
-            &format!("{plain} (outside the verdict), {n} {hunks}: {at}"),
-        )?;
+        emit(out, &format!("not classified ({plain}), {n} {hunks}: {at}"))?;
     }
     Ok(())
 }
@@ -793,7 +812,7 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
 /// read without the command line.
 fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::Result<()> {
     let s = &report.summary;
-    // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
+    // Parts in hunks the verdict counts; "hunk verdicts" counts the rest.
     let kinds: Vec<String> = (s.kinds.iter())
         .filter(|(_, n)| **n > 0)
         .map(|(k, n)| format!("{n} {k}"))
@@ -830,7 +849,7 @@ fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::
         if outside.is_empty() {
             String::new()
         } else {
-            format!("; outside the verdict: {}", outside.join(", "))
+            format!("; hunk verdicts: {}", outside.join(", "))
         },
         s.lines.review_lines,
         if s.lines.review_lines == 1 { "" } else { "s" },
@@ -863,6 +882,16 @@ fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::
     let refactor = refactor_text(report);
     if let Some(line) = &refactor {
         emit(out, line)?;
+    }
+    let untested = logic_without_tests(&report.hunks);
+    if !untested.is_empty() {
+        let n = untested.len();
+        let (s, verb) = if n == 1 { ("", "holds") } else { ("s", "hold") };
+        let line = format!(
+            "no test changed: {n} code hunk{s} {verb} logic{}",
+            places(&untested)
+        );
+        emit(out, &line)?;
     }
     claims(out, report, refactor.is_some())?;
     Ok(())
@@ -1012,13 +1041,63 @@ fn conflicts(report: &Report, refactor: bool) -> Vec<(&'static str, String)> {
     out
 }
 
+/// The part's facets for text: each with what its detail of the same name
+/// says, `condition (flag_computed)`.
+pub(crate) fn facet_labels(part: &PartRecord) -> Vec<String> {
+    (part.facets.iter())
+        .map(|f| {
+            let said: Vec<&str> = (part.detail.get(f.as_str()))
+                .and_then(Value::as_array)
+                .map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect());
+            match said.is_empty() {
+                true => f.as_str().to_string(),
+                false => format!("{} ({})", f.as_str(), said.join(", ")),
+            }
+        })
+        .collect()
+}
+
+/// A test residual's calls removed and added, `calls -where -first +find_by`.
+pub(crate) fn calls_text(part: &PartRecord) -> Option<String> {
+    let calls = part.detail.get("calls")?;
+    let names = |key: &str, sign: char| -> Vec<String> {
+        (calls
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten())
+        .filter_map(Value::as_str)
+        .map(|n| format!("{sign}{n}"))
+        .collect()
+    };
+    let all = [names("removed", '-'), names("added", '+')].concat();
+    Some(format!("calls {}", all.join(" ")))
+}
+
+/// The text column's confidence: blank for a residual the tree comparison
+/// settles outright, whose 1 would rank nothing.
+fn confidence(part: &PartRecord) -> String {
+    let settled = part.kind == Kind::Logic
+        && part.evidence.comparison == Method::Ast
+        && !part.detail.contains_key("near");
+    match settled {
+        true => String::new(),
+        false => format!("{:.2}", part.confidence.get()),
+    }
+}
+
+/// Shapr compared the hunk's sides: parsed, or line by line.
+fn compared(hunk: &HunkRecord) -> bool {
+    match hunk.parts.as_slice() {
+        [part] => hunk.parsed || part.evidence.comparison != Method::None,
+        _ => true,
+    }
+}
+
 /// A hunk in a file shapr didn't compare, by its category alone: `docs
 /// change`, `unknown file`. `None` for code or tests, whose reason says why.
 fn uncompared(hunk: &HunkRecord) -> Option<String> {
-    let [part] = hunk.parts.as_slice() else {
-        return None;
-    };
-    if hunk.parsed || part.evidence.comparison != Method::None {
+    if compared(hunk) {
         return None;
     }
     Some(match hunk.category {

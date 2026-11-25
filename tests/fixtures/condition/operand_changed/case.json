@@ -1,0 +1,24 @@
+{
+  "description": "a comparison keeps its operator and changes an operand: condition, with nothing more to say",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

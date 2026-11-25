@@ -220,6 +220,10 @@ impl Frontend for Ruby {
         roles::pattern(tree, id)
     }
 
+    fn surface(&self, tree: &Tree, id: NodeId) -> Option<super::Surface> {
+        roles::surface(tree, id)
+    }
+
     fn signature(&self, tree: &Tree, def: NodeId) -> Option<Signature> {
         signature::signature(tree, def)
     }

@@ -66,6 +66,10 @@ pub trait Frontend: Sync {
     /// `true`, `false`, or an empty collection.
     fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool;
 
+    /// How a reader outside the program sees `id`: printed, logged or raised
+    /// text, or serialized keys. For `output_text` and `serialized_key`.
+    fn surface(&self, tree: &Tree, id: NodeId) -> Option<Surface>;
+
     /// The regular expression `id` writes out, when it is a literal one: a
     /// Ruby regexp literal, a string Rust passes to `Regex::new`. For
     /// `regex_widened`.
@@ -182,16 +186,40 @@ pub struct Pattern {
     pub extended: bool,
 }
 
+/// Where code meets a reader outside the program, as [`Frontend::surface`]
+/// reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Surface {
+    /// A call, macro or attribute whose literal arguments are printed,
+    /// logged or raised as a message (`puts`, `raise`, `logger.info`;
+    /// `println!`, `panic!`, `.expect`, `#[error]`).
+    Text,
+    /// A definition whose keys are serialized: a Rust struct or enum
+    /// deriving `Serialize` or `Deserialize`, a Ruby `to_h` or `as_json`.
+    Serialized,
+    /// A key a serialized definition writes: these nodes name it (a hash
+    /// pair's key; a field's or variant's name and attributes, its type aside;
+    /// a container's `#[serde]` attribute).
+    Key(Vec<NodeId>),
+}
+
 /// A language construct that tells one kind of logic change from another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Construct {
     /// A conditional (`if`, `while`, `case`, a `when`, a match arm): its
     /// first `test` code children are what it tests.
     Branch { test: usize },
-    /// An operator comparing or combining truth values (`>`, `==`, `&&`, `!`).
+    /// An operator comparing or combining truth values (`>`, `==`, `&&`).
     Comparison,
-    /// A number, string, symbol, boolean or nil written out.
+    /// A truth value negated (`!x`, Ruby's `not x`): its first code child.
+    Negation,
+    /// A call asking whether a value is missing or empty (`nil?`,
+    /// `empty?`, `blank?`, `present?`; `is_none`, `is_some`, `is_empty`).
+    Guard,
+    /// A number, string, symbol or nil written out.
     Literal,
+    /// `true` or `false` written out.
+    Flag,
     /// Raises, propagates or rescues an error (`raise`, `rescue`, `?`,
     /// `unwrap`, `panic!`).
     Error,
@@ -202,6 +230,8 @@ pub enum Construct {
     /// A test's assertion (`expect`, `assert_equal`, `assert_eq!`), counted
     /// once per call or macro.
     Assertion,
+    /// A test's stub or hook (`stub_const`, `allow`, `before`).
+    Setup,
 }
 
 static FRONTENDS: &[&dyn Frontend] = &[&Ruby, &Rust];

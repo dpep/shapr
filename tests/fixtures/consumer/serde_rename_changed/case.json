@@ -1,0 +1,17 @@
+{
+  "description": "a serde rename attribute on a field changes: serialized_key",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "serialized_key"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

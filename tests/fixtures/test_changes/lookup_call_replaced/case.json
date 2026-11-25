@@ -1,0 +1,25 @@
+{
+  "description": "a spec's lookup swaps where(...).first for find_by (polyid#109): detail.calls names what left and what came",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "calls": {
+                "removed": [
+                  "first",
+                  "where"
+                ],
+                "added": [
+                  "find_by"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

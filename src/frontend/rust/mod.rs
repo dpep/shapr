@@ -194,6 +194,10 @@ impl Frontend for Rust {
         roles::pattern(tree, id)
     }
 
+    fn surface(&self, tree: &Tree, id: NodeId) -> Option<super::Surface> {
+        roles::surface(tree, id)
+    }
+
     /// Rust has no default arguments: no argument restates one.
     fn signature(&self, _: &Tree, _: NodeId) -> Option<Signature> {
         None

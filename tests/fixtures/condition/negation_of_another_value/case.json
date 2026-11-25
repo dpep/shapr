@@ -1,0 +1,24 @@
+{
+  "description": "a branch's test becomes the negation of something else: condition, but no negation_added",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

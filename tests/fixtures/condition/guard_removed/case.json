@@ -1,0 +1,22 @@
+{
+  "description": "a Rust branch on is_empty() is removed: condition with guard_removed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "guard_removed"
+              ]
+            },
+            "facets": {
+              "$some": "condition"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

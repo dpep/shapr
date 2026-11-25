@@ -1,0 +1,26 @@
+{
+  "description": "a call named allow removed from library code: not a test, no removes_setup",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$every": {
+                "$not": "removes_setup"
+              }
+            },
+            "detail": {
+              "$not": {
+                "calls": {
+                  "$not": null
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

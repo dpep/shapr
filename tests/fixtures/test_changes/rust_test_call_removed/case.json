@@ -1,0 +1,25 @@
+{
+  "description": "a Rust test stops sorting before it asserts: detail.calls names sort removed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "test"
+            },
+            "detail": {
+              "calls": {
+                "removed": [
+                  "sort"
+                ],
+                "added": []
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

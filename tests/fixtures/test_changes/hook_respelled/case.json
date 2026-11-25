@@ -1,0 +1,19 @@
+{
+  "description": "a before hook's braces become do/end around a changed body: the hook stays, no removes_setup",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$every": {
+                "$not": "removes_setup"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

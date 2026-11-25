@@ -1,0 +1,4 @@
+{
+  "description": "a config edit with no test in the change: config isn't code logic, so logic_without_tests is 0",
+  "expect": {"summary": {"verdict": "behavior", "logic_without_tests": 0}}
+}

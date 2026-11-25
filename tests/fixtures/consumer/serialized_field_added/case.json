@@ -1,0 +1,17 @@
+{
+  "description": "a struct deriving Serialize gains a field (rwr#18's rewritten_by): serialized_key",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "serialized_key"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

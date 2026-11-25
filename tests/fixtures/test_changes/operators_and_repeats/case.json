@@ -1,0 +1,24 @@
+{
+  "description": "a spec drops a comparison and two calls of one name: operators aren't listed, a name is listed once",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "calls": {
+                "removed": [
+                  "be",
+                  "first",
+                  "sort"
+                ],
+                "added": []
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

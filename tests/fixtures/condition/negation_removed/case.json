@@ -1,0 +1,22 @@
+{
+  "description": "a Ruby guard's negation is dropped: condition with negation_removed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "negation_removed"
+              ]
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

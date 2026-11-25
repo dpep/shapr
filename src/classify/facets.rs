@@ -10,8 +10,8 @@ mod regex;
 use super::{Label, Labels, Method, Relocation};
 use crate::change::{Category, Change, Trees};
 use crate::diff::{Hunk, Lines};
-use crate::frontend::{self, Construct, Frontend, Pattern};
-use crate::tree::{NameKind, NodeId, Role, Span, Tree};
+use crate::frontend::{self, Construct, Frontend, Pattern, Surface};
+use crate::tree::{NameKind, NodeId, Receiver, Role, Span, Tree};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,10 +44,16 @@ pub enum Facet {
     RegexWidened,
     /// A literal regular expression changed, not shown to widen.
     RegexChanged,
+    /// A literal in printed, logged or raised text changed, the call the same.
+    OutputText,
+    /// A key a serialized definition writes was added, removed or renamed.
+    SerializedKey,
+    /// Test code no longer makes a stub or setup call it made.
+    RemovesSetup,
 }
 
 impl Facet {
-    pub const ALL: [Facet; 10] = [
+    pub const ALL: [Facet; 13] = [
         Facet::Test,
         Facet::AddsDefinition,
         Facet::RemovesDefinition,
@@ -58,6 +64,9 @@ impl Facet {
         Facet::RemovesAssertions,
         Facet::RegexWidened,
         Facet::RegexChanged,
+        Facet::OutputText,
+        Facet::SerializedKey,
+        Facet::RemovesSetup,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -72,6 +81,9 @@ impl Facet {
             Facet::RemovesAssertions => "removes_assertions",
             Facet::RegexWidened => "regex_widened",
             Facet::RegexChanged => "regex_changed",
+            Facet::OutputText => "output_text",
+            Facet::SerializedKey => "serialized_key",
+            Facet::RemovesSetup => "removes_setup",
         }
     }
 }
@@ -83,6 +95,7 @@ pub fn run(change: &Change, labels: &mut Labels) {
             _ => None,
         };
         for (hunk, label) in file.diff.hunks.iter().zip(labels) {
+            label.tests = parsed.as_ref().is_some_and(|p| p.touches_tests(hunk));
             if !label.has_residual() {
                 continue;
             }
@@ -92,14 +105,45 @@ pub fn run(change: &Change, labels: &mut Labels) {
                 .filter(|_| label.residual.evidence.method == Method::Ast)
             {
                 let hunk = residual(hunk, label);
-                parsed.facets(&hunk, &mut facets);
-                let test = file.category == Category::Test || facets.contains(&Facet::Test);
+                let test = file.category == Category::Test;
+                let Found { condition, calls } = parsed.facets(&hunk, test, &mut facets);
+                if !condition.is_empty() {
+                    label.residual.detail.insert(
+                        "condition".to_string(),
+                        json!(condition.iter().map(|c| c.as_str()).collect::<Vec<_>>()),
+                    );
+                }
+                let test = test || facets.contains(&Facet::Test);
                 let (removed, added) = parsed.assertions(&hunk, &label.residual.relocated);
                 if test && added < removed {
                     facets.insert(Facet::RemovesAssertions);
                     label.residual.detail.insert(
                         "assertions".to_string(),
                         json!({"removed": removed, "added": added}),
+                    );
+                }
+                if test && !calls.removed.is_empty() {
+                    fn names(calls: &[Call]) -> Vec<&str> {
+                        let mut names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+                        names.sort_unstable();
+                        names
+                    }
+                    let mut setup: Vec<&str> = (calls.removed.iter())
+                        .filter(|c| c.setup)
+                        .map(|c| c.name.as_str())
+                        .collect();
+                    setup.sort_unstable();
+                    setup.dedup();
+                    if !setup.is_empty() {
+                        facets.insert(Facet::RemovesSetup);
+                        label
+                            .residual
+                            .detail
+                            .insert("removes_setup".to_string(), json!(setup));
+                    }
+                    label.residual.detail.insert(
+                        "calls".to_string(),
+                        json!({"removed": names(&calls.removed), "added": names(&calls.added)}),
                     );
                 }
             }
@@ -135,6 +179,56 @@ fn residual(hunk: &Hunk, label: &Label) -> Hunk {
         removed: lines.before.iter().copied().collect(),
         added: lines.after.iter().copied().collect(),
     }
+}
+
+/// What a `condition` change did, where the code shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ConditionChange {
+    /// A comparison kept its operands and changed its operator.
+    OperatorChanged,
+    /// A value tested is now negated.
+    NegationAdded,
+    /// A negated value is now tested as it is.
+    NegationRemoved,
+    /// A branch now tests whether a value is missing or empty.
+    GuardAdded,
+    /// A branch no longer tests whether a value is missing or empty.
+    GuardRemoved,
+    /// A call's `true` or `false` argument is now computed.
+    FlagComputed,
+}
+
+impl ConditionChange {
+    fn as_str(self) -> &'static str {
+        match self {
+            ConditionChange::OperatorChanged => "operator_changed",
+            ConditionChange::NegationAdded => "negation_added",
+            ConditionChange::NegationRemoved => "negation_removed",
+            ConditionChange::GuardAdded => "guard_added",
+            ConditionChange::GuardRemoved => "guard_removed",
+            ConditionChange::FlagComputed => "flag_computed",
+        }
+    }
+}
+
+/// What [`Parsed::facets`] finds beyond the facets.
+struct Found {
+    condition: BTreeSet<ConditionChange>,
+    calls: Calls,
+}
+
+/// Calls one side of the residual makes and the other doesn't, by name.
+#[derive(Default)]
+struct Calls {
+    removed: Vec<Call>,
+    added: Vec<Call>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Call {
+    name: String,
+    /// A test stub or hook (`Construct::Setup`).
+    setup: bool,
 }
 
 /// A parsed file's per-tree facts, computed once for all its hunks.
@@ -268,7 +362,11 @@ impl<'a> Parsed<'a> {
         }
     }
 
-    fn facets(&self, hunk: &Hunk, facets: &mut BTreeSet<Facet>) {
+    /// Adds the hunk's facets; returns what its condition change did, where
+    /// the code shows it, and the calls it removed and added. In a test
+    /// file (`test`) or test item, a `true` or `false` argument is an
+    /// expected value, not a mode: no `flag_computed`.
+    fn facets(&self, hunk: &Hunk, test: bool, facets: &mut BTreeSet<Facet>) -> Found {
         let before = Side {
             facts: &self.before,
             changed: &hunk.removed,
@@ -307,8 +405,30 @@ impl<'a> Parsed<'a> {
             };
             side(&b) != side(&a)
         };
-        if differs(|c| matches!(c, Construct::Branch { .. } | Construct::Comparison)) {
+        if differs(|c| {
+            matches!(
+                c,
+                Construct::Branch { .. } | Construct::Comparison | Construct::Negation
+            )
+        }) {
             facets.insert(Facet::Condition);
+        }
+        let (skip_before, skip_after) = (skips(&before, &removed), skips(&after, &added));
+        let (b_ids, a_ids) = (
+            self.touched(&before, &skip_before),
+            self.touched(&after, &skip_after),
+        );
+        let test = test || facets.contains(&Facet::Test);
+        let condition = self.condition_changes((&before, &b_ids), (&after, &a_ids), test);
+        // A computed flag is a branch moved into the callee.
+        if !condition.is_empty() {
+            facets.insert(Facet::Condition);
+        }
+        if self.output_text((&before, &b_ids), (&after, &a_ids)) {
+            facets.insert(Facet::OutputText);
+        }
+        if self.keys_written(&before, &b_ids) != self.keys_written(&after, &a_ids) {
+            facets.insert(Facet::SerializedKey);
         }
         if differs(|c| *c == Construct::Error) {
             facets.insert(Facet::ErrorHandling);
@@ -321,6 +441,266 @@ impl<'a> Parsed<'a> {
             Some(regex::Change::Changed) => facets.insert(Facet::RegexChanged),
             None => false,
         };
+        let (old, new) = (self.calls(&before, &b_ids), self.calls(&after, &a_ids));
+        let calls = Calls {
+            removed: old.difference(&new).cloned().collect(),
+            added: new.difference(&old).cloned().collect(),
+        };
+        Found { condition, calls }
+    }
+
+    /// The calls whose own syntax the side's changed lines touch.
+    fn calls(&self, side: &Side, ids: &[NodeId]) -> BTreeSet<Call> {
+        let tree = side.tree();
+        let spelling = &tree.semantics.spelling;
+        (ids.iter().copied())
+            .filter(|&id| matches!(tree.node(id).role, Role::Call(_)))
+            // A bare word (Ruby's `id`) reads like a local: not listed.
+            .filter(|&id| {
+                tree.node(id).role != Role::Call(Receiver::Implicit)
+                    || tree.code_children(id).next().is_some()
+            })
+            .filter(|&id| {
+                tree.own_bytes(id)
+                    .iter()
+                    .any(|&(l, _)| side.touches((l, l)))
+            })
+            .filter_map(|id| {
+                let name = tree.node(id).name.as_deref()?;
+                // Operators (`==`, `[]`) are what condition reads, not calls.
+                spelling.is_identifier(name).then(|| Call {
+                    name: name.to_string(),
+                    setup: self.frontend.construct(tree, id) == Some(Construct::Setup),
+                })
+            })
+            .collect()
+    }
+
+    /// Text surfaces whose literals changed while the rest stayed: a surface
+    /// on each side, unequal, with equal hashes once literals are masked.
+    fn output_text(&self, (before, b): (&Side, &[NodeId]), (after, a): (&Side, &[NodeId])) -> bool {
+        let surfaces = |t: &Tree, ids: &[NodeId]| -> Vec<(u64, u64)> {
+            (ids.iter().copied())
+                .filter(|&id| self.frontend.surface(t, id) == Some(Surface::Text))
+                .map(|id| (self.masked(t, id, id), t.node(id).hash))
+                .collect()
+        };
+        let (old, new) = (surfaces(before.tree(), b), surfaces(after.tree(), a));
+        old.iter().any(|&(mask, hash)| {
+            new.iter().any(|&(m, h)| m == mask && h != hash) && !new.iter().any(|&(_, h)| h == hash)
+        })
+    }
+
+    /// `id`'s hash with every literal under `surface` masked, except under
+    /// another call, whose result is what's printed.
+    fn masked(&self, tree: &Tree, surface: NodeId, id: NodeId) -> u64 {
+        tree.hash_with(id, |c| {
+            let node = tree.node(c);
+            Some(match self.frontend.construct(tree, c) {
+                Some(Construct::Literal | Construct::Flag) if node.role != Role::DynamicName => 0,
+                _ if c != surface && matches!(node.role, Role::Call(_)) => node.hash,
+                _ => self.masked(tree, surface, c),
+            })
+        })
+    }
+
+    /// The keys serialized definitions write, of those the side's changed
+    /// lines touch, as their naming nodes' hashes, sorted.
+    fn keys_written(&self, side: &Side, ids: &[NodeId]) -> Vec<Vec<u64>> {
+        let tree = side.tree();
+        let mut keys: Vec<Vec<u64>> = (ids.iter().copied())
+            .filter_map(|id| match self.frontend.surface(tree, id) {
+                Some(Surface::Key(names)) => Some((id, names)),
+                _ => None,
+            })
+            .filter(|(_, names)| (names.iter()).any(|&n| side.touches_span(&tree.node(n).extent)))
+            .filter(|&(id, _)| {
+                (tree.ancestors(id))
+                    .any(|p| self.frontend.surface(tree, p) == Some(Surface::Serialized))
+            })
+            .map(|(_, names)| names.iter().map(|&n| tree.node(n).hash).collect())
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// Nodes on the side whose extent touches its changed lines, outside `skip`.
+    fn touched(&self, side: &Side, skip: &[Span]) -> Vec<NodeId> {
+        let tree = side.tree();
+        let mut out = Vec::new();
+        let mut stack = vec![Tree::ROOT];
+        while let Some(id) = stack.pop() {
+            let node = tree.node(id);
+            if !side.touches_span(&node.extent) || skip.iter().any(|s| contains(s, &node.extent)) {
+                continue;
+            }
+            stack.extend(node.children.iter().copied());
+            out.push(id);
+        }
+        out
+    }
+
+    /// The construct `id` is, when the change touches its own syntax.
+    fn own_construct(&self, side: &Side, id: NodeId) -> Option<Construct> {
+        let own = side.tree().own_bytes(id);
+        let touched = own.iter().any(|&(line, _)| side.touches((line, line)));
+        self.frontend.construct(side.tree(), id).filter(|_| touched)
+    }
+
+    fn condition_changes(
+        &self,
+        (before, b): (&Side, &[NodeId]),
+        (after, a): (&Side, &[NodeId]),
+        test: bool,
+    ) -> BTreeSet<ConditionChange> {
+        let (b, a) = (b.to_vec(), a.to_vec());
+        let mut out = BTreeSet::new();
+        let picked = |side: &Side, ids: &[NodeId], want: Construct| -> Vec<NodeId> {
+            (ids.iter().copied())
+                .filter(|&id| self.own_construct(side, id) == Some(want))
+                .collect()
+        };
+        let hashes = |t: &Tree, ids: &[NodeId]| -> Vec<u64> {
+            ids.iter().map(|&id| t.node(id).hash).collect()
+        };
+        // Operator: equal operands, other own text.
+        let operands = |t: &Tree, id: NodeId| hashes(t, &t.code_children(id).collect::<Vec<_>>());
+        let own =
+            |t: &Tree, id: NodeId| -> Vec<u8> { t.own_bytes(id).iter().map(|&(_, c)| c).collect() };
+        let (bt, at) = (before.tree(), after.tree());
+        let old = picked(before, &b, Construct::Comparison);
+        let new = picked(after, &a, Construct::Comparison);
+        if old.iter().any(|&o| {
+            new.iter().any(|&n| {
+                operands(bt, o) == operands(at, n)
+                    && own(bt, o) != own(at, n)
+                    && bt.node(o).hash != at.node(n).hash
+            })
+        }) {
+            out.insert(ConditionChange::OperatorChanged);
+        }
+        // Negation: an operand negated on one side, tested bare on the other.
+        let negated = |side: &Side, ids: &[NodeId]| -> Vec<u64> {
+            (picked(side, ids, Construct::Negation).into_iter())
+                .filter_map(|n| side.tree().code_children(n).next())
+                .map(|c| side.tree().node(c).hash)
+                .collect()
+        };
+        let (nb, na) = (negated(before, &b), negated(after, &a));
+        let present = |t: &Tree, ids: &[NodeId], h: u64| ids.iter().any(|&id| t.node(id).hash == h);
+        if minus(&na, &nb).iter().any(|&h| present(bt, &b, h)) {
+            out.insert(ConditionChange::NegationAdded);
+        }
+        if minus(&nb, &na).iter().any(|&h| present(at, &a, h)) {
+            out.insert(ConditionChange::NegationRemoved);
+        }
+        // Guard: a missing-or-empty check a branch tests.
+        let guards = |side: &Side, ids: &[NodeId]| -> Vec<u64> {
+            (picked(side, ids, Construct::Guard).into_iter())
+                .filter(|&g| self.in_branch_test(side.tree(), g))
+                .map(|g| side.tree().node(g).hash)
+                .collect()
+        };
+        let (gb, ga) = (guards(before, &b), guards(after, &a));
+        if !minus(&ga, &gb).is_empty() {
+            out.insert(ConditionChange::GuardAdded);
+        }
+        if !minus(&gb, &ga).is_empty() {
+            out.insert(ConditionChange::GuardRemoved);
+        }
+        if !test && self.flag_computed((before, &b), (after, &a)) {
+            out.insert(ConditionChange::FlagComputed);
+        }
+        out
+    }
+
+    /// `id` lies inside what an enclosing conditional tests.
+    fn in_branch_test(&self, tree: &Tree, id: NodeId) -> bool {
+        let mut child = id;
+        for parent in tree.ancestors(id) {
+            if let Some(Construct::Branch { test }) = self.frontend.construct(tree, parent)
+                && tree.code_children(parent).take(test).any(|c| c == child)
+            {
+                return true;
+            }
+            child = parent;
+        }
+        false
+    }
+
+    /// A call passing `true` or `false` on the before side passes a computed
+    /// value in its place on the after side, everything else equal.
+    fn flag_computed(
+        &self,
+        (before, b): (&Side, &[NodeId]),
+        (after, a): (&Side, &[NodeId]),
+    ) -> bool {
+        let (bt, at) = (before.tree(), after.tree());
+        // A flag's place: the call, and its index path to the flag.
+        let place = |t: &Tree, flag: NodeId| -> Option<(NodeId, Vec<usize>)> {
+            let mut path = Vec::new();
+            let mut child = flag;
+            for parent in t.ancestors(flag).take(2) {
+                path.push(t.code_children(parent).position(|c| c == child)?);
+                if matches!(t.node(parent).role, Role::Call(_)) {
+                    path.reverse();
+                    return Some((parent, path));
+                }
+                child = parent;
+            }
+            None
+        };
+        let calls: Vec<NodeId> = (a.iter().copied())
+            .filter(|&id| matches!(at.node(id).role, Role::Call(_)))
+            .collect();
+        (b.iter().copied())
+            .filter(|&id| self.frontend.construct(bt, id) == Some(Construct::Flag))
+            .filter_map(|flag| place(bt, flag))
+            .any(|(call, path)| {
+                // Both calls changed: the flagged one gone, the computed one new.
+                let gone =
+                    |t: &Tree, ids: &[NodeId], h: u64| !ids.iter().any(|&i| t.node(i).hash == h);
+                gone(at, a, bt.node(call).hash)
+                    && calls.iter().any(|&other| {
+                        let (old, new) = (bt.node(call), at.node(other));
+                        gone(bt, b, new.hash)
+                            && old.role == new.role
+                            && old.name == new.name
+                            && self.differs_only_at(bt, call, at, other, &path)
+                    })
+            })
+    }
+
+    /// The subtrees are equal but along `path`, where the after side holds a
+    /// computed value: not a literal, a flag or a constant.
+    fn differs_only_at(&self, bt: &Tree, b: NodeId, at: &Tree, a: NodeId, path: &[usize]) -> bool {
+        let Some((&i, rest)) = path.split_first() else {
+            // Computed: it reads a variable or calls something.
+            return std::iter::once(a).chain(at.descendants(a)).any(|n| {
+                matches!(
+                    at.node(n).role,
+                    Role::Call(_)
+                        | Role::Reference(
+                            NameKind::Variable
+                                | NameKind::Parameter
+                                | NameKind::Field
+                                | NameKind::Member
+                                | NameKind::Global
+                        )
+                )
+            });
+        };
+        let (old, new): (Vec<NodeId>, Vec<NodeId>) =
+            (bt.code_children(b).collect(), at.code_children(a).collect());
+        old.len() == new.len()
+            && bt.node(b).kind == at.node(a).kind
+            && old.iter().zip(&new).enumerate().all(|(j, (&o, &n))| {
+                if j == i {
+                    self.differs_only_at(bt, o, at, n, rest)
+                } else {
+                    bt.node(o).hash == at.node(n).hash
+                }
+            })
     }
 
     /// Assertions starting on the hunk's changed lines, removed and added,
@@ -340,6 +720,16 @@ impl<'a> Parsed<'a> {
             count(&self.before, &hunk.removed, false),
             count(&self.after, &hunk.added, true),
         )
+    }
+
+    /// A changed code line on either side lies in a test item.
+    fn touches_tests(&self, hunk: &Hunk) -> bool {
+        let touches = |facts: &TreeFacts, changed: &[usize]| {
+            (changed.iter())
+                .filter(|&&l| facts.tree.line(l).code)
+                .any(|&l| facts.tests.iter().any(|&(f, t)| f <= l && l <= t))
+        };
+        touches(&self.before, &hunk.removed) || touches(&self.after, &hunk.added)
     }
 
     /// Every changed code line on the side lies in a test item.
@@ -431,7 +821,7 @@ impl<'a> Parsed<'a> {
                     }
                     tests.iter().map(|&c| tree.node(c).hash).collect()
                 }
-                Construct::Comparison | Construct::Error => {
+                Construct::Comparison | Construct::Negation | Construct::Error => {
                     if !own_touched() {
                         continue;
                     }
@@ -500,7 +890,10 @@ impl<'a> Parsed<'a> {
                 .iter()
                 .filter(|&&(id, n)| {
                     n.role != Role::DynamicName
-                        && self.frontend.construct(tree, id) == Some(Construct::Literal)
+                        && matches!(
+                            self.frontend.construct(tree, id),
+                            Some(Construct::Literal | Construct::Flag)
+                        )
                 })
                 .map(|(_, n)| n.extent.clone())
                 .collect();
@@ -555,6 +948,21 @@ fn regexes<'s>(before: &Side<'s>, after: &Side<'s>) -> Option<regex::Change> {
     })
 }
 
+/// The elements of `a` left once each of `b`'s is taken out, one for one.
+fn minus<T: Clone + PartialEq>(a: &[T], b: &[T]) -> Vec<T> {
+    let mut left = b.to_vec();
+    a.iter()
+        .filter(|h| match left.iter().position(|x| x == *h) {
+            Some(i) => {
+                left.swap_remove(i);
+                false
+            }
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
 /// The extents of definitions a side gained or lost outright.
 fn skips(side: &Side, ids: &[NodeId]) -> Vec<Span> {
     ids.iter()
@@ -585,8 +993,11 @@ mod tests {
                 | Facet::ErrorHandling
                 | Facet::LiteralOnly
                 | Facet::RemovesAssertions
-                | Facet::RegexWidened => {}
-                Facet::RegexChanged => {
+                | Facet::RegexWidened
+                | Facet::RegexChanged
+                | Facet::OutputText
+                | Facet::SerializedKey => {}
+                Facet::RemovesSetup => {
                     assert_eq!(i, Facet::ALL.len() - 1, "the last variant")
                 }
             }

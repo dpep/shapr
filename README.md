@@ -93,15 +93,16 @@ Text output, for a commit that reformats one method's signature and changes anot
 
 ```
 mixed: 2 hunks (1 format_only, 1 logic); review 2 lines; structure share 0.50
+no test changed: 1 code hunk holds logic (lib/greeter.rb:11)
 claims: refactor in 1 of 1 message
 unproven: claims refactor; 1 hunk not shown structural (lib/greeter.rb:11)
 
 lib/greeter.rb:2   format_only       1.00  same code and comments; whitespace differs
-lib/greeter.rb:11  logic             1.00  [literal_only]
+lib/greeter.rb:11  logic                   [literal_only]
                    style Style/StringLiterals: diverging at line 11; class expects single_quotes (0.95: class 2 of 2, directory 12 of 12)
 ```
 
-Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Hunks outside the verdict that shapr didn't compare close the list, one line per description with every place: `docs change (outside the verdict), 3 hunks: README.md:3 CHANGELOG.md:7,19`. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
+Each line is a part: its place, kind, confidence and reason (none for a plain `logic` part), with its facets in brackets. A `logic` part the tree comparison settles shows no confidence: its 1 would rank nothing; a near miss shows how surely the structure it resembles was found. A `style` line says how the hunk's new code sits against the style around it (here a double-quoted string where the class uses single quotes). `claims` reads the commit messages; `unproven` is a claim the code doesn't bear out, with the first hunks behind it. Hunks outside the verdict that shapr didn't compare close the list, one line per description with every place: `docs change (outside the verdict), 3 hunks: README.md:3 CHANGELOG.md:7,19`. Under `-j` the verdict is `.summary.verdict`; under `-J` it is the last line's `.verdict`.
 
 `shapr norms` text output, for a directory where one method breaks the quote style:
 
@@ -125,9 +126,9 @@ The plan's diffs are at `.steps[].edits[].diff` under `-j`, ready for `git apply
 shapr norms -j lib | jq -r '.steps[].edits[].diff' | git apply
 ```
 
-Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a file of unknown category, or a test in a language shapr doesn't parse, they are outside the verdict (`unknown`). Code shapr parses but didn't compare (too big, nested too deep) stays inside the verdict as `logic`. Text output names them by category instead: `README.md:1  docs change (outside the verdict)`, `config/app.yml:3  config change`, `spec/fixtures/cart.rb:1  fixture change (outside the verdict)`, `Makefile:1  unknown file (outside the verdict)`.
+Hunks in files shapr can't parse are `logic` with confidence 0 in JSON; in a file of unknown category, or a test in a language shapr doesn't parse, they are outside the verdict (`unknown`). Code shapr parses but didn't compare (too big, nested too deep) stays inside the verdict as `logic`. Text output names them by category instead: `config/app.yml:3  config change` among the hunks, and, closing the list, `not classified (docs change), 1 hunk: README.md:1`, `not classified (fixture change), 1 hunk: spec/fixtures/cart.rb:1`, `not classified (unknown file), 1 hunk: Makefile:1`. Not classified means shapr didn't look, not that nothing is there to read.
 
-Experimental: `--digest` keeps the summary lines and narrows the rest to what a reviewer reads first: the logic hunks ranked (near misses of a structural kind first, then size and facets), hunks sharing a reason as one line, structure shapr couldn't prove and why, proven structure as counts to skip, style divergences (or that there are none), and where the hunks outside the verdict are. Under `-j` it is one compact object ([docs/schema.md](docs/schema.md#--digest)), a small fraction of the full JSON.
+Experimental: `--digest` keeps the summary lines and narrows the rest to what a reviewer reads first: the logic hunks ranked (near misses of a structural kind first, then size and facets), hunks sharing a reason as one line, structure shapr couldn't prove and why, proven structure as counts to skip, style divergences (or that there are none), and where the hunks the verdict doesn't count are. Under `-j` it is one compact object ([docs/schema.md](docs/schema.md#--digest)), a small fraction of the full JSON.
 
 ## Usage log
 

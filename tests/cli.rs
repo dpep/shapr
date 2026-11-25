@@ -1385,7 +1385,7 @@ fn the_text_kinds_count_only_hunks_inside_the_verdict() {
     let text = String::from_utf8_lossy(&out.stdout);
     let last = text.lines().next().unwrap_or_default();
     assert!(
-        last.contains("behavior: 2 hunks (1 logic); outside the verdict: 1 none;"),
+        last.contains("behavior: 2 hunks (1 logic); hunk verdicts: 1 none;"),
         "{text}"
     );
 }
@@ -1569,6 +1569,8 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
             ("config/x.yml", "a: 1\n"),
             ("config/y.yml", "b: 1  \n"),
             ("spec/fixtures/f.rb", "X = 1\n"),
+            (".gitattributes", "gen/** linguist-generated\n"),
+            ("gen/g.rb", "Y = 1\n"),
         ],
         &[
             ("README.md", "hello\n"),
@@ -1577,20 +1579,22 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
             ("config/x.yml", "a: 2\n"),
             ("config/y.yml", "b: 1\n"),
             ("spec/fixtures/f.rb", "X = 2\n"),
+            ("gen/g.rb", "Y = 2\n"),
         ],
     ]);
     let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
-    // Outside the verdict, one line per description after the listed hunks,
+    // Not classified, one line per description after the listed hunks,
     // which a long path among them doesn't pad.
     let lines: Vec<&str> = hunk_lines(&text).collect();
     assert_eq!(
         lines,
         [
             "config/x.yml:1  config change",
-            "unknown file (outside the verdict), 1 hunk: Makefile:1",
-            "docs change (outside the verdict), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
-            "config change, whitespace only (outside the verdict), 1 hunk: config/y.yml:1",
-            "fixture change (outside the verdict), 1 hunk: spec/fixtures/f.rb:1",
+            "gen/g.rb:1      logic                   [literal_only] (generated: verdict unknown)",
+            "not classified (unknown file), 1 hunk: Makefile:1",
+            "not classified (docs change), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
+            "not classified (config change, whitespace only), 1 hunk: config/y.yml:1",
+            "not classified (fixture change), 1 hunk: spec/fixtures/f.rb:1",
         ],
         "{text}"
     );
@@ -1607,9 +1611,79 @@ fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
     assert_eq!(
         lines,
         [
-            "a.rb:2  logic             1.00  [literal_only]",
+            "a.rb:2  logic                   [literal_only]",
             "b.rb:1  logic             0.00  syntax error on both sides; compared line by line",
         ],
+        "{text}"
+    );
+}
+
+#[test]
+fn text_says_when_logic_changed_and_no_test_did() {
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n")],
+        &[("a.rb", "def f\n  2\nend\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert_eq!(
+        text.lines().nth(1),
+        Some("no test changed: 1 code hunk holds logic (a.rb:2)"),
+        "{text}"
+    );
+    let dir = repo(&[
+        &[("a.rb", "def f\n  1\nend\n"), ("spec/a_spec.rb", "f\n")],
+        &[("a.rb", "def f\n  2\nend\n"), ("spec/a_spec.rb", "g\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(!text.contains("no test changed"), "{text}");
+}
+
+#[test]
+fn text_says_what_a_condition_change_did() {
+    let dir = repo(&[
+        &[("a.rb", "def f(x)\n  take(x, false)\nend\n")],
+        &[("a.rb", "def f(x)\n  take(x, x.fresh?)\nend\n")],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("a.rb:2  logic                   [condition (flag_computed)]"),
+        "{text}"
+    );
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("  a.rb:2  2 lines [condition (flag_computed)]"),
+        "{text}"
+    );
+}
+
+#[test]
+fn text_says_which_calls_a_test_stopped_making() {
+    let spec = |lookup: &str| {
+        format!(
+            "RSpec.describe U do\n  it \"finds\" do\n    stub_const(\"K\", 1)\n    expect({lookup}).to eq(a)\n  end\nend\n"
+        )
+    };
+    let after = "RSpec.describe U do\n  it \"finds\" do\n    expect(U.find_by(k: 1)).to eq(a)\n  end\nend\n";
+    let dir = repo(&[
+        &[("spec/u_spec.rb", &spec("U.where(k: 1).first"))],
+        &[("spec/u_spec.rb", after)],
+    ]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("[removes_setup (stub_const)] calls -first -stub_const -where +find_by"),
+        "{text}"
+    );
+}
+
+#[test]
+fn text_shows_a_residual_confidence_only_where_evidence_grades_it() {
+    // A near miss carries the refused part's confidence; a plain residual's 1 ranks nothing.
+    let before = "class A\n  def a\n    1\n  end\n\n  def b\n    __LINE__\n  end\nend\n";
+    let after = "class A\n  def b\n    __LINE__\n  end\n\n  def a\n    1\n  end\nend\n";
+    let dir = repo(&[&[("a.rb", before)], &[("a.rb", after)]]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("          logic             0.67  move, but it moves line 3"),
         "{text}"
     );
 }

@@ -1,0 +1,22 @@
+{
+  "description": "a branch on an emptiness check is added: condition with guard_added",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "condition": [
+                "guard_added"
+              ]
+            },
+            "facets": [
+              "condition"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

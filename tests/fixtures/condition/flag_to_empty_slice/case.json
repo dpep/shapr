@@ -1,0 +1,21 @@
+{
+  "description": "a false argument becomes &[] (trekr: the parameter's type changed): a literal value reads no runtime state, so no flag_computed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

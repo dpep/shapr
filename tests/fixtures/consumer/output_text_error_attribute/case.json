@@ -1,0 +1,17 @@
+{
+  "description": "a thiserror #[error] message changes: output_text",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "output_text"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

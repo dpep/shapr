@@ -1,0 +1,22 @@
+{
+  "description": "a spec drops a before hook: removes_setup names it",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "facets": {
+              "$some": "removes_setup"
+            },
+            "detail": {
+              "removes_setup": [
+                "before"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
