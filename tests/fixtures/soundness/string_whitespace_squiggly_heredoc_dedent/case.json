@@ -1,0 +1,6 @@
+{
+  "description": "a <<~ heredoc line reindented changes the dedent of every line: the value of another line changes",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

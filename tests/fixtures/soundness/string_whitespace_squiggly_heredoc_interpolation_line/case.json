@@ -1,0 +1,6 @@
+{
+  "description": "a <<~ heredoc line holding only an interpolation reindented changes the dedent",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

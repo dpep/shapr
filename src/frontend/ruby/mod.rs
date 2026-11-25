@@ -92,6 +92,7 @@ impl Frontend for Ruby {
             sorbet: sorbet::Sorbet::of(&result),
             entered: Entered::default(),
             parents: Vec::new(),
+            gaps: Vec::new(),
         }
         .visit(&result.node());
         if let Some(data) = result.data_loc() {
@@ -287,6 +288,9 @@ struct Walker<'b> {
     entered: Entered,
     /// The open prism nodes, as (kind, start), for [`variants::respell`].
     parents: Vec<(&'static str, usize)>,
+    /// Per open node, the stretches of an interpolated heredoc's body no
+    /// part holds, in order, to report as leaves between its parts.
+    gaps: Vec<Vec<Span>>,
 }
 
 /// The node an enter hook just saw, as (kind, start, end), for the
@@ -327,6 +331,17 @@ impl Walker<'_> {
         self.entered.dispatched(node)
     }
 
+    /// Reports the open node's gaps that start before `at`.
+    fn gaps_before(&mut self, at: usize) {
+        let Some(gaps) = self.gaps.last_mut() else {
+            return;
+        };
+        let due = gaps.partition_point(|g| g.start < at);
+        for gap in gaps.drain(..due) {
+            self.builder.leaf("heredoc_indent", gap, None, Role::Other);
+        }
+    }
+
     fn facts(&mut self, node: &Node<'_>) -> (&'static str, Option<Vec<u8>>, Role) {
         let (kind, name) = generated::kind_and_name(node);
         let (role, renamed) = self.roles.of(node);
@@ -339,6 +354,7 @@ impl<'pr> Visit<'pr> for Walker<'_> {
 
     fn visit_branch_node_enter(&mut self, node: Node<'pr>) {
         self.entered.enter(&node);
+        self.gaps_before(node.location().start_offset());
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
@@ -353,15 +369,19 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         self.builder.flag(flags);
         self.respell(&node);
         self.parents.push((kind, node.location().start_offset()));
+        self.gaps.push(heredoc_gaps(&node, self.builder.source()));
     }
 
     fn visit_branch_node_leave(&mut self) {
+        self.gaps_before(usize::MAX);
+        self.gaps.pop();
         self.parents.pop();
         self.builder.close();
     }
 
     fn visit_leaf_node_enter(&mut self, node: Node<'pr>) {
         self.entered.enter(&node);
+        self.gaps_before(node.location().start_offset());
         let (kind, name, role) = self.facts(&node);
         let name = name.as_deref();
         // A heredoc's node spans only its opener; the body and terminator
@@ -376,6 +396,39 @@ impl<'pr> Visit<'pr> for Walker<'_> {
             self.respell(&node);
         }
     }
+}
+
+/// The bytes of an interpolated heredoc's body outside its parts: the
+/// indentation a `<<~` heredoc strips where it leaves no string part, which
+/// still sets how much every line loses.
+fn heredoc_gaps(node: &Node<'_>, source: &[u8]) -> Vec<Span> {
+    let (opening, parts, closing) = if let Some(n) = node.as_interpolated_string_node() {
+        (n.opening_loc(), n.parts(), n.closing_loc())
+    } else if let Some(n) = node.as_interpolated_x_string_node() {
+        (Some(n.opening_loc()), n.parts(), Some(n.closing_loc()))
+    } else {
+        return Vec::new();
+    };
+    let heredoc = opening.is_some_and(|o| o.as_slice().starts_with(b"<<"));
+    let spans: Vec<Span> = parts.iter().map(|p| span(&p.location())).collect();
+    let (true, Some(first)) = (heredoc, spans.first()) else {
+        return Vec::new();
+    };
+    // The body starts a line.
+    let start = source[..first.start]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    let end = closing.map_or(spans[spans.len() - 1].end, |c| c.start_offset());
+    let bounds = std::iter::once(start)
+        .chain(spans.iter().flat_map(|s| [s.start, s.end]))
+        .chain(std::iter::once(end));
+    let bounds: Vec<usize> = bounds.collect();
+    bounds
+        .chunks(2)
+        .map(|g| g[0]..g[1])
+        .filter(|g| g.start < g.end)
+        .collect()
 }
 
 /// From a plain heredoc's first body byte through its terminator.

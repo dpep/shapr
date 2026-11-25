@@ -146,7 +146,9 @@ inlines in particular are linked to later bug fixes and still deserve review.
 
 Tree equality is exact: node kinds, child order, and every non-whitespace
 byte of each node's source must match, and leaves (string content, heredoc
-bodies, symbols, numbers) match byte for byte, whitespace included. So
+bodies, symbols, numbers) match byte for byte, whitespace included; so does
+the indentation a `<<~` heredoc strips, and a line whose only change is such
+whitespace holds code. So
 `do…end` versus `{…}`, a change of quote style or a trailing comma in Ruby
 is not `format_only`; it is a `restyle` where the trees prove it the same
 program, and any reordering is `logic`.
@@ -226,7 +228,7 @@ spellings:
 
 | variant | the same program | not the same |
 |---|---|---|
-| `Style/StringLiterals` | `'a'`, `"a"`, `%q(a)`, `?a`, a plain heredoc: a string with no interpolation, compared by its value and its encoding and frozen flags | `"\u00e9"` vs `"é"` (the escape forces UTF-8); a regexp's or command's text; an interpolated string's quotes |
+| `Style/StringLiterals` | `'a'`, `"a"`, `%q(a)`, `?a`, a plain heredoc: a string with no interpolation, compared by its value and its encoding and frozen flags; a `<<~` heredoc reindented whole, compared by every line's value after the indentation it strips | `"\u00e9"` vs `"é"` (the escape forces UTF-8); a regexp's or command's text; an interpolated string's quotes |
 | `Style/QuotedSymbols` | `:a`, `:"a"` | `:"a#{b}"` |
 | `Style/HashSyntax` | `{:a => 1}`, `{a: 1}`, `{"a b": 1}` (the key a symbol on both sides); `{x: x}`, `{x:}` where `x` is a local | `{"a": 1}` vs `{"a" => 1}` (a symbol vs a string key); `{x:}` reading a method |
 | `Style/WordArray`, `Style/SymbolArray` | `%w[a b]`, `["a", "b"]`; `%i[a b]`, `[:a, :b]` | |

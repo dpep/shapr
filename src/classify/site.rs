@@ -194,12 +194,12 @@ impl<'t> CodeLines<'t> {
         CodeLines { tree }
     }
 
-    /// Offsets of the code bytes on `line`.
+    /// Offsets of the code bytes on `line`: whitespace counts in a leaf.
     fn bytes(&self, line: usize) -> Vec<usize> {
-        self.tree
-            .line_span(line, line)
-            .filter(|&at| !self.tree.source[at].is_ascii_whitespace())
-            .filter(|&at| !self.tree.in_comment(at))
+        let tree = self.tree;
+        tree.line_span(line, line)
+            .filter(|&at| !tree.source[at].is_ascii_whitespace() || tree.verbatim(at))
+            .filter(|&at| !tree.in_comment(at))
             .collect()
     }
 

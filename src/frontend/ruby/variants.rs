@@ -61,6 +61,12 @@ pub(super) fn respell(
         ) {
             return None;
         }
+        // A `<<~` heredoc strips the indentation all its lines share, so a
+        // part's value depends on lines outside it.
+        let squiggly = parent.is_some_and(|(_, at)| source[at..].starts_with(b"<<~"));
+        if parent_kind == Some("interpolated_string") && squiggly {
+            return None;
+        }
         let flags = [
             n.is_forced_utf8_encoding(),
             n.is_forced_binary_encoding(),
@@ -75,6 +81,30 @@ pub(super) fn respell(
             variant,
             Canonical::Value(value(b'"', &flags, n.unescaped())),
         ));
+    }
+    if let Some(n) = node.as_interpolated_string_node() {
+        // A `<<~` heredoc's parts are read together: each line loses the
+        // indentation all of them share.
+        let squiggly = n
+            .opening_loc()
+            .is_some_and(|o| o.as_slice().starts_with(b"<<~"));
+        if !squiggly {
+            return None;
+        }
+        let mut text = vec![u8::from(n.is_frozen()), u8::from(n.is_mutable())];
+        for part in n.parts().iter() {
+            match part.as_string_node() {
+                Some(s) => {
+                    let flags = [s.is_forced_utf8_encoding(), s.is_forced_binary_encoding()];
+                    let part = value(b'"', &flags, s.unescaped());
+                    text.push(b's');
+                    text.extend((part.len() as u64).to_le_bytes());
+                    text.extend(part);
+                }
+                None => text.push(b'e'),
+            }
+        }
+        return Some((STRING_LITERALS, Canonical::Literal(text)));
     }
     if let Some(n) = node.as_symbol_node() {
         let flags = [
