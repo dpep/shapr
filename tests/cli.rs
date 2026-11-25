@@ -1057,6 +1057,45 @@ fn usage_summarizes_the_log_and_reset_empties_it() {
     );
 }
 
+/// A log path that isn't a regular file (a FIFO would block the open) is
+/// skipped, and the run finishes.
+#[test]
+fn a_log_path_that_isnt_a_file_is_skipped() {
+    let dir = branched();
+    let state = tempfile::tempdir().unwrap();
+    let log = state.path().join("usage.jsonl");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&log)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    for args in [&["-q", "feat"][..], &["-j", "--usage"]] {
+        let mut child = command(env!("CARGO_BIN_EXE_shapr"), dir.path())
+            .args(args)
+            .env("SHAPR_USAGE", &log)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if started.elapsed().as_secs() > 20 {
+                child.kill().unwrap();
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(
+            status.and_then(|s| s.code()),
+            Some(0),
+            "{args:?} hung or failed"
+        );
+    }
+}
+
 #[test]
 fn the_log_defaults_to_xdg_state_and_status_shows_it() {
     let dir = branched();

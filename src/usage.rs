@@ -185,6 +185,9 @@ fn append(path: &Path, line: &str) -> std::io::Result<()> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(symlink());
     }
+    if !regular(path) {
+        return Err(std::io::Error::other("the log path isn't a file"));
+    }
     let mut file = options.open(path)?;
     #[cfg(unix)]
     {
@@ -260,9 +263,19 @@ pub struct Summary {
     pub verdicts: BTreeMap<String, u64>,
 }
 
+/// Whether PATH is a regular file or nothing yet: opening anything else (a
+/// FIFO) can block.
+fn regular(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta.is_file(),
+        Err(_) => true,
+    }
+}
+
 /// Empties the log.
 pub fn reset() -> std::io::Result<()> {
     match location().path {
+        Some(path) if !regular(&path) => Err(std::io::Error::other("the log path isn't a file")),
         Some(path) if path.exists() => std::fs::write(path, b""),
         _ => Ok(()),
     }
@@ -276,7 +289,8 @@ pub fn summary() -> Summary {
         enabled: location.enabled,
         ..Summary::default()
     };
-    let Some(text) = location.path.and_then(|p| std::fs::read_to_string(p).ok()) else {
+    let readable = location.path.filter(|p| p.exists() && regular(p));
+    let Some(text) = readable.and_then(|p| std::fs::read_to_string(p).ok()) else {
         return summary;
     };
     summary.bytes = text.len() as u64;
