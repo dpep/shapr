@@ -14,7 +14,7 @@ use super::{Arguments, Construct, Frontend, Signature};
 use crate::norms::Snapshot;
 use crate::tree::{Flags, NodeId, Semantics, Span, Spelling, Tree, TreeBuilder};
 use roles::{Mode, Plan};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use tree_sitter::{Node, Parser};
 
@@ -121,14 +121,18 @@ impl Frontend for Rust {
             .set_language(&tree_sitter_rust::LANGUAGE.into())
             .expect("the bundled grammar matches the tree-sitter version");
         match parse_2015(&mut parser, &source) {
-            Some(cst) => Walker {
-                src: &source,
-                b: &mut builder,
-                locals: vec![HashSet::new()],
-                opaque_members: false,
-                doctests: doctests(cst.root_node(), &source),
+            Some(cst) => {
+                let family = Family::of(cst.root_node());
+                Walker {
+                    src: &source,
+                    b: &mut builder,
+                    family: &family,
+                    locals: vec![HashSet::new()],
+                    opaque_members: false,
+                    doctests: doctests(cst.root_node(), &source, &family),
+                }
+                .children(cst.root_node(), Mode::Expr, &[])
             }
-            .children(cst.root_node(), Mode::Expr, &[]),
             None => builder.error(0..source.len()),
         }
         builder.finish()
@@ -326,6 +330,64 @@ fn try_macros(root: Node<'_>) -> Vec<Span> {
         .collect()
 }
 
+/// Each node's parent and neighbors, from one walk of the tree. tree-sitter's
+/// own `parent` descends from the root and `prev_sibling`/`next_sibling`
+/// rescan the parent's children, so asking them of each comment or macro
+/// token made a long run of siblings quadratic.
+struct Family<'t> {
+    nodes: Vec<Node<'t>>,
+    index: HashMap<usize, u32>,
+    /// Per node of `nodes`: its parent, previous and next sibling, or [`NONE`].
+    links: Vec<[u32; 3]>,
+}
+
+const NONE: u32 = u32::MAX;
+
+impl<'t> Family<'t> {
+    fn of(root: Node<'t>) -> Self {
+        let mut family = Family {
+            nodes: vec![root],
+            index: HashMap::from([(root.id(), 0)]),
+            links: vec![[NONE; 3]],
+        };
+        let mut cursor = root.walk();
+        let mut stack = vec![0u32];
+        while let Some(at) = stack.pop() {
+            let n = family.nodes[at as usize];
+            let first = family.nodes.len() as u32;
+            let count = n.child_count() as u32;
+            for (i, child) in (0..).zip(n.children(&mut cursor)) {
+                let id = first + i;
+                family.index.insert(child.id(), id);
+                family.nodes.push(child);
+                let prev = if i == 0 { NONE } else { id - 1 };
+                let next = if i + 1 == count { NONE } else { id + 1 };
+                family.links.push([at, prev, next]);
+                stack.push(id);
+            }
+        }
+        family
+    }
+
+    fn link(&self, n: &Node<'_>, which: usize) -> Option<Node<'t>> {
+        let at = *self.index.get(&n.id())?;
+        let to = self.links[at as usize][which];
+        (to != NONE).then(|| self.nodes[to as usize])
+    }
+
+    fn parent(&self, n: &Node<'_>) -> Option<Node<'t>> {
+        self.link(n, 0)
+    }
+
+    fn prev_sibling(&self, n: &Node<'_>) -> Option<Node<'t>> {
+        self.link(n, 1)
+    }
+
+    fn next_sibling(&self, n: &Node<'_>) -> Option<Node<'t>> {
+        self.link(n, 2)
+    }
+}
+
 fn span(n: &Node<'_>) -> Span {
     n.start_byte()..n.end_byte()
 }
@@ -367,7 +429,7 @@ fn trailing(parent: &Node<'_>, rest: &[(Option<&str>, Node<'_>)]) -> bool {
 /// Doc comments that hold doctest code, by start byte: in a run of `///`
 /// (or `//!`) lines, each line of a fenced or indented code block (fence
 /// lines included); a `/** */` or `/*! */` block holding one.
-fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
+fn doctests(root: Node<'_>, src: &[u8], family: &Family<'_>) -> HashSet<usize> {
     let mut docs = Vec::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -409,7 +471,7 @@ fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
         };
         match runs.last_mut() {
             Some((m, nodes))
-                if *m == marker && nodes.last().is_some_and(|last| joined(&n, last)) =>
+                if *m == marker && nodes.last().is_some_and(|last| joined(family, &n, last)) =>
             {
                 nodes.push(n)
             }
@@ -432,8 +494,8 @@ fn doctests(root: Node<'_>, src: &[u8]) -> HashSet<usize> {
 
 /// Whether rustdoc reads doc comment `n` as a continuation of `last`: only
 /// comments and attributes, which rustdoc joins or skips, lie between them.
-fn joined(n: &Node<'_>, last: &Node<'_>) -> bool {
-    let mut at = n.prev_sibling();
+fn joined(family: &Family<'_>, n: &Node<'_>, last: &Node<'_>) -> bool {
+    let mut at = family.prev_sibling(n);
     while let Some(s) = at {
         if s.id() == last.id() {
             return true;
@@ -441,7 +503,7 @@ fn joined(n: &Node<'_>, last: &Node<'_>) -> bool {
         if !(is_comment(&s) || matches!(s.kind(), "attribute_item" | "inner_attribute_item")) {
             return false;
         }
-        at = s.prev_sibling();
+        at = family.prev_sibling(&s);
     }
     false
 }
@@ -604,8 +666,8 @@ fn list_item(text: &str) -> Option<usize> {
 
 /// A token directly inside a `{ }` group of a token tree, where it may be
 /// field-init shorthand: tokens don't say whether `{` opens a struct.
-fn in_braces(n: &Node<'_>) -> bool {
-    n.parent().is_some_and(|p| {
+fn in_braces(family: &Family<'_>, n: &Node<'_>) -> bool {
+    family.parent(n).is_some_and(|p| {
         p.kind() == "token_tree" && p.child(0).is_some_and(|open| open.kind() == "{")
     })
 }
@@ -647,7 +709,7 @@ fn derives(attr: &str) -> Option<Vec<&str>> {
 /// Whether derive `path` on `item` never reads doc comments: one of std's,
 /// or one of [`DOCLESS_DERIVES`] named through its crate or imported from it
 /// where `item` sits.
-fn docless_derive(path: &str, item: &Node<'_>, src: &[u8]) -> bool {
+fn docless_derive(family: &Family<'_>, path: &str, item: &Node<'_>, src: &[u8]) -> bool {
     let segments: Vec<&str> = path.trim_start_matches("::").split("::").collect();
     let name = segments[segments.len() - 1];
     if [roles::NAMELESS_DERIVES, &["Debug"]]
@@ -657,7 +719,7 @@ fn docless_derive(path: &str, item: &Node<'_>, src: &[u8]) -> bool {
         return true;
     }
     let root = match segments.len() {
-        1 => import_root(item, name, src),
+        1 => import_root(family, item, name, src),
         _ => Some(segments[0].to_string()),
     };
     root.is_some_and(|root| {
@@ -671,15 +733,15 @@ fn docless_derive(path: &str, item: &Node<'_>, src: &[u8]) -> bool {
 /// settle it: the innermost scope binding it explicitly, reached through
 /// blocks and `use super::*` (a module doesn't see its parent's imports
 /// otherwise). Any other glob, or a binding from two crates, settles nothing.
-fn import_root(item: &Node<'_>, name: &str, src: &[u8]) -> Option<String> {
-    let mut scope = item.parent();
+fn import_root(family: &Family<'_>, item: &Node<'_>, name: &str, src: &[u8]) -> Option<String> {
+    let mut scope = family.parent(item);
     while let Some(s) = scope {
         let module = match s.kind() {
             "source_file" => true,
-            "declaration_list" if s.parent().is_some_and(|p| p.kind() == "mod_item") => true,
+            "declaration_list" if family.parent(&s).is_some_and(|p| p.kind() == "mod_item") => true,
             "block" => false,
             _ => {
-                scope = s.parent();
+                scope = family.parent(&s);
                 continue;
             }
         };
@@ -703,9 +765,9 @@ fn import_root(item: &Node<'_>, name: &str, src: &[u8]) -> Option<String> {
             return None;
         }
         // A module's body sits in its `mod_item`; continue from the item's parent.
-        scope = s
-            .parent()
-            .and_then(|p| if module { p.parent() } else { Some(p) });
+        scope = family
+            .parent(&s)
+            .and_then(|p| if module { family.parent(&p) } else { Some(p) });
     }
     None
 }
@@ -773,8 +835,8 @@ impl Uses {
 }
 
 /// The attributes before item `n`, across the comments between them.
-fn attributes<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
-    std::iter::successors(n.prev_sibling(), |s| s.prev_sibling())
+fn attributes<'t>(family: &Family<'t>, n: &Node<'_>) -> Vec<Node<'t>> {
+    std::iter::successors(family.prev_sibling(n), |s| family.prev_sibling(s))
         .take_while(|s| is_comment(s) || s.kind() == "attribute_item")
         .filter(|s| s.kind() == "attribute_item")
         .collect()
@@ -783,6 +845,7 @@ fn attributes<'t>(n: &Node<'t>) -> Vec<Node<'t>> {
 struct Walker<'a> {
     src: &'a [u8],
     b: &'a mut TreeBuilder,
+    family: &'a Family<'a>,
     /// Names bound by a pattern in each enclosing function, innermost last.
     locals: Vec<HashSet<String>>,
     /// The members being emitted are named by more than Rust code (a derive
@@ -803,9 +866,8 @@ impl<'a> Walker<'a> {
         if let Some(own) = own {
             return self.text(&own) == "pub";
         }
-        let container = n
-            .parent()
-            .and_then(|list| Some((list.kind(), list.parent()?)));
+        let container = (self.family.parent(n))
+            .and_then(|list| Some((list.kind(), self.family.parent(&list)?)));
         match container {
             Some(("declaration_list", item)) if item.kind() == "trait_item" => self.public(&item),
             Some(("enum_variant_list", item)) if item.kind() == "enum_item" => self.public(&item),
@@ -837,11 +899,12 @@ impl<'a> Walker<'a> {
         }
         // An inner doc (`//!`) documents the item around it, not the next one.
         let outer = !(text.starts_with("//!") || text.starts_with("/*!"));
-        let item = std::iter::successors(n.next_sibling(), |s| s.next_sibling())
-            .filter(|_| outer)
-            .find(|s| !is_comment(s) && s.kind() != "attribute_item");
+        let item =
+            std::iter::successors(self.family.next_sibling(n), |s| self.family.next_sibling(s))
+                .filter(|_| outer)
+                .find(|s| !is_comment(s) && s.kind() != "attribute_item");
         item.is_some_and(|i| self.reads_docs(&i))
-            || std::iter::successors(n.parent(), |p| p.parent())
+            || std::iter::successors(self.family.parent(n), |p| self.family.parent(p))
                 .any(|p| p.kind() == "token_tree" || self.reads_docs(&p))
     }
 
@@ -852,10 +915,12 @@ impl<'a> Walker<'a> {
         if matches!(item.kind(), "field_declaration" | "enum_variant") {
             return false;
         }
-        attributes(item)
+        attributes(self.family, item)
             .iter()
             .any(|attr| match derives(self.text(attr)) {
-                Some(paths) => paths.iter().any(|p| !docless_derive(p, item, self.src)),
+                Some(paths) => {
+                    (paths.iter()).any(|p| !docless_derive(self.family, p, item, self.src))
+                }
                 None => roles::reads_tokens(std::slice::from_ref(attr), self.src),
             })
     }
@@ -993,13 +1058,16 @@ impl<'a> Walker<'a> {
         match n.kind() {
             "identifier" => {
                 let name = self.text(&n);
-                let bang = n.next_sibling().is_some_and(|s| s.kind() == "!");
+                let bang = self
+                    .family
+                    .next_sibling(&n)
+                    .is_some_and(|s| s.kind() == "!");
                 let role = match name {
                     "line" | "column" | "dbg" if bang => Role::Hazard(Hazard::Line),
                     "file" | "module_path" if bang => Role::Hazard(Hazard::File),
                     _ => Role::Opaque,
                 };
-                if role == Role::Opaque && in_braces(&n) {
+                if role == Role::Opaque && in_braces(self.family, &n) {
                     // Possibly `S { a }` shorthand, naming a field too.
                     self.member(&n, Some(name));
                     return self.b.close();
@@ -1021,9 +1089,9 @@ impl<'a> Walker<'a> {
             _ => {
                 self.b.open(kind(&n), span(&n), None, Role::Other);
                 // `name!(...)` nested in another macro's tokens.
-                let bang = n.prev_sibling().filter(|b| b.kind() == "!");
+                let bang = self.family.prev_sibling(&n).filter(|b| b.kind() == "!");
                 let name = bang
-                    .and_then(|b| b.prev_sibling())
+                    .and_then(|b| self.family.prev_sibling(&b))
                     .filter(|i| i.kind() == "identifier");
                 if name.is_some_and(|i| roles::spells(self.text(&i), Some(n))) {
                     self.b.flag(Flags::SPELLS);
@@ -1103,6 +1171,41 @@ impl<'a> Walker<'a> {
 mod tests {
     use super::*;
     use crate::tree::{Hazard, NameKind::*, Receiver, Role};
+
+    /// `Family` against tree-sitter's own links, for every node of every
+    /// Rust file of the fixtures.
+    #[test]
+    fn family_links_are_tree_sitters() {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let mut dirs = vec![std::path::PathBuf::from("tests/fixtures")];
+        let mut nodes = 0;
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let source = std::fs::read(&path).unwrap();
+                let cst = parse_2015(&mut parser, &source).unwrap();
+                let family = Family::of(cst.root_node());
+                let id = |n: Option<Node<'_>>| n.map(|n| n.id());
+                for n in &family.nodes {
+                    assert_eq!(id(family.parent(n)), id(n.parent()), "{path:?}");
+                    assert_eq!(id(family.prev_sibling(n)), id(n.prev_sibling()), "{path:?}");
+                    assert_eq!(id(family.next_sibling(n)), id(n.next_sibling()), "{path:?}");
+                }
+                nodes += family.nodes.len();
+            }
+        }
+        assert!(nodes > 10_000, "{nodes} nodes");
+    }
 
     /// Lists `Cargo.toml` and `src/lib.rs`, but reads nothing.
     struct Unreadable;
