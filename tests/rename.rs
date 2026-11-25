@@ -164,12 +164,46 @@ fn a_method_rename_across_files_checks_every_file() {
     logic_because(&report, "greet is still used");
 }
 
+/// The hunk's reason, for a change to one Ruby file.
+fn reason(before: &str, after: &str) -> String {
+    let report = ruby(before, after);
+    assert!(kinds(&report).iter().all(|k| *k == "logic"), "{report}");
+    lead(&hunks(&report)[0])["reason"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
 #[test]
 fn a_call_renamed_without_its_definition_is_logic() {
-    // Calls a different method.
-    let before = "def run\n  start\nend\n";
-    let after = "def run\n  begin_now\nend\n";
-    logic_because(&ruby(before, after), "definition isn't renamed");
+    // Calls a method the change doesn't define.
+    assert_eq!(
+        reason("def run\n  start\nend\n", "def run\n  begin_now\nend\n"),
+        "renames start to begin_now, but start isn't defined in the change"
+    );
+    // The old method is kept beside the new call.
+    assert_eq!(
+        reason(
+            "def start; end\n\ndef run\n  start\nend\n",
+            "def start; end\n\ndef run\n  begin_now\nend\n"
+        ),
+        "renames start to begin_now, but start's definition is kept, not renamed"
+    );
+}
+
+/// polyid#107: a helper deleted and its calls replaced reads as a
+/// replacement, not a rename left dangling.
+#[test]
+fn a_removed_definition_whose_calls_become_another_name_is_a_replacement() {
+    let pad = format!("def pad\n{}end\n\n", filler());
+    let report = ruby(
+        &format!("def start; end\n\n{pad}def run\n  start\nend\n"),
+        &format!("{pad}def run\n  begin_now\nend\n"),
+    );
+    logic_because(
+        &report,
+        "start is removed and its uses become begin_now: a replacement, not a rename",
+    );
 }
 
 #[test]
