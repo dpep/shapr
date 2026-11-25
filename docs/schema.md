@@ -275,8 +275,9 @@ differ. The frontend marks two kinds of annotation in Ruby:
 
 A bare `sig` counts only in a file that has a `# typed:` sigil or names
 `T`, so a method of one's own named `sig` stays `logic`. A file that defines
-a constant `T` of its own (`module T`, `class T`, `T = ...`) has no Sorbet
-annotations. A cast whose value is `self` (directly or through another
+a constant `T` of its own (`module T`, `class T`, or any constant write or
+assignment target ending in `T`: `T = ...`, `T ||= ...`, `A::T = ...`,
+`T, _ = ...`) has no Sorbet annotations. A cast whose value is `self` (directly or through another
 cast) used as a call's receiver isn't an annotation: `T.unsafe(self).secret`
 raises where `self.secret` calls a private method, as `-T.unsafe(self)` does
 where `-self` calls a private `-@`, so it stays `logic`. Two subtrees whose
