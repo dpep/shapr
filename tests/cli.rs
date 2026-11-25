@@ -1590,7 +1590,7 @@ fn text_names_the_category_of_a_file_shapr_doesnt_parse() {
         lines,
         [
             "config/x.yml:1  config change",
-            "gen/g.rb:1      logic             1.00  [literal_only] (generated: verdict unknown)",
+            "gen/g.rb:1      logic                   [literal_only] (generated: verdict unknown)",
             "not classified (unknown file), 1 hunk: Makefile:1",
             "not classified (docs change), 2 hunks: README.md:1 docs/a/very/long/path/that/would/pad/every/line.md:1",
             "not classified (config change, whitespace only), 1 hunk: config/y.yml:1",
@@ -1611,9 +1611,22 @@ fn text_drops_the_generic_logic_reason_and_keeps_specific_ones() {
     assert_eq!(
         lines,
         [
-            "a.rb:2  logic             1.00  [literal_only]",
+            "a.rb:2  logic                   [literal_only]",
             "b.rb:1  logic             0.00  syntax error on both sides; compared line by line",
         ],
+        "{text}"
+    );
+}
+
+#[test]
+fn text_shows_a_residual_confidence_only_where_evidence_grades_it() {
+    // A near miss carries the refused part's confidence; a plain residual's 1 ranks nothing.
+    let before = "class A\n  def a\n    1\n  end\n\n  def b\n    __LINE__\n  end\nend\n";
+    let after = "class A\n  def b\n    __LINE__\n  end\n\n  def a\n    1\n  end\nend\n";
+    let dir = repo(&[&[("a.rb", before)], &[("a.rb", after)]]);
+    let text = String::from_utf8(shapr(dir.path(), &["HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("          logic             0.67  move, but it moves line 3"),
         "{text}"
     );
 }

@@ -764,10 +764,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
             }
             detail.retain(|d| !d.is_empty());
             let line = format!(
-                "{:width$}  {:<17} {:.2}  {}",
+                "{:width$}  {:<17} {:4}  {}",
                 if i == 0 { place(hunk) } else { String::new() },
                 part.kind.as_str(),
-                part.confidence.get(),
+                confidence(part),
                 detail.join(" "),
             );
             emit(out, line.trim_end())?;
@@ -1010,6 +1010,18 @@ fn conflicts(report: &Report, refactor: bool) -> Vec<(&'static str, String)> {
         ));
     }
     out
+}
+
+/// The text column's confidence: blank for a residual the tree comparison
+/// settles outright, whose 1 would rank nothing.
+fn confidence(part: &PartRecord) -> String {
+    let settled = part.kind == Kind::Logic
+        && part.evidence.comparison == Method::Ast
+        && !part.detail.contains_key("near");
+    match settled {
+        true => String::new(),
+        false => format!("{:.2}", part.confidence.get()),
+    }
 }
 
 /// Shapr compared the hunk's sides: parsed, or line by line.

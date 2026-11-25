@@ -900,6 +900,10 @@ Each part's confidence is computed from the evidence, not assigned per kind.
   syntax error: `0.5 × (1 − lines with an error / lines in both regions)`.
 - `comparison` `"none"`: 0. The `logic` part is the safe default, not a finding.
 
+The text output leaves the column blank for a `logic` part with `comparison`
+`"ast"` and no `detail.near`: its 1 is the same for every such part, so it
+ranks nothing. The JSON keeps it.
+
 ## Moves
 
 A *unit* is a method, class, module or constant definition of at least 3
