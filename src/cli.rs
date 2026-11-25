@@ -563,6 +563,9 @@ fn dispatch() -> ExitCode {
             style
         });
     }
+    let budgets = crate::outside::budgets(&repositories);
+    report.summary.bounds_hit = crate::outside::hits(&budgets);
+    crate::usage::count("bounds", &budgets);
     crate::usage::counts(&report.summary, &["files", "hunks", "kinds", "verdict"]);
     let mut styles = std::collections::BTreeMap::new();
     for style in report.hunks.iter().filter_map(|h| h.style.as_ref()) {

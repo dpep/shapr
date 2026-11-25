@@ -338,6 +338,9 @@ pub struct Summary {
     /// Experimental: per norm config sets, whether the change moves the
     /// code toward it; filled in beside the hunks' style.
     pub config_trajectory: Vec<crate::norms::Trajectory>,
+    /// The bounds on the search outside the change that refused a search;
+    /// filled in once the norms' searches are done too.
+    pub bounds_hit: Vec<crate::outside::Hit>,
 }
 
 pub fn build<'a>(change: &'a Change, labels: &Labels, claims: Claims, meta: Meta) -> Report<'a> {
@@ -644,6 +647,7 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
         refactor_share: share(refactor_lines, total),
         claims,
         config_trajectory: Vec::new(),
+        bounds_hit: Vec::new(),
     }
 }
 
@@ -851,6 +855,9 @@ fn summary_text(out: &mut impl Write, report: &Report, standalone: bool) -> io::
     );
     emit(out, &line)?;
     for line in crate::norms::trajectory::text(&s.config_trajectory) {
+        emit(out, &line)?;
+    }
+    if let Some(line) = crate::outside::text(&s.bounds_hit) {
         emit(out, &line)?;
     }
     let refactor = refactor_text(report);

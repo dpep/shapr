@@ -172,7 +172,7 @@ What the search can't settle stays on the part:
 | assumption | meaning |
 |---|---|
 | `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), or holds the name in a file shapr can't parse for a use (YAML, JavaScript; see below), so code outside the change may still use the name. |
-| `search_capped` | The repository holds more than 20,000 files of the language: they aren't searched. |
+| `search_capped` | The search hit one of its [bounds](#search-bounds): the repository holds more files of the language than one search reads, or the run's searches already read their share of files, or the files to parse (those that call by a computed name, then the files found) pass the run's bytes. Uses outside the change weren't checked. `summary.bounds_hit` names the bound. |
 | `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. Also a definition moved from a gem's `lib/` into a new file that other files load after the old one: another package may load the old file alone ([New files](#new-files)). |
 | `runtime_check` | A `typing` part holds a type annotation a runtime may check: sorbet-runtime checks a `sig`, `T.let`, `T.cast` and `T.bind`, raises on a `nil` in `T.must`, and enforces `abstract!` and its kin, so a value the new types reject raises where the old code ran. See [Typing](#typing). |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
@@ -202,6 +202,27 @@ docs, generated, vendored or binary files) can't be parsed for a use, so it
 leaves `unseen_uses`. It can't see other repositories beyond `public_api`. In
 a partial clone (the GitHub cache) the language's blobs at the after
 revision are fetched in one request first.
+
+### Search bounds
+
+The search's cost grows with the repository: each search greps every file,
+and the files it parses (those that call by a computed name, once per run,
+then each search's files found) cost time and, kept for the run, memory. Three
+bounds keep a run finite; each search past one isn't run, so the parts it
+would settle keep `search_capped`, and every bound that refused a search is
+listed in `summary.bounds_hit` and on one text line, `bounds hit:
+parsed_bytes (2 searches past 134217728); their parts keep search_capped`.
+
+| bound | limit | counts |
+|---|---|---|
+| `language_files` | 20,000 | Files of the language one search reads (`used`: the most any search asked for). |
+| `searched_files` | 4,000,000 | Files the run's searches read, every file each search greps (the language's and the texts beside them). |
+| `parsed_bytes` | 134,217,728 (128 MiB) | Bytes of files outside the change read to parse for proof: the files that call by a computed name, then each search's files found (a file is charged once). |
+
+The bounds count work, not time, so the same change gets the same answer on
+a loaded machine. `SHAPR_BOUNDS` sets other limits for trying them
+(`SHAPR_BOUNDS=parsed_bytes=33554432,searched_files=100000`); each run's
+distance to every bound is in the usage log (`counts.bounds`).
 
 A diff on stdin names its after side only by the blob ids on its `index`
 lines, so shapr searches it only where those ids say the change ends: the
@@ -1272,6 +1293,7 @@ under `shapr norms` and a change's hunks alike.
 | `refactor_lines` | int | Changed lines in parts of a structure kind (every kind but `logic`), proven or not, in hunks whose verdict is `structure`, `behavior` or `mixed`, generated and vendored hunks left out: the refactoring's size, whether or not shapr could rule out a behavior change. A move whose surroundings may observe it, or a Sorbet signature a runtime checks, counts here and not in `structure_share`. |
 | `refactor_share` | number 0–1 | `refactor_lines` over all changed lines, as `structure_share` counts them; 0 when nothing changed. At least `structure_share`. |
 | `claims` | object | What the commit messages and `--message` description claim, kept apart from the code's facts. See [Claims](#claims). |
+| `bounds_hit` | array | Each [search bound](#search-bounds) that refused a search: `bound` (`language_files`, `searched_files`, `parsed_bytes`), `limit`, `used` (what the run spent), `needed` (the most a refused search would have brought it to) and `refused` (searches not run); empty when none did. Their parts carry `search_capped`. |
 | `config_trajectory` | array | *Experimental.* Per norm `.rubocop.yml` (or `.editorconfig`) sets in a changed file, whether the change moves the code toward it: `norm`, `configured`, `before` and `after` (each `checked`, the observations config checks in the changed files, and `offenses`, those not in the configured style), `fixed` and `added` (offenses only before, and only after, in a changed file, matched by content with the style taken out, so one carried over, or moved within its file, is neither), and `direction`, `toward` (fewer offenses), `away` (more) or `level`, which nets them. Both sides are judged by the config as of the after side; unchanged files hold the same offenses on both sides, so the counts move as the file's, its directory's and the repository's do. Only norms whose counts move, or with an offense fixed or added, are listed. |
 
 When `refactor_share` is two thirds or more and some hunk in the verdict
@@ -1417,7 +1439,9 @@ object under `-j` or `-J`. Each run appends a line to the log (except
 and `paths` (as `meta`), `flags` (the long names of the flags given, never their
 values), `format` (`text`, `json`, `ndjson`), `exit`, `duration_ms`, and
 `counts` (`files`, `hunks`, `kinds` and `verdict` from the summary,
-`styles`, hunks per `style.direction`, and `claim_conflicts`; for `norms`,
+`styles`, hunks per `style.direction`, `claim_conflicts`, and `bounds`, each
+[search bound](#search-bounds) with its `used`, `needed`, `limit` and
+`refused`, hit or not; for `norms`,
 `files` and `steps`). It holds no paths, repositories, revisions,
 code, messages or URLs. `SHAPR_USAGE=0` (`false`, `off`, `no`) turns logging
 off, `1` (`true`, `on`, `yes`) on, an absolute path moves the log; unset, it is
