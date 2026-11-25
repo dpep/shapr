@@ -2,7 +2,7 @@
 
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
 says which structural changes it holds (`format_only`, `comment_only`,
-`restyle`, `reorder`, `default_argument`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
+`restyle`, `typing`, `reorder`, `default_argument`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
 explains, and the residual `logic` lines no part explains; it gives each hunk
 and the whole change a verdict: structure, behavior, or mixed (structure and
 behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
@@ -76,6 +76,8 @@ src/
     ruby/signature.rs  a def's parameters and a call's arguments, for default_argument
     ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
                     ids from here
+    ruby/sorbet.rs  Sorbet's annotations (TYPING, TYPE_CAST, UNCHECKED flags) and whether the
+                    nearest lockfile names sorbet-runtime, for typing
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
     rust/mod.rs     tree-sitter → TreeBuilder: own text, folded `;`/braces, attributes into their item,
                     macro token trees as leaves, trailing commas ignored
@@ -94,6 +96,9 @@ src/
                     method), and last, the reformatted lines the other passes left
     restyle.rs      the restyle pass: aligned subtrees whose canons agree (Node::canon, from
                     the frontend's TreeBuilder::respell), their changed lines where nothing else differs
+    typing.rs       the typing pass: covers equal once type annotations are stripped (TYPING
+                    statements left out, TYPE_CAST calls replaced by their value); structure only
+                    when no runtime checks them (UNCHECKED, Frontend::types_loaded)
     reorder.rs      the reorder pass: a hunk's elements of one container permuted, with the context
                     (frontend::order) naming what observes the order; structure when nothing does
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
@@ -135,7 +140,8 @@ other packages depend on, from the repository's layout; `called_by_name`: whethe
 calls a file's public methods by name, given the repository's paths (a Rails root's
 `app/controllers/`); `load`: how a statement loads another file, for moves into new files;
 `rebinds_self`: a node whose code may run with another `self`, for `default_argument` and
-extract; and for `default_argument`, `signature`, `arguments` and `plain_literal`: a def's
+extract; `types_loaded`: whether the library behind a file's type annotations is known loaded
+at runtime (Ruby: the nearest lockfile names sorbet-runtime), for `typing`; and for `default_argument`, `signature`, `arguments` and `plain_literal`: a def's
 parameters, a call's arguments, a literal with no shared identity) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
@@ -181,7 +187,10 @@ attribute macro, which reads its tokens; no rename passes into it),
 `CLASS_VALUE` (a constant whose value is a new class: `Point = Struct.new(:x)`),
 `CONSTANT` and `FIELD` (a computed `DynamicName` that reaches a constant,
 `const_get(n)`, or a field, `instance_variable_get(n)`, rather than a
-method; rename blocks only that family's names by it) and `DIRECTIVE` (set by the builder for
+method; rename blocks only that family's names by it), `TYPING` (a statement that only
+declares types: Sorbet's `sig`, `extend T::Sig`), `TYPE_CAST` (a call returning its first
+positional argument: `T.let`, `T.must`), `UNCHECKED` (an annotation no runtime checks once its
+type library is loaded: `T.unsafe`, `checked: false`) and `DIRECTIVE` (set by the builder for
 `directive`). The core never reads a node's `kind`
 string or source text to learn what the language means.
 
