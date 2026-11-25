@@ -10,8 +10,10 @@
 //! must equal the chunk once its parameters are renamed to the call's
 //! arguments, and a hunk may change nothing else.
 
-use super::align::{Alignments, siblings};
+use super::align::{Alignments, lcs, siblings};
+use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
+use super::moves::Context;
 use super::proof::{self, Assumption, Naming, Verified};
 use super::site::CodeLines;
 use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
@@ -24,6 +26,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 /// this small says little, and a one-call method is more often a hook for a
 /// subclass to override, a behavior seam, than a tidying.
 const FLOOR: usize = 8;
+
+/// Least share of subtrees a changed body must keep from the statements,
+/// as for a move whose body changed: more alike than not.
+const NEAR: f64 = 0.5;
 
 pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels: &mut Labels) {
     for (f, file) in change.files.iter().enumerate() {
@@ -168,11 +174,18 @@ impl Region {
 struct Stats {
     statements: usize,
     nodes: usize,
+    /// Nodes matched only by renaming a parameter, or, when the body
+    /// changed, not matched at all.
     renamed: usize,
+    /// Dice coefficient of the body's and the statements' subtrees; 1 when
+    /// the body matched.
+    similarity: f64,
     params: usize,
     returns: bool,
     /// The chunk is one expression, not statements.
     expression: bool,
+    /// What changed around the refactoring, or in it: not structure.
+    context: Vec<Context>,
     /// What the refactoring relies on that the search couldn't settle.
     assumptions: Vec<Assumption>,
     /// Files searched for the method's name outside the change.
@@ -186,10 +199,11 @@ impl Stats {
     }
 
     /// Size saturates at twice the floor; a renamed node is an inferred
-    /// correspondence, so it counts half.
+    /// correspondence, so it counts half; a changed body scales by how much
+    /// of it the statements share.
     fn confidence(&self) -> Confidence {
         let size = (self.nodes as f64 / (2 * FLOOR) as f64).min(1.0);
-        Confidence::new(size * (1.0 + self.verbatim()) / 2.0)
+        Confidence::new(size * (1.0 + self.verbatim()) / 2.0 * self.similarity)
     }
 }
 
@@ -232,25 +246,24 @@ fn find(
     // A bare `private` added (or removed) with B, governing only B, is B's.
     changed.0.retain(|&v| !governs_only(calls, scope, v, b));
     let (params, body) = method_body(calls, b).ok_or("unsupported parameters or body")?;
+    let body_kind = calls.node(body).kind;
+    let b_stmts = code_children(calls, body);
+    let mut context = Vec::new();
     // An expression first (a binding's value, an argument): the binding or
-    // the call around it stays in the caller. Then a run of statements.
+    // the call around it stays in the caller. Then a run of statements; then,
+    // when the caller changed beyond the call, the run standing where it is.
     let (expression, assigned, chunk) = match splice(calls, a_call, call, None, chunks, a_chunk) {
         Some(chunk) => (true, None, chunk),
-        None => (
-            false,
-            assigned,
-            splice(
-                calls,
-                a_call,
-                stmt,
-                Some(calls.node(body).kind),
-                chunks,
-                a_chunk,
-            )
-            .ok_or("caller differs beyond the call")?,
-        ),
+        None => match splice(calls, a_call, stmt, Some(body_kind), chunks, a_chunk) {
+            Some(chunk) => (false, assigned, chunk),
+            None => {
+                context.push(Context::Caller);
+                let run = locate(calls, a_call, call, body_kind, chunks, a_chunk, &b_stmts)
+                    .ok_or("no statements where the call stands")?;
+                (false, assigned, run)
+            }
+        },
     };
-    let b_stmts = code_children(calls, body);
     let args = arguments(calls, call);
     let flow = Flow::of(chunks, a_chunk, &chunk);
 
@@ -261,21 +274,30 @@ fn find(
     let exact = wired.and_then(|names| {
         Matcher::new(calls, chunks, names).body(&b_stmts, &chunk, assigned.as_deref())
     });
-    let matched = exact
-        .or_else(|| {
-            Matcher::new(calls, chunks, Names::default()).body(
-                &b_stmts,
-                &chunk,
-                assigned.as_deref(),
-            )
-        })
-        .ok_or("body differs from the statements")?;
-
+    let matched = exact.or_else(|| {
+        Matcher::new(calls, chunks, Names::default()).body(&b_stmts, &chunk, assigned.as_deref())
+    });
     let nodes = chunk
         .iter()
         .flat_map(|&s| chunks.descendants(s))
         .filter(|&n| !chunks.node(n).comment)
         .count();
+    // The body differs: what the two share explains, the rest is logic.
+    let shared = match matched {
+        Some(_) => None,
+        None => {
+            let shared = Shared::of(chunks, &chunk, calls, &b_stmts);
+            if shared.similarity < NEAR {
+                return Err("body differs from the statements");
+            }
+            context.push(Context::Body);
+            Some(shared)
+        }
+    };
+    let (renamed, similarity) = match (&shared, matched) {
+        (Some(shared), _) => (nodes - shared.nodes, shared.similarity),
+        (None, renamed) => (renamed.unwrap_or_default(), 1.0),
+    };
     let arg_set: HashSet<&str> = args.iter().flatten().map(String::as_str).collect();
     let free: HashSet<&str> = flow.free.iter().map(String::as_str).collect();
     let assigned_set: HashSet<&str> = assigned.iter().map(String::as_str).collect();
@@ -315,7 +337,13 @@ fn find(
         Err(Risk::BlockParameter)
     } else if rebound {
         Err(Risk::Jump)
-    } else if let Some(why) = miswired(exact.is_some() && free == arg_set, &flow, &assigned_set) {
+    } else if let Some(why) = shared
+        .is_none()
+        .then(|| miswired(exact.is_some() && free == arg_set, &flow, &assigned_set))
+        .flatten()
+    {
+        // Only a body that matched pairs each parameter with an argument;
+        // a body that differs leaves the call's line logic instead.
         wiring = Some(why);
         Err(Risk::Wiring)
     } else if chunks.semantics.scoped_drop
@@ -324,27 +352,48 @@ fn find(
         Err(Risk::Drop)
     } else if mentioned(change, &method, dir, calls, b) {
         Err(Risk::Collision)
-    } else if nodes < FLOOR {
+    } else if shared.as_ref().map_or(nodes, |s| s.nodes) < FLOOR {
         Err(Risk::Tiny)
     } else {
         Ok(Stats {
             statements: chunk.len(),
             nodes,
-            renamed: matched,
+            renamed,
+            similarity,
             params: params.len(),
             returns: assigned.is_some(),
             expression,
+            context: context.clone(),
             assumptions: Vec::new(),
             searched: None,
         })
     };
-    let region = |tree: &Tree, scope: NodeId, holes: &[NodeId], touch: &[NodeId]| Region {
-        scope: tree.node(scope).extent.clone(),
-        holes: holes.iter().map(|&n| tree.node(n).extent.clone()).collect(),
-        touch: touch.iter().map(|&n| tree.node(n).extent.clone()).collect(),
-    };
-    let call_side = region(calls, scope, &changed.0, &[a_call, b]);
-    let chunk_side = region(chunks, chunk_scope, &changed.1, &[a_chunk]);
+    // The caller beyond the call, and with a changed body the call too,
+    // explain nothing: those lines are logic.
+    let (mut call_spot, mut chunk_spot) = (Vec::new(), Vec::new());
+    if !context.is_empty() {
+        differ(
+            (calls, a_call, &[stmt], &mut call_spot),
+            (chunks, a_chunk, &chunk, &mut chunk_spot),
+        );
+    }
+    if let Some(shared) = &shared {
+        call_spot.push(calls.node(stmt).extent.clone());
+        call_spot.extend(shared.unshared.1.iter().cloned());
+        chunk_spot.extend(shared.unshared.0.iter().cloned());
+    }
+    let region =
+        |tree: &Tree, scope: NodeId, holes: &[NodeId], spot: Vec<Span>, touch: &[NodeId]| {
+            let mut holes: Vec<Span> = holes.iter().map(|&n| tree.node(n).extent.clone()).collect();
+            holes.extend(spot);
+            Region {
+                scope: tree.node(scope).extent.clone(),
+                holes,
+                touch: touch.iter().map(|&n| tree.node(n).extent.clone()).collect(),
+            }
+        };
+    let call_side = region(calls, scope, &changed.0, call_spot, &[a_call, b]);
+    let chunk_side = region(chunks, chunk_scope, &changed.1, chunk_spot, &[a_chunk]);
     let regions = match dir {
         Dir::Extract => [chunk_side, call_side],
         Dir::Inline => [call_side, chunk_side],
@@ -363,6 +412,206 @@ fn find(
         wiring,
         used_in: Vec::new(),
     })
+}
+
+/// What a changed body shares with the statements it replaced.
+struct Shared {
+    similarity: f64,
+    /// The statements' nodes inside a subtree the body shares.
+    nodes: usize,
+    /// Code each side holds that the other doesn't: (statements, body).
+    unshared: (Vec<Span>, Vec<Span>),
+}
+
+impl Shared {
+    fn of(chunks: &Tree, chunk: &[NodeId], calls: &Tree, body: &[NodeId]) -> Shared {
+        let similarity = super::rounded(dice(
+            subtree_hashes(chunks, chunk),
+            subtree_hashes(calls, body),
+        ));
+        let (in_chunk, out_chunk) = common(chunks, chunk, calls, body);
+        let (_, out_body) = common(calls, body, chunks, chunk);
+        Shared {
+            similarity,
+            nodes: in_chunk,
+            unshared: (out_chunk, out_body),
+        }
+    }
+}
+
+/// Matches `from`'s subtrees, largest first, against those `to` holds, each
+/// of `to`'s used once: the nodes inside a match, and the own text of every
+/// node outside one (its code the other side lacks).
+fn common(from_tree: &Tree, from: &[NodeId], to_tree: &Tree, to: &[NodeId]) -> (usize, Vec<Span>) {
+    let mut offered: HashMap<u64, usize> = HashMap::new();
+    for &t in to {
+        for n in to_tree.descendants(t).filter(|&n| !to_tree.node(n).comment) {
+            *offered.entry(to_tree.node(n).hash).or_default() += 1;
+        }
+    }
+    let (mut inside, mut outside) = (0, Vec::new());
+    let mut stack: Vec<NodeId> = from.iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        let node = from_tree.node(id);
+        if node.comment {
+            continue;
+        }
+        if offered.get(&node.hash).is_some_and(|&c| c > 0) {
+            for n in from_tree
+                .descendants(id)
+                .filter(|&n| !from_tree.node(n).comment)
+            {
+                if let Some(c) = offered.get_mut(&from_tree.node(n).hash) {
+                    *c = c.saturating_sub(1);
+                }
+                inside += 1;
+            }
+            continue;
+        }
+        from_tree.walk_own(id, |piece| {
+            if let Piece::Text(text) = piece {
+                outside.push(text);
+            }
+        });
+        stack.extend(node.children.iter().rev());
+    }
+    (inside, outside)
+}
+
+/// The code of `x` and `y` that differs, skipping `skip` on each side: each
+/// level's children aligned by a longest common subsequence of hashes, and
+/// in each gap, children of the same kind and own text paired in order and
+/// compared in turn; what stays unpaired differs whole.
+fn differ(
+    (tx, x, skip_x, out_x): (&Tree, NodeId, &[NodeId], &mut Vec<Span>),
+    (ty, y, skip_y, out_y): (&Tree, NodeId, &[NodeId], &mut Vec<Span>),
+) {
+    if tx.node(x).hash == ty.node(y).hash && skip_x.is_empty() && skip_y.is_empty() {
+        return;
+    }
+    let own_x = unmarked(own(tx, x, None));
+    if own_x != unmarked(own(ty, y, None)) {
+        tx.walk_own(x, |p| {
+            if let Piece::Text(t) = p {
+                out_x.push(t)
+            }
+        });
+        ty.walk_own(y, |p| {
+            if let Piece::Text(t) = p {
+                out_y.push(t)
+            }
+        });
+    }
+    let kids = |t: &Tree, id: NodeId, skip: &[NodeId]| -> Vec<NodeId> {
+        t.code_children(id).filter(|c| !skip.contains(c)).collect()
+    };
+    let (cx, cy) = (kids(tx, x, skip_x), kids(ty, y, skip_y));
+    let whole = |t: &Tree, ids: &[NodeId], out: &mut Vec<Span>| {
+        out.extend(ids.iter().map(|&c| t.node(c).extent.clone()));
+    };
+    if cx.len().saturating_mul(cy.len()) > 10_000 {
+        whole(tx, &cx, out_x);
+        whole(ty, &cy, out_y);
+        return;
+    }
+    let pairs = lcs(
+        cx.len(),
+        cy.len(),
+        |l, r| tx.node(cx[l]).hash == ty.node(cy[r]).hash,
+        |_| 1,
+    );
+    let mut bounds: Vec<(usize, usize)> = pairs.iter().map(|&(l, r)| (l, r)).collect();
+    bounds.push((cx.len(), cy.len()));
+    let (mut i, mut j) = (0, 0);
+    for (l, r) in bounds {
+        let (gx, gy) = (&cx[i..l], &cy[j..r]);
+        let mut rest_y: Vec<NodeId> = gy.to_vec();
+        for &a in gx {
+            let kind = tx.node(a).kind;
+            let text = unmarked(own(tx, a, None));
+            match rest_y
+                .iter()
+                .position(|&b| ty.node(b).kind == kind && unmarked(own(ty, b, None)) == text)
+            {
+                Some(at) => {
+                    let b = rest_y.remove(at);
+                    differ((tx, a, skip_x, out_x), (ty, b, skip_y, out_y));
+                }
+                None => out_x.push(tx.node(a).extent.clone()),
+            }
+        }
+        whole(ty, &rest_y, out_y);
+        (i, j) = (l + 1, r + 1);
+    }
+}
+
+/// The statements standing where the call's statement stands, when the
+/// caller also changed elsewhere: A walked down the call's path, each
+/// level's child on it paired with the other side's child of the same kind
+/// and own text in the gap a longest common subsequence of hashes leaves
+/// around it; at the statement, of the gap's statements the run sharing the
+/// most with B's body.
+fn locate(
+    calls: &Tree,
+    a_call: NodeId,
+    call: NodeId,
+    body_kind: &str,
+    chunks: &Tree,
+    a_chunk: NodeId,
+    body: &[NodeId],
+) -> Option<Vec<NodeId>> {
+    let mut path = vec![call];
+    while let Some(&top) = path.last()
+        && top != a_call
+    {
+        path.push(calls.node(top).parent?);
+    }
+    path.reverse();
+    let (mut x, mut y) = (a_call, a_chunk);
+    for &child in &path[1..] {
+        let (cx, cy) = (code_children(calls, x), code_children(chunks, y));
+        if calls.node(x).kind != chunks.node(y).kind || cx.len().saturating_mul(cy.len()) > 10_000 {
+            return None;
+        }
+        let i = cx.iter().position(|&c| c == child)?;
+        let pairs = lcs(
+            cx.len(),
+            cy.len(),
+            |l, r| calls.node(cx[l]).hash == chunks.node(cy[r]).hash,
+            |_| 1,
+        );
+        let lo = pairs.iter().rev().find(|p| p.0 < i).map_or(0, |p| p.1 + 1);
+        let hi = pairs.iter().find(|p| p.0 > i).map_or(cy.len(), |p| p.1);
+        let gap = cy.get(lo..hi)?;
+        if calls.node(x).kind == body_kind {
+            return best_run(chunks, gap, calls, body);
+        }
+        let own_x = unmarked(own(calls, child, None));
+        y = *gap.iter().find(|&&c| {
+            chunks.node(c).kind == calls.node(child).kind && unmarked(own(chunks, c, None)) == own_x
+        })?;
+        x = child;
+    }
+    None
+}
+
+/// Of `gap`'s contiguous runs, the one sharing the most subtrees with
+/// `body`, the shorter on a tie; `None` when even that one shares under
+/// [`NEAR`].
+fn best_run(chunks: &Tree, gap: &[NodeId], calls: &Tree, body: &[NodeId]) -> Option<Vec<NodeId>> {
+    let want = subtree_hashes(calls, body);
+    let mut best: Option<(f64, &[NodeId])> = None;
+    for start in 0..gap.len() {
+        for end in start + 1..=gap.len() {
+            let run = &gap[start..end];
+            let sim = dice(subtree_hashes(chunks, run), want.clone());
+            if best.is_none_or(|(s, r)| sim > s || (sim == s && run.len() < r.len())) {
+                best = Some((sim, run));
+            }
+        }
+    }
+    best.filter(|&(s, _)| s >= NEAR)
+        .map(|(_, run)| run.to_vec())
 }
 
 /// Whether `v` is a bare visibility call (`private`) whose section in `scope`
@@ -502,19 +751,29 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
                     found.method, found.caller
                 ),
             };
+            if !stats.context.is_empty() {
+                let why: Vec<&str> = stats.context.iter().map(|c| c.reason()).collect();
+                reason = format!("{reason}, but {}", why.join("; "));
+            }
             if stats.assumptions.contains(&Assumption::PublicApi) {
                 reason = format!("public API removed: {reason}");
             } else if !stats.assumptions.is_empty() {
                 reason = format!("{reason}; uses outside the change weren't checked");
             }
-            let contested = touched.iter().any(|(h, lines)| {
-                let taken = labels[*h].changed.minus(&labels[*h].unclaimed());
-                !lines.intersect(&taken).is_empty()
-            });
-            if contested {
+            let names: Vec<&str> = stats.context.iter().map(|c| c.as_str()).collect();
+            detail.insert("context".into(), json!(names));
+            // A proven refactoring explains each of its lines, so a line
+            // another part holds refuses it; one that isn't structure claims
+            // what is left (two extracts from one caller share its kept code).
+            let taken = |h: usize| labels[h].changed.minus(&labels[h].unclaimed());
+            let contested = touched
+                .iter()
+                .any(|(h, lines)| !lines.intersect(&taken(*h)).is_empty());
+            if contested && stats.context.is_empty() {
                 return;
             }
-            for (h, lines) in &touched {
+            let free: Vec<Claim> = touched.iter().map(|(h, l)| l.minus(&taken(*h))).collect();
+            for ((h, _), lines) in touched.iter().zip(&free) {
                 let label = &mut labels[*h];
                 let mut evidence = label.residual.evidence.clone();
                 let values = &mut evidence.values;
@@ -522,11 +781,12 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
                 values.insert("nodes".into(), Value::from(stats.nodes));
                 values.insert("params".into(), Value::from(stats.params));
                 values.insert("verbatim".into(), Value::from(stats.verbatim()));
+                values.insert("similarity".into(), Value::from(stats.similarity));
                 values.insert("returns".into(), Value::from(stats.returns));
                 values.insert("searched".into(), json!(stats.searched));
                 let part = Part {
                     kind: found.dir.kind(),
-                    context: Vec::new(),
+                    context: stats.context.clone(),
                     assumptions: stats.assumptions.clone(),
                     lines: lines.clone(),
                     // Structure, but where refactoring bugs cluster: still read.

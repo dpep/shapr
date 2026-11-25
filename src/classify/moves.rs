@@ -644,6 +644,10 @@ pub enum Context {
     ElementOrder,
     /// Reordered code that runs in written order.
     EvaluationOrder,
+    /// An extract's or inline's caller changed beyond the call.
+    Caller,
+    /// An extracted or inlined method's body differs from the statements.
+    Body,
 }
 
 impl Context {
@@ -668,10 +672,12 @@ impl Context {
             Context::IterationOrder => "iteration_order",
             Context::ElementOrder => "element_order",
             Context::EvaluationOrder => "evaluation_order",
+            Context::Caller => "caller",
+            Context::Body => "body",
         }
     }
 
-    fn reason(self) -> &'static str {
+    pub(super) fn reason(self) -> &'static str {
         match self {
             Context::Module => "its file is its module",
             Context::Owner => "its owner (class or module) changes",
@@ -684,6 +690,8 @@ impl Context {
             Context::IterationOrder => "iteration sees insertion order",
             Context::ElementOrder => "positions are part of the value",
             Context::EvaluationOrder => "the code runs in another order",
+            Context::Caller => "the caller changed beyond the call",
+            Context::Body => "the method's body differs from the statements",
         }
     }
 }

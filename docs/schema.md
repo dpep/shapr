@@ -66,8 +66,8 @@ nothing proven is one `logic` part.
 | `default_argument` | yes, unless it has `assumptions` | A call drops or adds an argument that restates its parameter's literal default, and the method it calls is the only one the call can reach. See [Default arguments](#default-arguments). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering other statements (`require`s, Gemfile `gem` lines, callbacks, validations, `include`s, other DSL calls) is a `reorder`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
-| `extract` | yes, unless it has `assumptions` | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. See [Extract and inline](#extract-and-inline). |
-| `inline` | yes, unless it has `assumptions` | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
+| `extract` | yes, unless it has `assumptions` or its `detail.context` is non-empty | Statements leave one method and become the body of a new method in the same class, replaced by a call to it. One whose caller changed beyond the call, or whose new method's body differs from the statements, is an `extract` part that isn't structure, the lines that differ `logic` beside it. See [Extract and inline](#extract-and-inline). |
+| `inline` | yes, unless it has `assumptions` or its `detail.context` is non-empty | The inverse of `extract`: a method and its only call disappear, and its body takes the call's place. |
 | `logic` | no | The residual: anything else. A line shapr can't prove structural is `logic`. |
 
 Each part is proven against the whole of both trees, residual included, so
@@ -736,6 +736,15 @@ Each part:
 
 An `extract` or `inline` is proven, not scored: the caller is identical on both sides once the call is swapped for the statements (the *chunk*), the new method's body equals the chunk once its parameters are renamed to the call's arguments, and the methods' container still holds the same other code, in order, apart from siblings that changed on their own. A bare `private`, `protected` or `public` line added or removed with the new method, whose section holds nothing but it, is part of the refactoring. A sibling's changed lines aren't part of the refactoring: they stay `logic`, beside the refactoring's part when they share its hunk. The chunk is one expression when the call stands where it stood (a binding's value, an argument, a returned value: `model = b(key)`), the binding or call around it staying in the caller; otherwise a run of statements. The new method's parameters must be plain required positionals, the call's arguments plain local variables, and a value used after the chunk comes back as the call's result (`x = b(...)`). Every hunk the refactoring touches gets a part, or none does (when another part already explains a line it would).
 
+A refactoring that holds apart from what changed around it or in it is a part that isn't structure, its `detail.context` naming each difference, and the lines that differ stay `logic` beside it:
+
+| context | meaning |
+|---|---|
+| `caller` | The caller changed beyond the call. The chunk is the run of statements standing where the call stands: the caller is walked down to the call's statement, each level's children aligned by their trees, and of the statements the other side holds there, the run sharing the most subtrees with the new method's body. The caller's other changed code is `logic`. |
+| `body` | The new method's body differs from the chunk, sharing at least half their subtrees (`evidence.similarity`, a Dice coefficient, at least 0.5, as for a move whose body changed). Code either side holds that the other doesn't is `logic`, and so is the call's line: which value each argument carries is proven only through a body that matches. |
+
+Such a part claims only lines no earlier part holds, so two methods extracted from one caller are two parts. The risks below still refuse it, except `wiring`, which is checked only against a body that matches.
+
 `detail` on each part:
 
 | key | type | meaning |
@@ -743,6 +752,7 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 | `method` | string | The method created (`extract`) or removed (`inline`). |
 | `caller` | string | The method the chunk left or joined. |
 | `hunks` | int array | `id`s of every hunk the refactoring touches, this one included. |
+| `context` | string array | What differs around the refactoring or in it (the table above); empty for a part that is structure. A near miss's residual doesn't carry it. |
 
 `evidence` keys beside `comparison`:
 
@@ -751,11 +761,12 @@ An `extract` or `inline` is proven, not scored: the caller is identical on both 
 | `statements` | int | Statements in the chunk. |
 | `nodes` | int | Syntax nodes in the chunk: its size. |
 | `params` | int | The method's parameters. |
-| `verbatim` | number 0–1 | Share of the chunk's nodes that match the method's body without renaming a parameter. |
+| `verbatim` | number 0–1 | Share of the chunk's nodes that match the method's body without renaming a parameter; with context `body`, that lie in a subtree the body shares. |
+| `similarity` | number 0–1 | Dice coefficient of the chunk's and the body's subtrees; 1 when the body matches. |
 | `returns` | bool | The call's result is assigned: a value flows back to the caller. |
 | `searched` | int or null | Files the repository search read for the method's name outside the change; `null` when no search ran. |
 
-Confidence is `size × (1 + verbatim) / 2`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
+Confidence is `size × (1 + verbatim) / 2 × similarity`, where `size` is `nodes / 16`, capped at 1. A chunk under 8 nodes stays `logic`: equality of a body that small says little, and a one-call method is more often an override hook than a tidying. A renamed node is an inferred correspondence, so it counts half.
 
 A hunk that matches this shape but would change behavior stays `logic`, and its residual says why in `detail`, beside `method`, `caller` and `hunks`:
 

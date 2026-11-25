@@ -1,0 +1,15 @@
+{
+  "description": "statements extracted verbatim while the caller also changes another line: an extract part that isn't structure (context caller), the other edit logic beside it",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {"kind": "extract", "structure": false, "detail": {"method": "print_header", "caller": "render", "context": ["caller"]}},
+          {"kind": "logic", "lines": {"before": [{"start": 3, "count": 1}], "after": [{"start": 3, "count": 1}]}}
+        ]
+      }
+    ]
+  }
+}

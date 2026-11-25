@@ -1,0 +1,6 @@
+{
+  "description": "a new method and a new call to it, with nothing removed where the call stands: new code, not an extract",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic", "parts": {"$every": {"kind": "logic"}}}}
+  }
+}

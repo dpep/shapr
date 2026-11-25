@@ -1,0 +1,7 @@
+{
+  "description": "a loose extract still refuses a chunk holding return: logic, near an extract with risk jump",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "jump"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "description": "two methods extracted from one caller at once: each is an extract, the other's call a change to its caller",
+  "expect": {
+    "hunks": {"$every": {"parts": {"$every": {"kind": "extract", "structure": false}}}}
+  }
+}
