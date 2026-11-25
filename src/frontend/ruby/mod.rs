@@ -753,6 +753,22 @@ mod tests {
     }
 
     #[test]
+    fn whole_literals_spelling_a_field_name_it() {
+        let dynamic = |source: &str| -> Vec<String> {
+            roles(source)
+                .into_iter()
+                .filter(|(r, _)| *r == Role::DynamicName)
+                .filter_map(|(_, n)| n)
+                .collect()
+        };
+        assert_eq!(
+            dynamic("[:@a, :\"@b\", \"@c\", '@@d']\n%i[@e]\n"),
+            ["@a", "@b", "@c", "@@d", "@e"]
+        );
+        assert!(dynamic("[\"#{x}@a\", %w[@b], :c, \"@d e\", \"@1\"]\n").is_empty());
+    }
+
+    #[test]
     fn roles_mark_jumps_and_calls() {
         use crate::tree::Hazard::*;
         let found = roles(

@@ -220,9 +220,6 @@ impl Roles {
                 Role::Other
             }
             Node::SymbolNode { .. } | Node::StringNode { .. } => {
-                if !self.dynamic_args.remove(&node.location().start_offset()) {
-                    return (Role::Other, None);
-                }
                 let value = match node.as_symbol_node() {
                     Some(symbol) => symbol.unescaped().to_vec(),
                     None => node
@@ -230,6 +227,18 @@ impl Roles {
                         .map(|s| s.unescaped().to_vec())
                         .unwrap_or_default(),
                 };
+                // A whole literal spelling an instance or class variable
+                // (`:@x`, `%i[@x]`, `"@x"`) names it, as reflection reads it.
+                // An interpolated string's fixed text, or a %w element, is
+                // a string node with no quotes of its own.
+                let whole = node.as_symbol_node().is_some()
+                    || node
+                        .as_string_node()
+                        .is_some_and(|s| s.opening_loc().is_some());
+                let dynamic = self.dynamic_args.remove(&node.location().start_offset());
+                if !dynamic && !(whole && spells_field(&value)) {
+                    return (Role::Other, None);
+                }
                 let start = node.location().start_offset();
                 let value = match self.constant_literals.remove(&start) {
                     true => last_segment(value),
@@ -392,6 +401,19 @@ fn sigiled(pattern: Vec<u8>) -> Vec<u8> {
         Some(b'@') => pattern,
         _ => [b"@".as_slice(), &pattern].concat(),
     }
+}
+
+/// Whether `value` is an instance or class variable's name: `@x`, `@@x`.
+fn spells_field(value: &[u8]) -> bool {
+    let rest = value
+        .strip_prefix(b"@@")
+        .or_else(|| value.strip_prefix(b"@"))
+        .unwrap_or_default();
+    rest.first()
+        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_' || *c >= 0x80)
+        && rest
+            .iter()
+            .all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c >= 0x80)
 }
 
 /// A constant path's last segment, which names the constant whatever

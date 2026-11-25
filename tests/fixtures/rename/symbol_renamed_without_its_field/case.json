@@ -1,0 +1,8 @@
+{
+  "description": "a symbol spelling a field changed while the field keeps its name follows no rename: logic",
+  "expect": {
+    "hunks": [
+      {"kind": "logic"}
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "an instance variable renamed in its uses and in a %i[] symbol naming it in the same file is one rename: the symbol follows the field",
+  "expect": {
+    "hunks": [
+      {"kind": "rename", "verdict": "structure"},
+      {"kind": "rename", "verdict": "structure"}
+    ]
+  }
+}

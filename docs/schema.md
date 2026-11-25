@@ -422,7 +422,10 @@ every name that differs passes these checks:
   `std::any::type_name` and `module_path!`) that any code may read: as with
   every part, structure is a shape, not a claim that no output changes.
 - A renamed dynamic reference (`send(:old)` → `send(:new)`) follows a method,
-  constant or field rename that passes.
+  constant or field rename that passes, and so does a whole symbol or quoted
+  string spelling a field with its sigil (`:@old`, `%i[@old]`, `"@old"`), the
+  name reflection reads it by. Text spelling it inside a larger string, or
+  without the sigil (`:old`), doesn't follow.
 - Every definition of the new name in its scope after the change is a
   renamed one: new code defining it too (a second `def new` in another
   class, a new `let new`) would share the name with the renamed code.
@@ -771,7 +774,7 @@ none. They need both sides parsed cleanly (`evidence.comparison` `"ast"`).
 | `signature` | An existing method's interface. | A method on both sides, touched by the residual, whose parameter list or annotations (Rust: return type, generics, visibility) differ, whitespace aside. |
 | `condition` | What the code branches on. | A conditional (`if`, `unless`, `while`, `until`, `case`, `when`, `in`; Rust `if`, `while`, `match`, a match arm) whose test sits on a changed line, or a comparison or boolean operator (`==`, `<`, `>=`, `&&`, `and`, `!`, …) whose operator does, is on one side and not the other: added, removed, or testing something else. A line added inside a branch's body is not a condition change. |
 | `error_handling` | How errors are raised, propagated or recovered. | An error construct with its own syntax on a changed line is on one side and not the other, compared by kind, name, operator text and the classes it names. Ruby: `raise`/`fail`, `rescue` (clause and modifier), `ensure`. Rust: `?`, `panic!`, `unreachable!`, `todo!`, `unimplemented!`, `bail!`, `ensure!`, `anyhow!`, `Err(…)` built or matched, and `unwrap`, `expect`, `unwrap_err`, `expect_err`, `map_err`, `ok_or`, `ok_or_else`, `unwrap_or`, `unwrap_or_else`, `unwrap_or_default`, `context`, `with_context`. Changing an argument under a `?` is not. |
-| `literal_only` | Only literal values changed: config-like. | The changed regions are equal once every literal (number, string, symbol, boolean, nil, regexp; a string's text inside an interpolation) and comment is masked, and hold the same number of literals, but not the same code reordered (swapped match arms or arguments). A symbol naming code (`send(:x)`, see `DynamicName` in the rename rules) is not a literal here. |
+| `literal_only` | Only literal values changed: config-like. | The changed regions are equal once every literal (number, string, symbol, boolean, nil, regexp; a string's text inside an interpolation) and comment is masked, and hold the same number of literals, but not the same code reordered (swapped match arms or arguments). A symbol naming code (`send(:x)`, or one spelling a field, `:@x`; see `DynamicName` in the rename rules) is not a literal here. |
 
 Code inside a definition the residual adds or removes doesn't add `condition` or
 `error_handling`: `adds_definition` already says all of it is new.

@@ -1,0 +1,9 @@
+{
+  "description": "a symbol without the sigil may name anything (a key, a method), so changing it beside a field rename stays logic while the sigil-spelled symbol on the line above follows the field",
+  "expect": {
+    "hunks": [
+      {"kind": "logic", "parts": [{"kind": "rename", "lines": {"after": [{"start": 2, "count": 1}]}}, {"kind": "logic", "lines": {"after": [{"start": 3, "count": 1}]}}]},
+      {"kind": "rename"}
+    ]
+  }
+}
