@@ -6,9 +6,11 @@
 
 use crate::change::Category;
 use crate::classify::proof::{Outside, Search};
+use crate::diff::FileDiff;
 use crate::frontend::{self, Frontend};
 use crate::git::{Git, Linguist, State};
-use crate::norms::Snapshot;
+use crate::norms::{Index, Revision, Snapshot, Worktree};
+use crate::report::Input;
 use crate::tree::{Role, Tree, spells};
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeSet, HashMap};
@@ -322,6 +324,86 @@ impl Outside for Repository<'_> {
     }
 }
 
+/// The repository as of a change's after side: each state the change may
+/// end in, and the snapshot norms read config and neighbors from.
+pub struct AfterSide<'g> {
+    git: &'g Git,
+    states: Vec<State>,
+    revision: Option<Revision<'g>>,
+    index: Index<'g>,
+    worktree: Option<Worktree>,
+}
+
+impl<'g> AfterSide<'g> {
+    /// Where a change named in FORM (diffed over RANGE, parsed into FILES)
+    /// ends: its after revision, else the index for a staged diff and the
+    /// working tree for a local one. A diff on stdin names its own after
+    /// side only by blob ids.
+    pub fn new(git: &'g Git, form: Input, range: Option<&str>, files: &[FileDiff]) -> Self {
+        let stdin = form == Input::Stdin;
+        let states = match (stdin, git.after_revision(range)) {
+            (_, Some(rev)) => vec![State::Revision(rev)],
+            (false, None) if form == Input::Staged => vec![State::Index],
+            (false, None) => vec![State::Worktree],
+            (true, None) => git.stdin_after(files),
+        };
+        if stdin && states.is_empty() {
+            crate::verbose!(
+                "the diff doesn't end in the index or the working tree: uses outside it aren't searched"
+            );
+        }
+        let revision = match states.first() {
+            Some(State::Revision(rev)) => Some(Revision::new(git, rev.clone())),
+            _ => None,
+        };
+        AfterSide {
+            git,
+            states,
+            revision,
+            index: Index(git),
+            worktree: git.toplevel().map(Worktree),
+        }
+    }
+
+    pub fn states(&self) -> &[State] {
+        &self.states
+    }
+
+    /// The after revision, when the change ends in one.
+    pub fn revision(&self) -> Option<&str> {
+        match self.states.first() {
+            Some(State::Revision(rev)) => Some(rev),
+            _ => None,
+        }
+    }
+
+    /// The after revision's files, else the index's when the change ends
+    /// there, else the working tree's.
+    pub fn snapshot(&self) -> Option<&dyn Snapshot> {
+        match (self.states.first(), &self.revision, &self.worktree) {
+            (_, Some(revision), _) => Some(revision),
+            (Some(State::Index), ..) => Some(&self.index),
+            (_, None, Some(worktree)) => Some(worktree),
+            (_, None, None) => None,
+        }
+    }
+
+    /// One searchable repository per state, each over its own files.
+    pub fn repositories(&self) -> Vec<Repository<'_>> {
+        self.states
+            .iter()
+            .filter_map(|state| {
+                let snapshot: &dyn Snapshot = match state {
+                    State::Revision(_) => self.revision.as_ref()?,
+                    State::Index => &self.index,
+                    State::Worktree => self.worktree.as_ref()?,
+                };
+                Some(Repository::new(self.git, state.clone(), snapshot))
+            })
+            .collect()
+    }
+}
+
 /// Several states a change may end in, searched as one: a diff on stdin
 /// whose blob ids fit both the index and the working tree. A use in any of
 /// them is a use.
@@ -456,20 +538,92 @@ mod tests {
         assert!(repo.parse("notes.txt").is_none());
     }
 
+    /// Runs git in DIR, isolated from any repository around the test run.
+    fn git_in(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+
+    #[test]
+    fn the_after_side_follows_the_input_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| git_in(dir.path(), args);
+        let write = |text: &str| std::fs::write(dir.path().join("a.rb"), text).unwrap();
+        git(&["init", "-q"]);
+        for text in ["v0\n", "v1\n"] {
+            write(text);
+            git(&["add", "-A"]);
+            git(&["commit", "-qm", text]);
+        }
+        write("v2\n");
+        git(&["add", "-A"]);
+        write("v3\n");
+        let shell = Git::new(Some(dir.path().to_path_buf()));
+        let revision = |rev: &str| vec![State::Revision(rev.to_string())];
+        // A diff on stdin whose blob ids fit neither the index nor the working tree.
+        let foreign = crate::diff::parse(
+            "diff --git a/a.rb b/a.rb\nindex 1111111..2222222 100644\n--- a/a.rb\n+++ b/a.rb\n@@ -1 +1 @@\n-x\n+y\n",
+        )
+        .unwrap();
+        let none: &[FileDiff] = &[];
+        let cases = [
+            (
+                Input::Commit,
+                Some("HEAD^!"),
+                none,
+                revision("HEAD"),
+                Some("v1\n"),
+                1,
+            ),
+            (
+                Input::Range,
+                Some("HEAD^..HEAD"),
+                none,
+                revision("HEAD"),
+                Some("v1\n"),
+                1,
+            ),
+            (
+                Input::Staged,
+                None,
+                none,
+                vec![State::Index],
+                Some("v2\n"),
+                1,
+            ),
+            (
+                Input::Worktree,
+                Some("HEAD"),
+                none,
+                vec![State::Worktree],
+                Some("v3\n"),
+                1,
+            ),
+            // Nothing to search, but norms still read the working tree.
+            (Input::Stdin, None, &foreign, vec![], Some("v3\n"), 0),
+        ];
+        for (form, range, files, states, read, repositories) in cases {
+            let after = AfterSide::new(&shell, form, range, files);
+            assert_eq!(after.states(), states, "{form:?}");
+            let text = after.snapshot().and_then(|s| s.read("a.rb"));
+            assert_eq!(text.as_deref(), read.map(str::as_bytes), "{form:?}");
+            assert_eq!(after.repositories().len(), repositories, "{form:?}");
+        }
+    }
+
     #[test]
     fn a_repository_beyond_the_cap_is_not_searched() {
         let dir = tempfile::tempdir().unwrap();
-        let git = |args: &[&str]| {
-            let out = std::process::Command::new("git")
-                .current_dir(dir.path())
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_INDEX_FILE")
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(out.status.success(), "{out:?}");
-        };
+        let git = |args: &[&str]| git_in(dir.path(), args);
         git(&["init", "-q"]);
         for name in ["a.rb", "b.rb"] {
             std::fs::write(dir.path().join(name), "go\n").unwrap();
