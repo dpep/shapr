@@ -9,9 +9,11 @@ use ruby_prism::{ConstantPathNode, ConstantReadNode, Node, ParseResult, Visit};
 /// What a file shows of Sorbet, read before the walk: a method named `sig`
 /// is Sorbet's only in a file that has a `typed` sigil or names `T`, and
 /// `abstract!` only in one that names `T::Helpers` (Rails defines one too).
+/// A file defining a constant `T` of its own has no Sorbet annotations.
 pub(super) struct Sorbet {
     uses: bool,
     helpers: bool,
+    own_t: bool,
 }
 
 impl Sorbet {
@@ -24,15 +26,24 @@ impl Sorbet {
         Sorbet {
             uses: typed || scan.names_t,
             helpers: scan.helpers,
+            own_t: scan.defines_t,
         }
     }
 
     /// `node`'s annotation flags; `statement` when it sits directly in a
-    /// statement list, so its value is unused.
-    pub(super) fn flags(&self, node: &Node<'_>, statement: bool) -> Flags {
+    /// statement list, so its value is unused; `receiver` when it is a call's
+    /// receiver.
+    pub(super) fn flags(&self, node: &Node<'_>, statement: bool, receiver: bool) -> Flags {
         let Some(call) = node.as_call_node() else {
             return Flags::default();
         };
+        if self.own_t {
+            return Flags::default();
+        }
+        // `self.secret` may call a private method; `T.unsafe(self).secret` raises.
+        if receiver && yields_self(node) {
+            return Flags::default();
+        }
         if call.is_safe_navigation() {
             return Flags::default();
         }
@@ -73,6 +84,24 @@ impl Sorbet {
             _ => Flags::default(),
         }
     }
+}
+
+/// Whether `node` is `self`, or a `T` cast whose value is.
+fn yields_self(node: &Node<'_>) -> bool {
+    if node.as_self_node().is_some() {
+        return true;
+    }
+    let Some(call) = node.as_call_node() else {
+        return false;
+    };
+    let is_t = call
+        .receiver()
+        .is_some_and(|r| path(&r).as_deref() == Some(&[b"T".as_slice()][..]));
+    let first = call.arguments().and_then(|a| a.arguments().iter().next());
+    is_t && matches!(
+        call.name().as_slice(),
+        b"let" | b"cast" | b"bind" | b"must" | b"unsafe"
+    ) && first.is_some_and(|a| yields_self(&a))
 }
 
 /// `T.<name>(args)`: a cast when its arguments are plain, positional but for
@@ -152,14 +181,30 @@ fn path(node: &Node<'_>) -> Option<Vec<&'static [u8]>> {
         .collect()
 }
 
-/// Whether the file names `T` anywhere, and `T::Helpers`.
+/// Whether the file names `T` anywhere, `T::Helpers`, and defines a `T`.
 #[derive(Default)]
 struct Scan {
     names_t: bool,
     helpers: bool,
+    defines_t: bool,
 }
 
 impl<'pr> Visit<'pr> for Scan {
+    fn visit_module_node(&mut self, node: &ruby_prism::ModuleNode<'pr>) {
+        self.defines_t |= node.name().as_slice() == b"T";
+        ruby_prism::visit_module_node(self, node);
+    }
+
+    fn visit_class_node(&mut self, node: &ruby_prism::ClassNode<'pr>) {
+        self.defines_t |= node.name().as_slice() == b"T";
+        ruby_prism::visit_class_node(self, node);
+    }
+
+    fn visit_constant_write_node(&mut self, node: &ruby_prism::ConstantWriteNode<'pr>) {
+        self.defines_t |= node.name().as_slice() == b"T";
+        ruby_prism::visit_constant_write_node(self, node);
+    }
+
     fn visit_constant_read_node(&mut self, node: &ConstantReadNode<'pr>) {
         self.names_t |= node.name().as_slice() == b"T";
     }

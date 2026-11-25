@@ -272,7 +272,11 @@ differ. The frontend marks two kinds of annotation in Ruby:
   `checked:` allowed), `T.must(x)` and `T.unsafe(x)`.
 
 A bare `sig` counts only in a file that has a `# typed:` sigil or names
-`T`, so a method of one's own named `sig` stays `logic`. Two subtrees whose
+`T`, so a method of one's own named `sig` stays `logic`. A file that defines
+a constant `T` of its own (`module T`, `class T`, `T = ...`) has no Sorbet
+annotations. A cast whose value is `self` (directly or through another
+cast) used as a call's receiver isn't an annotation: `T.unsafe(self).secret`
+raises where `self.secret` calls a private method, so it stays `logic`. Two subtrees whose
 hashes agree once annotations are stripped are the same code but for types;
 the hunk's covers are compared this way, statements matched in order, and a
 changed line touched only by annotations in such code (or, where one side

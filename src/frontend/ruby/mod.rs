@@ -342,8 +342,14 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
-        let statement = self.parents.last().is_some_and(|(k, _)| *k == "statements");
-        let flags = self.roles.flags(&node) | self.sorbet.flags(&node, statement);
+        let parent = self.parents.last().copied();
+        let statement = parent.is_some_and(|(k, _)| k == "statements");
+        // The leftmost child of a call is its receiver.
+        let receiver = parent.is_some_and(|(k, start)| {
+            (k == "call" || k.starts_with("call_") || k.starts_with("index_"))
+                && start == node.location().start_offset()
+        });
+        let flags = self.roles.flags(&node) | self.sorbet.flags(&node, statement, receiver);
         self.builder.flag(flags);
         self.respell(&node);
         self.parents.push((kind, node.location().start_offset()));

@@ -1,0 +1,4 @@
+{
+  "description": "T.unsafe(self).secret for self.secret: a private method called on a receiver that isn't literally self raises, so the cast isn't neutral and the hunk isn't structure",
+  "expect": {"hunks": [{"verdict": {"$not": "structure"}, "parts": {"$every": {"structure": false}}}]}
+}
