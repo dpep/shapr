@@ -2,19 +2,19 @@
 //! it is, and for the whole change whether it alters structure, behavior, or
 //! both.
 
-pub mod change;
-pub mod claims;
-pub mod classify;
+mod change;
+mod claims;
+mod classify;
 mod cli;
-pub mod diff;
-pub mod frontend;
-pub mod git;
-pub mod github;
-pub mod log;
-pub mod norms;
-pub mod outside;
-pub mod report;
-pub mod tree;
+mod diff;
+mod frontend;
+mod git;
+mod github;
+mod log;
+mod norms;
+mod outside;
+mod report;
+mod tree;
 mod usage;
 
 pub use cli::run;

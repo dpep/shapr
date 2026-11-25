@@ -56,8 +56,8 @@ never edit an old one, mark it Superseded.
 
 ```
 src/
-  main.rs, lib.rs   entry; lib's modules are `pub`, but integration tests drive the binary,
-                    never `shapr::`
+  main.rs, lib.rs   entry; lib's modules are private (only `run` is exported), so the
+                    compiler finds dead code; integration tests drive the binary
   cli.rs            clap, input selection (range or stdin, -C), exit codes, after-help
   log.rs            -v telemetry (the verbose! macro)
   usage.rs          the usage log: one NDJSON line per run, names and counts only, and --usage
