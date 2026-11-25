@@ -19,7 +19,7 @@ use super::site::CodeLines;
 use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::frontend::Construct;
-use crate::tree::{Flags, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
+use crate::tree::{Flags, Hazard, MARK, NameKind, NodeId, Piece, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -352,6 +352,16 @@ fn find(
     let in_chunk = || chunk.iter().flat_map(|&s| chunks.descendants(s));
 
     let blocks = |op: Op, n: NodeId| chunks.node(n).role.hazard().is_some_and(|h| blocks(op, h));
+    // A `next` or `break` whose block or loop moves with it stays bound to it.
+    let jumps = |stmt: NodeId, n: NodeId| {
+        let caught = matches!(
+            chunks.node(n).role.hazard(),
+            Some(Hazard::Next | Hazard::Break | Hazard::Redo)
+        ) && (chunks.ancestors(n))
+            .take_while(|&p| Some(p) != chunks.node(stmt).parent)
+            .any(|p| chunks.node(p).flags.contains(Flags::LOOP));
+        blocks(Op::Extract, n) && !caught
+    };
     // `self` inside a block may be another object (`instance_eval`, a DSL):
     // the chunk and the call must each run with their method's `self`.
     let frontend = crate::frontend::for_path(change.files[file].diff.path());
@@ -362,7 +372,7 @@ fn find(
     let rebound =
         !own_self(calls, call, a_call) || chunk.iter().any(|&s| !own_self(chunks, s, a_chunk));
     let mut wiring = None;
-    let outcome = if in_chunk().any(|n| blocks(Op::Extract, n))
+    let outcome = if (chunk.iter()).any(|&s| chunks.descendants(s).any(|n| jumps(s, n)))
         || chunks
             .descendants(a_chunk)
             .any(|n| blocks(Op::ExtractCaller, n))

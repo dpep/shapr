@@ -1,0 +1,7 @@
+{
+  "description": "statements holding a whole block extracted into a new method, where the block uses `return`: unlike `next`, it leaves the method around the block, now the new method rather than the caller, so a jump near miss",
+  "expect": {
+    "hunks": {"$some": {"parts": {"$some": {"kind": "logic", "detail": {"near": "extract", "risk": "jump"}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

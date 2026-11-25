@@ -225,6 +225,9 @@ impl Flags {
     /// A block's or closure's parameter list (Ruby's `|a; b|`, Rust's `|a|`):
     /// the locals it declares are its parent's alone, shadowing any outside.
     pub const BLOCK_PARAMETERS: Flags = Flags(1 << 14);
+    /// A block or loop that a `next`, `break` or `redo` inside it acts on
+    /// (Ruby's blocks, lambdas and loops), not the method around it.
+    pub const LOOP: Flags = Flags(1 << 15);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0

@@ -437,6 +437,11 @@ fn flags(node: &Node<'_>) -> Flags {
         Node::ClassNode { .. } | Node::ModuleNode { .. } => Flags::SCOPE,
         Node::ArgumentsNode { .. } => Flags::ARGUMENTS,
         Node::BlockParametersNode { .. } => Flags::BLOCK_PARAMETERS,
+        Node::BlockNode { .. }
+        | Node::LambdaNode { .. }
+        | Node::WhileNode { .. }
+        | Node::UntilNode { .. }
+        | Node::ForNode { .. } => Flags::LOOP,
         // `{x:}`, `g(x:)`: the value read also names the key.
         Node::ImplicitNode { .. } => Flags::MEMBER,
         Node::ConstantWriteNode { .. } | Node::ConstantPathWriteNode { .. } => {
