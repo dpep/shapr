@@ -1,0 +1,6 @@
+{
+  "description": "whitespace a <<~ heredoc dedents away before an interpolation is still content: it sets the dedent",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

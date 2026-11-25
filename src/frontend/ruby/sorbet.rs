@@ -181,6 +181,11 @@ fn path(node: &Node<'_>) -> Option<Vec<&'static [u8]>> {
         .collect()
 }
 
+/// Whether a constant path ends in `T` (`A::T`).
+fn last_is_t(path: &ConstantPathNode<'_>) -> bool {
+    path.name().is_some_and(|n| n.as_slice() == b"T")
+}
+
 /// Whether the file names `T` anywhere, `T::Helpers`, and defines a `T`.
 #[derive(Default)]
 struct Scan {
@@ -203,6 +208,64 @@ impl<'pr> Visit<'pr> for Scan {
     fn visit_constant_write_node(&mut self, node: &ruby_prism::ConstantWriteNode<'pr>) {
         self.defines_t |= node.name().as_slice() == b"T";
         ruby_prism::visit_constant_write_node(self, node);
+    }
+
+    fn visit_constant_or_write_node(&mut self, node: &ruby_prism::ConstantOrWriteNode<'pr>) {
+        self.defines_t |= node.name().as_slice() == b"T";
+        ruby_prism::visit_constant_or_write_node(self, node);
+    }
+
+    fn visit_constant_and_write_node(&mut self, node: &ruby_prism::ConstantAndWriteNode<'pr>) {
+        self.defines_t |= node.name().as_slice() == b"T";
+        ruby_prism::visit_constant_and_write_node(self, node);
+    }
+
+    fn visit_constant_operator_write_node(
+        &mut self,
+        node: &ruby_prism::ConstantOperatorWriteNode<'pr>,
+    ) {
+        self.defines_t |= node.name().as_slice() == b"T";
+        ruby_prism::visit_constant_operator_write_node(self, node);
+    }
+
+    // `T, _ = ...` and `rescue => T`.
+    fn visit_constant_target_node(&mut self, node: &ruby_prism::ConstantTargetNode<'pr>) {
+        self.defines_t |= node.name().as_slice() == b"T";
+    }
+
+    // `A::T = ...`, `A::T ||= ...` and the rest: each holds its target path.
+    fn visit_constant_path_write_node(&mut self, node: &ruby_prism::ConstantPathWriteNode<'pr>) {
+        self.defines_t |= last_is_t(&node.target());
+        ruby_prism::visit_constant_path_write_node(self, node);
+    }
+
+    fn visit_constant_path_or_write_node(
+        &mut self,
+        node: &ruby_prism::ConstantPathOrWriteNode<'pr>,
+    ) {
+        self.defines_t |= last_is_t(&node.target());
+        ruby_prism::visit_constant_path_or_write_node(self, node);
+    }
+
+    fn visit_constant_path_and_write_node(
+        &mut self,
+        node: &ruby_prism::ConstantPathAndWriteNode<'pr>,
+    ) {
+        self.defines_t |= last_is_t(&node.target());
+        ruby_prism::visit_constant_path_and_write_node(self, node);
+    }
+
+    fn visit_constant_path_operator_write_node(
+        &mut self,
+        node: &ruby_prism::ConstantPathOperatorWriteNode<'pr>,
+    ) {
+        self.defines_t |= last_is_t(&node.target());
+        ruby_prism::visit_constant_path_operator_write_node(self, node);
+    }
+
+    fn visit_constant_path_target_node(&mut self, node: &ruby_prism::ConstantPathTargetNode<'pr>) {
+        self.defines_t |= node.name().is_some_and(|n| n.as_slice() == b"T");
+        ruby_prism::visit_constant_path_target_node(self, node);
     }
 
     fn visit_constant_read_node(&mut self, node: &ConstantReadNode<'pr>) {
@@ -334,6 +397,29 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn every_write_of_a_constant_t_defines_its_own() {
+        for write in [
+            "T = 1",
+            "T ||= 1",
+            "T &&= 1",
+            "T += 1",
+            "T, _ = 1, 2",
+            "A::T = 1",
+            "A::T ||= 1",
+            "A::T &&= 1",
+            "A::T += 1",
+            "A::T, _ = 1, 2",
+            "::T = 1",
+            "module T; end",
+            "class A::T; end",
+        ] {
+            let src = format!("{write}\nx = T.unsafe(1)\n");
+            assert!(annotated(&src).is_empty(), "{write}");
+        }
+        assert_eq!(annotated("A::U = 1\nx = T.unsafe(1)\n").len(), 1);
     }
 
     #[test]

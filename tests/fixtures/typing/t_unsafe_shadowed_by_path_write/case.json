@@ -1,0 +1,17 @@
+{
+  "description": "a file that defines its own T (`A::T = Freezer`): T.unsafe is its method, not Sorbet's, never structure",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        },
+        "parts": {
+          "$every": {
+            "structure": false
+          }
+        }
+      }
+    ]
+  }
+}

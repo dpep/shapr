@@ -1,0 +1,6 @@
+{
+  "description": "whitespace before an interpolation in a <<- heredoc is content",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

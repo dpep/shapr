@@ -94,10 +94,15 @@ pub(super) fn run(change: &Change, _: &Alignments, outside: &dyn Outside, labels
                 lines,
                 // A tree comparison, as for a reformat.
                 confidence: Confidence::new(1.0),
-                reason: match structure {
-                    true => "types only; nothing checks them at runtime".into(),
-                    false => "types only; sorbet-runtime checks them at runtime".into(),
-                },
+                reason: match (structure, loaded) {
+                    (true, _) => "types only; nothing checks them at runtime",
+                    (false, true) => "types only; sorbet-runtime checks them at runtime",
+                    // Unchecked or not, the annotation needs a `T`.
+                    (false, false) => {
+                        "types only; without sorbet-runtime loaded, T may be undefined or not Sorbet's"
+                    }
+                }
+                .into(),
                 evidence: Evidence {
                     method: Method::Ast,
                     values: Map::from_iter([

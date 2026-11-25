@@ -1,0 +1,22 @@
+{
+  "description": "an array's first and last elements swapped around kept middle ones: a reorder of the value's elements",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "element_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

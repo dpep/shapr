@@ -447,6 +447,10 @@ pub enum Canonical {
     /// Stands for the node's own text; its code children are read as a set,
     /// in no order (a braced import list resolves by name).
     Unordered(Vec<u8>),
+    /// Stands for the node's own text and its leaf children (a `<<~`
+    /// heredoc's content, dedented); its code children with children of
+    /// their own (interpolations) follow in order.
+    Literal(Vec<u8>),
     /// The node means its only code child (redundant parentheses).
     Transparent,
 }
@@ -468,7 +472,8 @@ pub struct Tree {
     pub semantics: Semantics,
     /// Separators the language ignores, sorted: hashed like whitespace.
     ignored: Vec<Span>,
-    /// Spans whose whitespace is hashed like code, sorted and disjoint.
+    /// Spans whose whitespace is code (leaves, [`TreeBuilder::verbatim`]),
+    /// sorted and disjoint.
     verbatim: Vec<Span>,
     /// Comments' extents, sorted and disjoint.
     comments: Vec<Span>,
@@ -965,6 +970,12 @@ impl TreeBuilder {
             self.nodes[i].extent = extent;
         }
         self.attach_comments();
+        // A leaf is compared byte for byte, so whitespace in it is code
+        // wherever lines are read, as it is in the hash.
+        let leaves = (self.nodes.iter().zip(&self.leaf))
+            .filter(|(n, leaf)| **leaf && n.children.is_empty() && !n.comment)
+            .map(|(n, _)| n.span.clone());
+        self.verbatim.extend(leaves);
         let mut tree = Tree {
             line_starts: line_starts(&self.source),
             lines: Vec::new(),
@@ -1112,6 +1123,15 @@ fn canon(tree: &Tree, i: usize, leaf: bool, canonical: Option<&Canonical>) -> (u
                 child.hash(&mut h);
             }
         }
+        Some(Canonical::Literal(text)) => {
+            node.kind.hash(&mut h);
+            h.write_u8(b'l');
+            text.hash(&mut h);
+            for child in code().filter(|c| !c.children.is_empty()) {
+                h.write_u8(MARK);
+                child.canon.hash(&mut h);
+            }
+        }
         Some(Canonical::Transparent) if code().count() == 1 => {
             return (code().next().expect("one child").canon, true);
         }
@@ -1180,11 +1200,12 @@ fn line_facts(tree: &Tree) -> Vec<LineFacts> {
         while next.peek().is_some_and(|c| c.start <= offset) {
             in_comment = next.next();
         }
-        if byte.is_ascii_whitespace() {
+        let comment = in_comment.is_some_and(|c| offset < c.end);
+        if byte.is_ascii_whitespace() && (comment || !tree.verbatim(offset)) {
             continue;
         }
         let line = &mut facts[tree.line_of(offset) - 1];
-        if in_comment.is_some_and(|c| offset < c.end) {
+        if comment {
             line.comment = true;
         } else {
             line.code = true;

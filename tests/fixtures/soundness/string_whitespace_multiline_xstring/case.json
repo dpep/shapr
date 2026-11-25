@@ -1,0 +1,6 @@
+{
+  "description": "whitespace in a multi-line backtick command is content the shell reads",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "description": "whitespace in a multi-line regexp is content the regexp engine reads",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

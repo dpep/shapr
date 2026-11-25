@@ -1,0 +1,6 @@
+{
+  "description": "whitespace on a continued line of a quoted string, before an interpolation, is content",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

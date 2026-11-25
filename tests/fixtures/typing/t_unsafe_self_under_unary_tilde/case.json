@@ -1,0 +1,17 @@
+{
+  "description": "~T.unsafe(self) for ~self: a private unary operator called on a receiver that isn't literally self raises, never structure",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": {
+          "$not": "structure"
+        },
+        "parts": {
+          "$every": {
+            "structure": false
+          }
+        }
+      }
+    ]
+  }
+}

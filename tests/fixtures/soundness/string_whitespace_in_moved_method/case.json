@@ -1,0 +1,6 @@
+{
+  "description": "a method moved with whitespace in its heredoc changed isn't moved unchanged",
+  "expect": {
+    "summary": {"verdict": {"$not": "structure"}}
+  }
+}

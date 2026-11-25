@@ -1,0 +1,22 @@
+{
+  "description": "a method's first and last statements swapped around kept middle ones: a reorder the evaluation order observes",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "reorder",
+            "structure": false,
+            "detail": {
+              "context": [
+                "evaluation_order"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

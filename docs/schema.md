@@ -62,7 +62,7 @@ nothing proven is one `logic` part.
 | `comment_only` | yes | Same syntax tree ignoring whitespace and comments; comment text differs, or a comment moved to another node (a doc comment to another item). |
 | `restyle` | yes | The same program spelled another way: the code differs only in spellings the language's frontend proves equivalent (quote style, hash syntax, block delimiters, redundant parentheses, ...). See [Restyle](#restyle). |
 | `typing` | yes, unless it has `assumptions` | Only Sorbet type annotations change: the code is the same once they are stripped. See [Typing](#typing). |
-| `reorder` | yes, unless its `detail.context` is non-empty | The hunk's elements of one container are the same subtrees, with the same comments leading them, in another order; lines of elements that also changed are `logic` beside it. An element out of order counts as moved only where the gap it leaves, or the one it enters, between elements kept in order holds a different number of elements on the two sides; where both hold as many, it reads as an edit in place. Structure where order can't be observed: Rust items and separate `use` declarations in a module, `impl`, trait or block with no `macro_rules!`, `#[macro_use]` item, item-level macro invocation or attribute macro among them (whichever element moved), and a struct literal's fields whose values are literals and names. Otherwise `detail.context` names what observes the order: `load_order` for `require`s, Gemfile `gem` lines and gemspec dependencies (Bundler requires gems in order), and for Rust items beside a `macro_rules!`, a `#[macro_use]` item, an item-level macro invocation or an attribute macro; `iteration_order` for Ruby hash entries and keyword arguments (every key a distinct plain literal); `element_order` for array elements and Rust struct field declarations and enum variants; `evaluation_order` for other statements, a struct literal's fields with a value that runs code, and beside the others where a moved element calls a method. Method definitions are a `move`; positional arguments and `match` arms are never a reorder. `evidence`: `elements` (the container's elements in the hunk found on both sides) and `moved` (those out of order). `review_lines`: 0 when structure, else each moved element's lines on the after side. |
+| `reorder` | yes, unless its `detail.context` is non-empty | The hunk's elements of one container are the same subtrees, with the same comments leading them, in another order; lines of elements that also changed are `logic` beside it. An element out of order counts as moved only where the gap it leaves, or the one it enters, between elements kept in order holds a different number of elements on the two sides, or where it belongs to a permutation: the slot it leaves is taken by another moved element, and the slot it takes was another's (two elements swapped around kept ones). Otherwise, where both gaps hold as many, it reads as an edit in place. Structure where order can't be observed: Rust items and separate `use` declarations in a module, `impl`, trait or block with no `macro_rules!`, `#[macro_use]` item, item-level macro invocation or attribute macro among them (whichever element moved), and a struct literal's fields whose values are literals and names. Otherwise `detail.context` names what observes the order: `load_order` for `require`s, Gemfile `gem` lines and gemspec dependencies (Bundler requires gems in order), and for Rust items beside a `macro_rules!`, a `#[macro_use]` item, an item-level macro invocation or an attribute macro; `iteration_order` for Ruby hash entries and keyword arguments (every key a distinct plain literal); `element_order` for array elements and Rust struct field declarations and enum variants; `evaluation_order` for other statements, a struct literal's fields with a value that runs code, and beside the others where a moved element calls a method. Method definitions are a `move`; positional arguments and `match` arms are never a reorder. `evidence`: `elements` (the container's elements in the hunk found on both sides) and `moved` (those out of order). `review_lines`: 0 when structure, else each moved element's lines on the after side. |
 | `default_argument` | yes, unless it has `assumptions` | A call drops or adds an argument that restates its parameter's literal default, and the method it calls is the only one the call can reach. See [Default arguments](#default-arguments). |
 | `rename` | yes, unless it has `assumptions` | Only identifiers change, and every use of each old name in its scope became the new name. Any parameter added, removed, reordered or given a default is `logic`. See [Renames](#renames). |
 | `move` | yes, unless its `detail.context` or `assumptions` is non-empty | Code removed in one place appears elsewhere, in the same file or another. Reordering methods within a class or module is a `move`; reordering other statements (`require`s, Gemfile `gem` lines, callbacks, validations, `include`s, other DSL calls) is a `reorder`. A moved definition whose body also changed is a `move` part plus the changed lines in the residual. One moved unchanged into different surroundings (another owner, visibility section, load order, file-level directives, or Rust module) is a `move` part that isn't structure. See [Moves](#moves). |
@@ -146,7 +146,9 @@ inlines in particular are linked to later bug fixes and still deserve review.
 
 Tree equality is exact: node kinds, child order, and every non-whitespace
 byte of each node's source must match, and leaves (string content, heredoc
-bodies, symbols, numbers) match byte for byte, whitespace included. So
+bodies, symbols, numbers) match byte for byte, whitespace included; so does
+the indentation a `<<~` heredoc strips, and a line whose only change is such
+whitespace holds code. So
 `do…end` versus `{…}`, a change of quote style or a trailing comma in Ruby
 is not `format_only`; it is a `restyle` where the trees prove it the same
 program, and any reordering is `logic`.
@@ -226,7 +228,7 @@ spellings:
 
 | variant | the same program | not the same |
 |---|---|---|
-| `Style/StringLiterals` | `'a'`, `"a"`, `%q(a)`, `?a`, a plain heredoc: a string with no interpolation, compared by its value and its encoding and frozen flags | `"\u00e9"` vs `"é"` (the escape forces UTF-8); a regexp's or command's text; an interpolated string's quotes |
+| `Style/StringLiterals` | `'a'`, `"a"`, `%q(a)`, `?a`, a plain heredoc: a string with no interpolation, compared by its value and its encoding and frozen flags; a `<<~` heredoc reindented whole, compared by every line's value after the indentation it strips | `"\u00e9"` vs `"é"` (the escape forces UTF-8); a regexp's or command's text; an interpolated string's quotes |
 | `Style/QuotedSymbols` | `:a`, `:"a"` | `:"a#{b}"` |
 | `Style/HashSyntax` | `{:a => 1}`, `{a: 1}`, `{"a b": 1}` (the key a symbol on both sides); `{x: x}`, `{x:}` where `x` is a local | `{"a": 1}` vs `{"a" => 1}` (a symbol vs a string key); `{x:}` reading a method |
 | `Style/WordArray`, `Style/SymbolArray` | `%w[a b]`, `["a", "b"]`; `%i[a b]`, `[:a, :b]` | |
@@ -273,10 +275,12 @@ differ. The frontend marks two kinds of annotation in Ruby:
 
 A bare `sig` counts only in a file that has a `# typed:` sigil or names
 `T`, so a method of one's own named `sig` stays `logic`. A file that defines
-a constant `T` of its own (`module T`, `class T`, `T = ...`) has no Sorbet
-annotations. A cast whose value is `self` (directly or through another
+a constant `T` of its own (`module T`, `class T`, or any constant write or
+assignment target ending in `T`: `T = ...`, `T ||= ...`, `A::T = ...`,
+`T, _ = ...`) has no Sorbet annotations. A cast whose value is `self` (directly or through another
 cast) used as a call's receiver isn't an annotation: `T.unsafe(self).secret`
-raises where `self.secret` calls a private method, so it stays `logic`. Two subtrees whose
+raises where `self.secret` calls a private method, as `-T.unsafe(self)` does
+where `-self` calls a private `-@`, so it stays `logic`. Two subtrees whose
 hashes agree once annotations are stripped are the same code but for types;
 the hunk's covers are compared this way, statements matched in order, and a
 changed line touched only by annotations in such code (or, where one side
