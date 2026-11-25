@@ -464,3 +464,26 @@ fn skips(side: &Side, ids: &[NodeId]) -> Vec<Span> {
 fn contains(outer: &Span, inner: &Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ALL` holds the variants in declaration order. The match is
+    /// exhaustive, so a new variant fails to compile here: add it to `ALL`.
+    #[test]
+    fn all_holds_every_facet() {
+        for (i, &facet) in Facet::ALL.iter().enumerate() {
+            assert_eq!(facet as usize, i, "{facet:?}");
+            match facet {
+                Facet::Test
+                | Facet::AddsDefinition
+                | Facet::RemovesDefinition
+                | Facet::Signature
+                | Facet::Condition
+                | Facet::ErrorHandling => {}
+                Facet::LiteralOnly => assert_eq!(i, Facet::ALL.len() - 1, "the last variant"),
+            }
+        }
+    }
+}

@@ -499,6 +499,28 @@ fn defaults(change: &Change) -> Labels {
 mod tests {
     use super::*;
 
+    /// `ALL` holds the variants in declaration order. The match is
+    /// exhaustive, so a new variant fails to compile here: add it to `ALL`.
+    #[test]
+    fn all_holds_every_kind() {
+        for (i, &kind) in Kind::ALL.iter().enumerate() {
+            assert_eq!(kind as usize, i, "{kind:?}");
+            match kind {
+                Kind::FormatOnly
+                | Kind::CommentOnly
+                | Kind::Restyle
+                | Kind::Typing
+                | Kind::Reorder
+                | Kind::DefaultArgument
+                | Kind::Rename
+                | Kind::Move
+                | Kind::Extract
+                | Kind::Inline => {}
+                Kind::Logic => assert_eq!(i, Kind::ALL.len() - 1, "the last variant"),
+            }
+        }
+    }
+
     #[test]
     fn confidence_rounds_where_built() {
         assert_eq!(Confidence::new(0.123_456).get(), 0.12);

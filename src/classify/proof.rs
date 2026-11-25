@@ -320,6 +320,24 @@ pub(super) fn directive_names(tree: &Tree, id: NodeId, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ALL` holds the variants in declaration order. The match is
+    /// exhaustive, so a new variant fails to compile here: add it to `ALL`.
+    #[test]
+    fn all_holds_every_assumption() {
+        for (i, &a) in Assumption::ALL.iter().enumerate() {
+            assert_eq!(a as usize, i, "{a:?}");
+            match a {
+                Assumption::UnseenUses
+                | Assumption::SearchCapped
+                | Assumption::PublicApi
+                | Assumption::AmbiguousMatch => {}
+                Assumption::RuntimeCheck => {
+                    assert_eq!(i, Assumption::ALL.len() - 1, "the last variant")
+                }
+            }
+        }
+    }
     use crate::frontend::{Frontend, Ruby, Rust};
 
     fn methods(source: &str) -> Vec<(String, bool)> {
