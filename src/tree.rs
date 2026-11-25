@@ -266,10 +266,13 @@ pub struct Semantics {
     /// Methods the runtime calls when a method is defined (Ruby's
     /// `method_added`): defining one changes what the definitions after it do.
     pub definition_hooks: &'static [&'static str],
+    /// A parameter can declare a default value a call may leave out (Ruby's
+    /// `retries: 3`): where `default_argument` looks.
+    pub default_arguments: bool,
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A
-/// control byte, so never part of a token next to it (see [`Spelling::mask`]).
+/// control byte, so never part of a token next to it when a name is masked.
 pub const MARK: u8 = 0x01;
 
 /// Stands for a masked name in [`Tree::own_text`].
@@ -335,14 +338,6 @@ pub struct Spelling {
 }
 
 impl Spelling {
-    /// Replaces the first occurrence of `name` in `text` that stands as a
-    /// whole token with [`MASKED`].
-    pub fn mask(&self, text: &mut Vec<u8>, name: &[u8]) {
-        if let Some(i) = self.find(text, name) {
-            text.splice(i..i + name.len(), [MASKED]);
-        }
-    }
-
     /// Where `name` first stands as a whole token in `text`.
     fn find(&self, text: &[u8], name: &[u8]) -> Option<usize> {
         let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
@@ -1369,14 +1364,16 @@ mod tests {
         quotes: &['"', '\''],
     };
 
+    /// `text` with the first whole-token `name` replaced by `_`.
     fn masked(text: &str, name: &str) -> String {
-        let mut bytes = text.as_bytes().to_vec();
-        RUBY.mask(&mut bytes, name.as_bytes());
-        String::from_utf8_lossy(&bytes).replace('\0', "_")
+        match RUBY.find(text.as_bytes(), name.as_bytes()) {
+            Some(i) => format!("{}_{}", &text[..i], &text[i + name.len()..]),
+            None => text.to_string(),
+        }
     }
 
     #[test]
-    fn mask_takes_whole_tokens_only() {
+    fn find_takes_whole_tokens_only() {
         assert_eq!(masked("def f(", "f"), "def _(");
         assert_eq!(masked("def de", "de"), "def _");
         assert_eq!(masked("x += ", "x"), "_ += ");

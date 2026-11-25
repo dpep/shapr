@@ -12,7 +12,7 @@
 
 use super::align::{Alignments, siblings};
 use super::hazard::{Op, blocks};
-use super::proof::{self, Assumption, Verified};
+use super::proof::{self, Assumption, Naming, Verified};
 use super::site::CodeLines;
 use super::{Claim, Confidence, Kind, Label, Labels, Outside, Part};
 use crate::change::{Change, Trees};
@@ -419,7 +419,7 @@ fn reach(
     let suffixes = calls.semantics.spelling.suffixes;
     let word = found.method.trim_end_matches(|c| suffixes.contains(&c));
     let method = found.method.clone();
-    let uses = |tree: &Tree| super::rename::mentions_method(tree, &method);
+    let uses = |tree: &Tree| proof::mentions_method(tree, &method);
     match proof::verify(outside, path, word, &covered, &uses) {
         Verified::Used(files) => {
             found.used_in = files;
@@ -1001,13 +1001,6 @@ fn statement_value(tree: &Tree, stmt: NodeId, v: &str) -> Option<NodeId> {
 /// defined again beside B, so B takes part in dispatch beyond its one call.
 /// New calls to the new method are not collisions.
 fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) -> bool {
-    let named = |tree: &Tree, id: NodeId| {
-        let node = tree.node(id);
-        match node.name.as_deref() {
-            Some(name) if node.role == Role::DynamicName => crate::tree::spells(name, method),
-            name => name == Some(method),
-        }
-    };
     ours.semantics.reserves(method)
         || change
             .files
@@ -1015,22 +1008,11 @@ fn mentioned(change: &Change, method: &str, dir: Dir, ours: &Tree, b: NodeId) ->
             .filter_map(|f| f.trees.as_ref().ok())
             .any(|trees| {
                 let (calls, chunks) = dir.sides(trees);
-                ids(chunks).any(|id| {
-                    super::rename::literal_names(chunks, id, method)
-                        || named(chunks, id)
-                            && matches!(
-                                chunks.node(id).role,
-                                Role::Definition(NameKind::Method)
-                                    | Role::Reference(NameKind::Method)
-                                    | Role::Call(_)
-                                    | Role::DynamicName
-                                    | Role::Opaque
-                            )
-                }) || ids(calls).any(|id| {
-                    named(calls, id)
-                        && calls.node(id).role == Role::Definition(NameKind::Method)
-                        && !(std::ptr::eq(calls, ours) && id == b)
-                })
+                ids(chunks).any(|id| proof::names_method(chunks, id, method).is_some())
+                    || ids(calls).any(|id| {
+                        proof::names_method(calls, id, method) == Some(Naming::Definition)
+                            && !(std::ptr::eq(calls, ours) && id == b)
+                    })
             })
 }
 

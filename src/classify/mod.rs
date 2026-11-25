@@ -352,7 +352,21 @@ pub fn classify(change: &Change, outside: &dyn Outside) -> Labels {
     runs::refine(change, outside, &mut labels);
     facets::run(change, &mut labels);
     relocate::run(change, &mut labels);
+    debug_assert!(aligned(change, &labels), "per-hunk lists out of step");
     labels
+}
+
+/// Every per-hunk list holds one entry per hunk: the report zips them, and
+/// a zip drops the extras silently.
+fn aligned(change: &Change, labels: &Labels) -> bool {
+    labels.len() == change.files.len()
+        && change.files.iter().zip(labels).all(|(file, labels)| {
+            let n = file.diff.hunks.len();
+            labels.len() == n
+                && file.ids.len() == n
+                && file.whitespace_only.len() == n
+                && (file.trees.as_ref().ok()).is_none_or(|t| t.sites.len() == n)
+        })
 }
 
 /// Every pass over every hunk; each residual is what no part claims.
@@ -484,6 +498,28 @@ fn defaults(change: &Change) -> Labels {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `ALL` holds the variants in declaration order. The match is
+    /// exhaustive, so a new variant fails to compile here: add it to `ALL`.
+    #[test]
+    fn all_holds_every_kind() {
+        for (i, &kind) in Kind::ALL.iter().enumerate() {
+            assert_eq!(kind as usize, i, "{kind:?}");
+            match kind {
+                Kind::FormatOnly
+                | Kind::CommentOnly
+                | Kind::Restyle
+                | Kind::Typing
+                | Kind::Reorder
+                | Kind::DefaultArgument
+                | Kind::Rename
+                | Kind::Move
+                | Kind::Extract
+                | Kind::Inline => {}
+                Kind::Logic => assert_eq!(i, Kind::ALL.len() - 1, "the last variant"),
+            }
+        }
+    }
 
     #[test]
     fn confidence_rounds_where_built() {

@@ -9,7 +9,7 @@
 
 use super::moves::visibility;
 use crate::frontend;
-use crate::tree::{Flags, NameKind, NodeId, Role, Tree, Visibility};
+use crate::tree::{Flags, NameKind, NodeId, Role, Tree, Visibility, spells};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -240,10 +240,105 @@ pub(super) fn public(tree: &Tree, def: NodeId) -> bool {
     named.or_else(|| visibility(tree, def)) != Some(Visibility::Private)
 }
 
+/// How a node can name a method: what every pass that must see all of a
+/// method's uses (rename, extract and inline, default_argument) reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Naming {
+    /// Defines it.
+    Definition,
+    /// Calls it.
+    Call,
+    /// Names it some other way: a reference (`method(:m)`), a dynamic name
+    /// spelled out (`send(:m)`, `alias`), a name in unparsed tokens.
+    Reference,
+    /// A name computed at runtime that could spell it (`send("m_#{x}")`).
+    Computed,
+    /// A plain literal spelling it ([`literal_names`]).
+    Literal,
+    /// A directive holding it as a word ([`directive_names`]).
+    Directive,
+}
+
+/// How node `id` could name method `name`, if it could.
+pub(super) fn names_method(tree: &Tree, id: NodeId, name: &str) -> Option<Naming> {
+    let n = tree.node(id);
+    let Some(found) = n.name.as_deref() else {
+        if literal_names(tree, id, tree.semantics.spelling.bare(name)) {
+            return Some(Naming::Literal);
+        }
+        return directive_names(tree, id, name).then_some(Naming::Directive);
+    };
+    match n.role {
+        // A computed constant or field name (`const_get(n)`,
+        // `instance_variable_get(n)`) can't reach a method.
+        Role::DynamicName if found.contains('*') => (!n.flags.contains(Flags::CONSTANT)
+            && !n.flags.contains(Flags::FIELD)
+            && spells(found, name))
+        .then_some(Naming::Computed),
+        _ if found != name => None,
+        Role::DynamicName | Role::Opaque | Role::Reference(NameKind::Method) => {
+            Some(Naming::Reference)
+        }
+        Role::Definition(NameKind::Method) => Some(Naming::Definition),
+        Role::Call(_) => Some(Naming::Call),
+        _ => None,
+    }
+}
+
+/// Whether `tree` uses method `name` anywhere: a definition, call or
+/// reference, a dynamic name that could spell it, or a plain literal.
+pub(super) fn mentions_method(tree: &Tree, name: &str) -> bool {
+    (tree.descendants(Tree::ROOT)).any(|id| names_method(tree, id, name).is_some())
+}
+
+/// A plain literal spelling `name` (`:name`, `"name"`, `name:`): DSLs such
+/// as callbacks and `autoload` name methods and constants this way, through
+/// calls no frontend can list.
+pub(super) fn literal_names(tree: &Tree, id: NodeId, name: &str) -> bool {
+    let n = tree.node(id);
+    if n.role != Role::Other || n.comment || !n.children.is_empty() {
+        return false;
+    }
+    let text = String::from_utf8_lossy(tree.text(&n.span));
+    tree.semantics.spelling.literal_spells(&text, name)
+}
+
+/// A directive (a Rust doctest line) holding `name` as a word: its code isn't
+/// parsed into the tree, so any mention may be a use.
+pub(super) fn directive_names(tree: &Tree, id: NodeId, name: &str) -> bool {
+    let n = tree.node(id);
+    if !n.flags.contains(Flags::DIRECTIVE) {
+        return false;
+    }
+    let word = tree.semantics.spelling.bare(name);
+    let word = word.trim_end_matches(tree.semantics.spelling.suffixes);
+    String::from_utf8_lossy(tree.text(&n.span))
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| w == word)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::{Frontend, Ruby};
+
+    /// `ALL` holds the variants in declaration order. The match is
+    /// exhaustive, so a new variant fails to compile here: add it to `ALL`.
+    #[test]
+    fn all_holds_every_assumption() {
+        for (i, &a) in Assumption::ALL.iter().enumerate() {
+            assert_eq!(a as usize, i, "{a:?}");
+            match a {
+                Assumption::UnseenUses
+                | Assumption::SearchCapped
+                | Assumption::PublicApi
+                | Assumption::AmbiguousMatch => {}
+                Assumption::RuntimeCheck => {
+                    assert_eq!(i, Assumption::ALL.len() - 1, "the last variant")
+                }
+            }
+        }
+    }
+    use crate::frontend::{Frontend, Ruby, Rust};
 
     fn methods(source: &str) -> Vec<(String, bool)> {
         let tree = Ruby.parse(source.as_bytes().to_vec());
@@ -322,5 +417,51 @@ mod tests {
             verify(&Nowhere, "a.rb", "x", &covered, &|_| true),
             Verified::Open(Assumption::UnseenUses)
         ));
+    }
+
+    #[test]
+    fn names_method_reads_each_way_code_can_name_a_method() {
+        use Naming::*;
+        let ruby: &dyn Frontend = &Ruby;
+        let rust: &dyn Frontend = &Rust;
+        // (frontend, source, method, how the tree names it)
+        let table: &[(&dyn Frontend, &str, &str, &[Naming])] = &[
+            (ruby, "def m; end\n", "m", &[Definition]),
+            (ruby, "m(1)\n", "m", &[Call]),
+            (ruby, "x.m\n", "m", &[Call]),
+            (ruby, "method(:m)\n", "m", &[Reference]),
+            (ruby, "send(:m)\n", "m", &[Reference]),
+            (ruby, "send(\"m_#{x}\")\n", "m_a", &[Computed]),
+            (ruby, "send(\"m_#{x}\")\n", "n_a", &[]),
+            (ruby, "Object.const_get(x)\n", "m", &[]),
+            (ruby, "instance_variable_get(x)\n", "m", &[]),
+            (ruby, "before_save :m\n", "m", &[Literal]),
+            (ruby, "x = { m: 1 }\n", "m", &[Literal]),
+            (ruby, "# rubocop:disable Naming/m\nx\n", "m", &[Directive]),
+            (ruby, "# m\nx\n", "m", &[]),
+            (ruby, "def n; end\n", "m", &[]),
+            (rust, "fn m() {}\n", "m", &[Definition]),
+            (rust, "fn f() { m(); }\n", "m", &[Call]),
+            (rust, "fn f() { mac!(m); }\n", "m", &[Reference]),
+            (
+                rust,
+                "/// ```\n/// demo::m();\n/// ```\nfn f() {}\n",
+                "m",
+                &[Directive],
+            ),
+            (rust, "/// m\nfn f() {}\n", "m", &[]),
+        ];
+        for &(frontend, source, method, want) in table {
+            let tree = frontend.parse(source.as_bytes().to_vec());
+            let found: Vec<Naming> = (tree.descendants(Tree::ROOT))
+                .filter_map(|id| names_method(&tree, id, method))
+                .collect();
+            assert_eq!(
+                found,
+                want,
+                "{} {source:?} naming {method}",
+                frontend.language()
+            );
+        }
     }
 }

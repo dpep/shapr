@@ -15,12 +15,12 @@
 //! empty collection), compared by canonical form.
 
 use super::hazard::{Op, blocks};
-use super::proof::{Assumption, Search};
+use super::proof::{self, Assumption, Naming, Search};
 use super::site::{CodeLines, Side as SiteSide};
 use super::{Claim, Confidence, Evidence, Kind, Labels, Method, Outside, Part};
 use crate::change::{Change, Trees};
 use crate::frontend::{self, Arguments, Frontend};
-use crate::tree::{Flags, MARK, NameKind, NodeId, Receiver, Role, Span, Tree, spells};
+use crate::tree::{Flags, MARK, NameKind, NodeId, Receiver, Role, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
@@ -38,7 +38,7 @@ pub(super) fn run(
         let Some(frontend) = frontend::for_path(file.diff.path()) else {
             continue;
         };
-        if !trees.clean() {
+        if !trees.clean() || !trees.before.semantics.default_arguments {
             continue;
         }
         let counts = OnceCell::new();
@@ -772,27 +772,15 @@ impl<'c> Lookups<'c> {
 /// name or define it: a dynamic name (`send(:m)`, `define_method`), a plain
 /// literal (`:m`), a reference. Calls to it are fine.
 fn scan(tree: &Tree, method: &str) -> Result<Vec<NodeId>, &'static str> {
-    let bare = tree.semantics.spelling.bare(method).to_string();
     let mut defs = Vec::new();
     for id in tree.descendants(Tree::ROOT) {
-        let node = tree.node(id);
-        let Some(name) = node.name.as_deref() else {
-            if super::rename::literal_names(tree, id, &bare) {
-                return Err("a literal names it");
-            }
-            continue;
-        };
-        match node.role {
-            Role::DynamicName if name.contains('*') && spells(name, method) => {
-                return Err("a computed name could spell it");
-            }
-            Role::DynamicName | Role::Opaque | Role::Reference(NameKind::Method)
-                if name == method =>
-            {
-                return Err("something besides a call names it");
-            }
-            Role::Definition(NameKind::Method) if name == method => defs.push(id),
-            _ => {}
+        match proof::names_method(tree, id, method) {
+            None | Some(Naming::Call) => {}
+            Some(Naming::Definition) => defs.push(id),
+            Some(Naming::Literal) => return Err("a literal names it"),
+            Some(Naming::Directive) => return Err("a directive names it"),
+            Some(Naming::Computed) => return Err("a computed name could spell it"),
+            Some(Naming::Reference) => return Err("something besides a call names it"),
         }
     }
     Ok(defs)

@@ -1,0 +1,10 @@
+{
+  "description": "a computed constant lookup (`const_get(kind)`) in the file can't reach a method, so it doesn't make the extracted name a collision",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "extract"
+      }
+    ]
+  }
+}

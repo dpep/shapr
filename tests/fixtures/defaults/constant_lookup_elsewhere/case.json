@@ -1,0 +1,10 @@
+{
+  "description": "a computed constant lookup (`const_get(name)`) elsewhere can't reach a method, so it doesn't stop a dropped default",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "default_argument"
+      }
+    ]
+  }
+}

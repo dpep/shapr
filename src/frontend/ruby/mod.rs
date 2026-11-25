@@ -74,6 +74,7 @@ impl Frontend for Ruby {
             reserved: reserved::RESERVED,
             definitions_run: true,
             definition_hooks: &["method_added", "singleton_method_added"],
+            default_arguments: true,
             spelling: Spelling {
                 sigils: &['@', '$'],
                 suffixes: &['?', '!', '='],
@@ -224,6 +225,15 @@ impl Frontend for Ruby {
 
     fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool {
         signature::plain_literal(tree, id)
+    }
+
+    fn reorder(
+        &self,
+        tree: &Tree,
+        container: NodeId,
+        moved: &[NodeId],
+    ) -> Option<Vec<super::order::Dependence>> {
+        super::order::ruby(tree, container, moved)
     }
 
     fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool {
