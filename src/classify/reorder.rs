@@ -10,7 +10,8 @@ use super::hazard::{self, Op};
 use super::site::{Side, Site};
 use super::{Claim, Confidence, Context, Evidence, Kind, Labels, Method, Outside, Part};
 use crate::change::{Change, Trees};
-use crate::frontend::order::{self, Dependence};
+use crate::frontend::order::Dependence;
+use crate::frontend::{self, Frontend};
 use crate::tree::{NodeId, Span, Tree};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
@@ -21,12 +22,15 @@ pub(super) fn run(change: &Change, alignments: &Alignments, _: &dyn Outside, lab
         let Ok(trees) = &change.files[f].trees else {
             continue;
         };
+        let Some(frontend) = frontend::for_path(change.files[f].diff.path()) else {
+            continue;
+        };
         for (site, label) in trees.sites.iter().zip(labels[f].iter_mut()) {
             let free = label.unclaimed();
             if free.is_empty() {
                 continue;
             }
-            if let Some(part) = prove(trees, site, &free) {
+            if let Some(part) = prove(trees, frontend, site, &free) {
                 label.claim(part);
             }
         }
@@ -122,7 +126,7 @@ fn context(dependence: Dependence) -> Context {
     }
 }
 
-fn prove(trees: &Trees, site: &Site, free: &Claim) -> Option<Part> {
+fn prove(trees: &Trees, frontend: &dyn Frontend, site: &Site, free: &Claim) -> Option<Part> {
     let (tb, ta) = (&trees.before, &trees.after);
     let (cb, eb, one) = elements(tb, &site.before)?;
     let (ca, ea, one_a) = elements(ta, &site.after)?;
@@ -235,9 +239,8 @@ fn prove(trees: &Trees, site: &Site, free: &Claim) -> Option<Part> {
     if blocked(tb, &moved_b) || blocked(ta, &moved_a) {
         return None;
     }
-    let language = trees.language;
-    let mut dependences = order::reorder(language, tb, cb, &moved_b)?;
-    dependences.extend(order::reorder(language, ta, ca, &moved_a)?);
+    let mut dependences = frontend.reorder(tb, cb, &moved_b)?;
+    dependences.extend(frontend.reorder(ta, ca, &moved_a)?);
     let contexts: BTreeSet<Context> = dependences.into_iter().map(context).collect();
     let contexts: Vec<Context> = contexts.into_iter().collect();
 

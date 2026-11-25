@@ -70,6 +70,16 @@ pub trait Frontend: Sync {
     /// (a Ruby block, which `instance_eval` can rebind, or a class body).
     fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool;
 
+    /// How reordering `moved`, elements of `container`, can be observed:
+    /// empty when it can't, `None` when the container's order is its
+    /// meaning or it can't be judged (see [`order`]).
+    fn reorder(
+        &self,
+        tree: &Tree,
+        container: NodeId,
+        moved: &[NodeId],
+    ) -> Option<Vec<order::Dependence>>;
+
     /// How statement `id` of the file at `path` loads another file of the
     /// language, if it does: `None` for code that loads nothing, and in a
     /// language whose files aren't loaded by statements.

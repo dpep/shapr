@@ -203,6 +203,15 @@ impl Frontend for Rust {
         false
     }
 
+    fn reorder(
+        &self,
+        tree: &Tree,
+        container: NodeId,
+        moved: &[NodeId],
+    ) -> Option<Vec<super::order::Dependence>> {
+        super::order::rust(tree, container, moved)
+    }
+
     fn rebinds_self(&self, _: &Tree, _: NodeId) -> bool {
         false
     }

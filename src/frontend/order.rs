@@ -21,23 +21,8 @@ pub enum Dependence {
     Evaluation,
 }
 
-/// How reordering `moved`, elements of `container` in a tree `language`
-/// parsed, can be observed: empty when it can't, `None` when the container's
-/// order is its meaning or it can't be judged.
-pub fn reorder(
-    language: &str,
-    tree: &Tree,
-    container: NodeId,
-    moved: &[NodeId],
-) -> Option<Vec<Dependence>> {
-    match language {
-        "ruby" => ruby(tree, container, moved),
-        "rust" => rust(tree, container, moved),
-        _ => None,
-    }
-}
-
-fn ruby(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependence>> {
+/// [`Frontend::reorder`] for Ruby.
+pub(super) fn ruby(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependence>> {
     let mut out = match tree.node(container).kind {
         "hash" | "keyword_hash" if distinct_keys(tree, container) => vec![Dependence::Iteration],
         "array" => vec![Dependence::Elements],
@@ -134,7 +119,8 @@ const ITEMS: &[&str] = &[
     "foreign_mod_item",
 ];
 
-fn rust(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependence>> {
+/// [`Frontend::reorder`] for Rust.
+pub(super) fn rust(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependence>> {
     let kind = tree.node(container).kind;
     let out = match kind {
         "root" | "mod_item" | "impl_item" | "trait_item" | "foreign_mod_item" | "block" => {
@@ -230,13 +216,13 @@ mod tests {
     fn ruby(source: &str, kind: &str) -> Option<Vec<Dependence>> {
         let tree = Ruby.parse(source.as_bytes().to_vec());
         let (id, children) = container(&tree, kind);
-        reorder("ruby", &tree, id, &children)
+        Ruby.reorder(&tree, id, &children)
     }
 
     fn rust(source: &str, kind: &str) -> Option<Vec<Dependence>> {
         let tree = Rust.parse(source.as_bytes().to_vec());
         let (id, children) = container(&tree, kind);
-        reorder("rust", &tree, id, &children)
+        Rust.reorder(&tree, id, &children)
     }
 
     use Dependence::*;
