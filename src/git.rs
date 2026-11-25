@@ -19,6 +19,9 @@ pub struct Git {
     toplevel: OnceCell<Option<PathBuf>>,
     parents: RefCell<HashMap<String, usize>>,
     promisor: OnceCell<Option<String>>,
+    /// The first key of the repository's own config an ordinary clone
+    /// doesn't write; `None` when there is none.
+    unusual: OnceCell<Option<String>>,
     /// A shallow clone's boundary commits, whose parents weren't fetched.
     shallow: OnceCell<Vec<String>>,
     /// Linguist attributes by source revision and path.
@@ -51,6 +54,7 @@ impl Git {
             toplevel: OnceCell::new(),
             parents: RefCell::default(),
             promisor: OnceCell::new(),
+            unusual: OnceCell::new(),
             shallow: OnceCell::new(),
             linguist: RefCell::default(),
         }
@@ -82,8 +86,8 @@ impl Git {
                 .env("GIT_TERMINAL_PROMPT", "0");
         } else {
             // A fetch runs what the repository's config names (`uploadpack`,
-            // `core.sshCommand`, a credential helper): never into a
-            // repository shapr didn't clone.
+            // `core.sshCommand`, a credential helper): only the diff fetches,
+            // and only where that config is an ordinary clone's (`fetches`).
             cmd.env("GIT_NO_LAZY_FETCH", "1");
             if let Some(dir) = &self.dir {
                 // `-C` names the repository; an inherited GIT_DIR would override it.
@@ -100,10 +104,14 @@ impl Git {
     /// rename detection and three lines of context whatever the user's
     /// config says.
     pub fn diff(&self, range: &str, cached: bool, paths: &[String]) -> Result<String> {
-        if self.bare.is_none() && self.partial() && version().is_some_and(|v| v < NO_LAZY_FETCH_GIT)
+        if self.bare.is_none()
+            && self.partial()
+            && !self.fetches()
+            && version().is_some_and(|v| v < NO_LAZY_FETCH_GIT)
         {
             bail!(
-                "{PARTIAL}; git before {}.{} would fetch anyway",
+                "{}; git before {}.{} would fetch anyway",
+                self.partial_refusal(),
                 NO_LAZY_FETCH_GIT.0,
                 NO_LAZY_FETCH_GIT.1
             );
@@ -161,8 +169,13 @@ impl Git {
 
     /// `git diff` in shapr's fixed format; TEXT diffs every file as text.
     fn run_diff(&self, range: &str, cached: bool, paths: &[String], text: bool) -> Result<String> {
-        let out = run(self
-            .command()
+        let mut cmd = self.command();
+        if self.fetches() {
+            // The blobs the diff needs, from the promisor remote; fail, never prompt.
+            cmd.env_remove("GIT_NO_LAZY_FETCH")
+                .env("GIT_TERMINAL_PROMPT", "0");
+        }
+        let out = run(cmd
             .args([
                 "diff",
                 "--no-color",
@@ -349,8 +362,8 @@ impl Git {
     /// ERROR, and in a shallow clone the history it may lack: a revision
     /// past the boundary doesn't resolve.
     fn shallow_hint(&self, error: anyhow::Error) -> anyhow::Error {
-        if self.bare.is_none() && self.partial() {
-            return anyhow::anyhow!("{:#}; {PARTIAL}", error);
+        if self.bare.is_none() && self.partial() && !self.fetches() {
+            return anyhow::anyhow!("{:#}; {}", error, self.partial_refusal());
         }
         if self.boundary().is_empty() {
             return error;
@@ -423,8 +436,9 @@ impl Git {
             .ok()?;
             Some(String::from_utf8_lossy(&out).trim().to_string())
         };
-        let id = verify(rev)?;
-        verify(&format!("{id}^{{commit}}")).filter(|commit| *commit == id)?;
+        // An annotated tag peels to the commit it points at.
+        let object = verify(rev)?;
+        let id = verify(&format!("{object}^{{commit}}"))?;
         match verify(&format!("{rev}^0")) {
             Some(same) if same == id => Some(rev.to_string()),
             _ => Some(id),
@@ -679,8 +693,8 @@ impl Git {
         let Some(remote) = self.promisor() else {
             return Ok(());
         };
-        if self.bare.is_none() {
-            bail!("{PARTIAL}");
+        if self.bare.is_none() && !self.fetches() {
+            bail!("{}", self.partial_refusal());
         }
         let mut input = ids.join("\n").into_bytes();
         input.push(b'\n');
@@ -701,7 +715,7 @@ impl Git {
         let mut input = missing.join("\n").into_bytes();
         input.push(b'\n');
         let mut fetch = self.command();
-        fetch.args([
+        fetch.env("GIT_TERMINAL_PROMPT", "0").args([
             "-c",
             "fetch.negotiationAlgorithm=noop",
             "fetch",
@@ -783,14 +797,53 @@ impl Git {
         .ok()?;
         let out = String::from_utf8_lossy(&out);
         out.lines().find_map(|line| {
-            let (key, value) = line.split_once(' ')?;
+            let (key, value) = line.split_once(' ').unwrap_or((line, "true"));
             match key.strip_prefix("remote.") {
                 Some(rest) => {
-                    (value == "true").then(|| rest.strip_suffix(".promisor").map(str::to_string))?
+                    truthy(value).then(|| rest.strip_suffix(".promisor").map(str::to_string))?
                 }
                 None => Some(value.to_string()),
             }
         })
+    }
+
+    /// A partial clone git may fetch into for the diff: its own config holds
+    /// only what an ordinary clone writes, so a fetch runs nothing it names.
+    /// System and global config are the machine's (#121).
+    fn fetches(&self) -> bool {
+        self.bare.is_none() && self.partial() && self.unusual().is_none()
+    }
+
+    /// Why a partial clone's missing blobs aren't fetched.
+    fn partial_refusal(&self) -> String {
+        match self.unusual() {
+            Some(key) => {
+                format!("{PARTIAL}: its config sets `{key}`, which could run a program on a fetch")
+            }
+            None => PARTIAL.to_string(),
+        }
+    }
+
+    fn unusual(&self) -> Option<String> {
+        self.unusual
+            .get_or_init(|| {
+                let Ok(out) = run(self
+                    .command()
+                    .args(["config", "--list", "-z", "--show-scope"]))
+                else {
+                    return Some("(unreadable config)".to_string());
+                };
+                let out = String::from_utf8_lossy(&out);
+                let mut fields = out.split('\0');
+                while let (Some(scope), Some(entry)) = (fields.next(), fields.next()) {
+                    let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+                    if matches!(scope, "local" | "worktree") && !cloned(key, value) {
+                        return Some(key.to_string());
+                    }
+                }
+                None
+            })
+            .clone()
     }
 
     /// The working tree's untracked files git doesn't ignore, as paths from
@@ -985,6 +1038,49 @@ pub fn command() -> Command {
 /// Why a range past a shallow clone's history isn't diffed, and the fix.
 pub const SHALLOW: &str =
     "shallow clone: the base commit isn't fetched (set fetch-depth: 0, or git fetch --unshallow)";
+
+/// A boolean config VALUE git reads as true.
+fn truthy(value: &str) -> bool {
+    ["true", "yes", "on", "1"]
+        .iter()
+        .any(|t| value.eq_ignore_ascii_case(t))
+}
+
+/// KEY, set to VALUE in a repository's own config, is one an ordinary clone
+/// or checkout writes and names no program: anything else (`uploadpack`,
+/// `core.sshCommand`, a credential helper, `url.*.insteadOf`, an include)
+/// keeps git from fetching. A remote's URL is a plain transport, never a
+/// remote helper (`ext::`).
+fn cloned(key: &str, value: &str) -> bool {
+    let (section, rest) = key.split_once('.').unwrap_or((key, ""));
+    let name = rest.rsplit('.').next().unwrap_or(rest);
+    let plain_url = || {
+        let scheme = value.split_once("://").map(|(s, _)| s);
+        match scheme {
+            Some(s) => matches!(s, "https" | "http" | "ssh" | "git" | "file"),
+            // A path, or scp-like `host:path`.
+            None => !value.contains("::") && !value.starts_with('-'),
+        }
+    };
+    match (section, name) {
+        ("core", n) => matches!(
+            n,
+            "repositoryformatversion"
+                | "filemode"
+                | "bare"
+                | "logallrefupdates"
+                | "ignorecase"
+                | "precomposeunicode"
+                | "symlinks"
+        ),
+        ("remote", "url") => plain_url(),
+        ("remote", n) => matches!(n, "fetch" | "promisor" | "partialclonefilter" | "tagopt"),
+        ("branch", n) => matches!(n, "remote" | "merge" | "rebase"),
+        ("extensions", n) => matches!(n, "partialclone" | "objectformat" | "worktreeconfig"),
+        ("user", n) => matches!(n, "name" | "email"),
+        _ => false,
+    }
+}
 
 /// The oldest git shapr runs: `--end-of-options` came in 2.24.
 const MIN_GIT: (u32, u32) = (2, 24);

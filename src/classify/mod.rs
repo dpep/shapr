@@ -430,7 +430,7 @@ fn defaults(change: &Change) -> Labels {
             let (method, reason) = match &file.trees {
                 Ok(trees) if trees.clean() => (Method::Ast, "code changed".to_string()),
                 Ok(_) => (Method::Line, "code changed".to_string()),
-                Err(why) => (Method::None, format!("not parsed: {why}")),
+                Err(why) => (Method::None, format!("not compared: {why}")),
             };
             let residual = Residual {
                 lines: Claim::default(),

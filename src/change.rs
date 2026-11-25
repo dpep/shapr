@@ -46,6 +46,13 @@ impl FileChange {
     pub fn language(&self) -> Option<&'static str> {
         self.trees.as_ref().ok().map(|t| t.language)
     }
+
+    /// Its hunks count toward the verdict, compared or not: a counted
+    /// category, except a test in a language shapr doesn't parse.
+    pub fn counts(&self) -> bool {
+        self.category.counted()
+            && (self.category != Category::Test || frontend::for_path(self.diff.path()).is_some())
+    }
 }
 
 /// Deepest nesting the classification walks; deeper code isn't compared.
@@ -63,6 +70,19 @@ pub const MAX_LINES: usize = 8_000;
 /// squared. Files past it aren't compared.
 pub const MAX_CHANGE_WORK: usize = 4 * MAX_LINES * MAX_LINES;
 
+/// Changed bytes that count as one changed line, about a one-line method:
+/// code packed onto a few long lines costs what it would on lines of its own.
+pub const LINE_BYTES: usize = 24;
+
+/// Largest side a file may have and be parsed; the largest Ruby or Rust
+/// file seen in real repositories is about 3 MB, and parsing and comparing
+/// take about a second per megabyte.
+pub const MAX_FILE_BYTES: usize = 4 << 20;
+
+/// Most children one node may have, the widest node of each side
+/// multiplied: aligning two bodies builds a table of that size.
+pub const MAX_WIDTH: usize = 1 << 24;
+
 /// DIFF's changed lines, removed plus added.
 fn changed_lines(diff: &FileDiff) -> usize {
     diff.hunks
@@ -71,20 +91,45 @@ fn changed_lines(diff: &FileDiff) -> usize {
         .sum()
 }
 
-/// Why a file of LINES changed lines isn't compared after SPENT work;
-/// `None` when it is.
-fn too_big(lines: usize, spent: usize) -> Option<String> {
+/// The bytes of DIFF's changed lines, removed in BEFORE plus added in AFTER.
+fn changed_bytes(diff: &FileDiff, before: &[u8], after: &[u8]) -> usize {
+    let bytes = |source: &[u8], lines: &mut dyn Iterator<Item = usize>| -> usize {
+        let all: Vec<&[u8]> = source.split(|&b| b == b'\n').collect();
+        lines.filter_map(|n| all.get(n - 1)).map(|l| l.len()).sum()
+    };
+    let removed = &mut diff.hunks.iter().flat_map(|h| h.removed.iter().copied());
+    let added = &mut diff.hunks.iter().flat_map(|h| h.added.iter().copied());
+    bytes(before, removed) + bytes(after, added)
+}
+
+/// Why a file of LINES changed lines holding BYTES isn't compared after
+/// SPENT work; `None` when it is. Its size is its lines, or its bytes in
+/// lines of [`LINE_BYTES`], whichever is more.
+fn too_big(lines: usize, bytes: usize, spent: usize) -> Option<String> {
+    let size = lines.max(bytes.div_ceil(LINE_BYTES));
     if lines > MAX_LINES {
+        Some(format!("too big: {lines} changed lines, past {MAX_LINES}"))
+    } else if size > MAX_LINES {
         Some(format!(
-            "too big to compare: {lines} changed lines, past {MAX_LINES}"
+            "too big: {bytes} changed bytes, past {}",
+            MAX_LINES * LINE_BYTES
         ))
-    } else if spent + lines * lines > MAX_CHANGE_WORK {
+    } else if spent + size * size > MAX_CHANGE_WORK {
         Some(format!(
-            "too big to compare: the change's files' changed lines, squared, pass {MAX_CHANGE_WORK}"
+            "too big: the change's files' changed lines, squared, pass {MAX_CHANGE_WORK}"
         ))
     } else {
         None
     }
+}
+
+/// Why trees this big aren't compared; `None` when they are.
+fn too_wide(before: &Tree, after: &Tree) -> Option<String> {
+    let widest = |t: &Tree| t.nodes.iter().map(|n| n.children.len()).max().unwrap_or(0);
+    let (b, a) = (widest(before), widest(after));
+    (b.saturating_mul(a) > MAX_WIDTH).then(|| {
+        format!("too big: a node of {b} children before and {a} after, past {MAX_WIDTH} multiplied")
+    })
 }
 
 /// Reads and parses every file the diff names. BEFORE and AFTER are the
@@ -202,14 +247,26 @@ fn file_change(
         let lines = changed_lines(&diff);
         match frontend::for_path(diff.path()) {
             None => Err(format!("no frontend for {}", diff.path())),
-            Some(_) if let Some(why) = too_big(lines, *spent) => Err(why),
+            Some(_) if lines > MAX_LINES => Err(too_big(lines, 0, 0).unwrap_or_default()),
             Some(frontend) => before.and_then(|before| {
-                *spent += lines * lines;
                 let after = read(blobs, diff.new_blob.as_deref(), diff.new_path.as_deref())?;
+                let largest = before.len().max(after.len());
+                if largest > MAX_FILE_BYTES {
+                    return Err(format!("too big: {largest} bytes, past {MAX_FILE_BYTES}"));
+                }
+                let bytes = changed_bytes(&diff, &before, &after);
+                if let Some(why) = too_big(lines, bytes, *spent) {
+                    return Err(why);
+                }
+                let size = lines.max(bytes.div_ceil(LINE_BYTES));
+                *spent += size * size;
                 let before = frontend.parse(before);
                 let after = frontend.parse(after);
                 if before.depth.max(after.depth) > MAX_DEPTH {
                     return Err(format!("code nested deeper than {MAX_DEPTH} levels"));
+                }
+                if let Some(why) = too_wide(&before, &after) {
+                    return Err(why);
                 }
                 let sites = diff
                     .hunks
@@ -529,12 +586,19 @@ mod tests {
 
     #[test]
     fn a_file_or_a_change_past_its_lines_isnt_compared() {
-        assert_eq!(too_big(MAX_LINES, 0), None);
-        assert!(too_big(MAX_LINES + 1, 0).unwrap().contains("past"));
-        let rest = MAX_CHANGE_WORK - MAX_LINES * MAX_LINES;
-        assert_eq!(too_big(MAX_LINES, rest), None);
+        assert_eq!(too_big(MAX_LINES, 0, 0), None);
         assert!(
-            too_big(MAX_LINES, rest + 1)
+            too_big(MAX_LINES + 1, 0, 0)
+                .unwrap()
+                .contains("lines, past")
+        );
+        let bytes = MAX_LINES * LINE_BYTES;
+        assert_eq!(too_big(2, bytes, 0), None);
+        assert!(too_big(2, bytes + 1, 0).unwrap().contains("bytes, past"));
+        let rest = MAX_CHANGE_WORK - MAX_LINES * MAX_LINES;
+        assert_eq!(too_big(MAX_LINES, 0, rest), None);
+        assert!(
+            too_big(MAX_LINES, 0, rest + 1)
                 .unwrap()
                 .contains("the change's")
         );

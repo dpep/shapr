@@ -125,8 +125,8 @@ A hunk's `verdict` is the first that applies:
 | `none` | The file is `docs` or `fixture`. |
 | `none` | shapr has no parser for the file, and its changed lines differ only in trailing whitespace and blank lines (indentation counts: YAML, Python and Makefiles read it). |
 | `structure`, `behavior`, `mixed` | A `code`, `test`, `config` or `manifest` file shapr compared (`evidence.comparison` `"ast"` or `"line"`): `structure` when every part is structure, `behavior` when none is, `mixed` otherwise. |
-| `behavior` | A `config` or `manifest` file shapr has no parser for: its text changed beyond whitespace, and that text is the setting. |
-| `unknown` | Anything else: an `unknown` file, or `code` or `test` whose content couldn't be read (`evidence.comparison` `"none"`). |
+| `behavior` | A `code`, `test`, `config` or `manifest` file shapr didn't compare (`evidence.comparison` `"none"`): a config or manifest has no parser, and its text is the setting; code too big, nested too deep or unreadable is `logic` its reason names, never left out of the verdict on its own say. |
+| `unknown` | Anything else: an `unknown` file, or a `test` file in a language shapr doesn't parse. |
 
 The change's `verdict` rolls up the hunks whose verdict is `structure`,
 `behavior` or `mixed`: `structure` when every part among them is structure,
@@ -348,11 +348,12 @@ every name that differs passes these checks:
   language calls those without a call site shapr can see.
 - A public method of a Rails application's or engine's controller, mailer,
   job or channel (a file under `app/controllers/`, `app/mailers/`,
-  `app/jobs/` or `app/channels/` of a directory, at any depth, holding
-  `config/application.rb` or an engine's `lib/**/engine.rb`) isn't renamed:
-  routes, templates, `deliver_later` and `perform_later` reach it by name. A
-  job or mailer class elsewhere, and an engine declared in another file, are
-  documented limits.
+  `app/jobs/` or `app/channels/` at any depth, in a repository holding a
+  `config/application.rb` or an `engine.rb` anywhere, so packs and engines
+  count wherever they sit) isn't renamed: routes, templates,
+  `deliver_later` and `perform_later` reach it by name. A job or mailer
+  class elsewhere, and an engine declared in a file not named `engine.rb`,
+  are documented limits.
 - A class or module (in Rust a struct, enum, union, trait or `mod`) renames
   like a constant, held to every rule here: in a library's public surface
   it assumes `public_api`. It isn't renamed in a Ruby repository that loads
@@ -481,16 +482,22 @@ extensionless DSL files RuboCop includes by default (`Gemfile`, `Rakefile`,
 the like; a file found only by its shebang is not) (parsed with prism) and `"rust"` for `.rs` (parsed with
 tree-sitter). Any other file is `null` and its hunks `logic`.
 
-A parsed file isn't compared, and its hunks are `unknown` with
-`parsed: false` and a reason saying why, when its code nests deeper than
+A parsed file isn't compared, and its hunks are `logic` (verdict
+`behavior`) with `parsed: false` and a reason saying why, when its code nests deeper than
 10,000 levels, or when it is too big to compare: its changed lines (removed
 plus added) pass 8,000 (4,000 lines rewritten in place, or 8,000 added),
-or the change's compared files' changed lines, squared and summed, pass
-256,000,000, charged smallest file first (so files named to sort first
-can't push a small edit out). Comparison grows with the square of the changed
-lines: removed lines are paired with added ones, and a file only added has
-its declarations compared with each other; a 4,000-line file shuffled, or
-8,000 one-line methods added, take seconds.
+or its changed bytes pass 192,000 (24 bytes, about a one-line method, count
+as a line, so code packed onto a few long lines costs what it would on lines
+of its own), or the change's compared files' sizes (changed lines, or changed
+bytes in lines, whichever is more), squared and summed, pass 256,000,000,
+charged smallest file first (so files named to sort first can't push a small
+edit out); or when a side is over 4 MiB, or its widest node's children times
+the other side's pass 16,777,216 (aligning two bodies builds a table of
+that size). Comparison grows with the square of the changed code: removed
+lines are paired with added ones, and a file only added has its
+declarations compared with each other; a 4,000-line file shuffled, or 8,000
+one-line methods added, take seconds. The largest Ruby or Rust file seen in
+real repositories is about 3 MB.
 
 The rules above
 are stated in Ruby's terms; for Rust:

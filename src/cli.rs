@@ -39,7 +39,8 @@ EXAMPLES                          each is a git command: shapr X is git show/dif
   Ruby and Rust are parsed; hunks in other files are `logic`, confidence 0. Only
   code, test, config and manifest files count toward the verdict: a docs-only change
   is `none` (so is test data under fixtures/ or testdata/), and lockfiles, vendored and binary files and unparsed languages are
-  `unknown`, counted in summary.verdicts.
+  `unknown`, counted in summary.verdicts. Ruby or Rust shapr didn't compare (too
+  big, nested too deep) is `logic`, inside the verdict.
 
 GITHUB (experimental: the forms, meta.source and the cache may change before 1.0)
   The argument may name a pull request (https://github.com/OWNER/REPO/pull/N, OWNER/REPO#N,
@@ -174,7 +175,7 @@ const NO_INPUT: &str = "no input: name a change (shapr HEAD, shapr main..HEAD, s
 /// A clap error's message as one line: its first paragraph, which may
 /// continue onto indented lines (the missing arguments), without the tips.
 pub(crate) fn usage_message(error: &clap::Error) -> String {
-    let text = error.to_string();
+    let text = report::clap_text(error);
     let message: Vec<&str> = text
         .lines()
         .take_while(|l| !l.trim().is_empty())

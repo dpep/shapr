@@ -172,7 +172,7 @@ fn deeply_nested_code_is_classified_or_not_compared() {
         let hunk = &hunks(&report)[0];
         assert_eq!(hunk["parsed"], !too_deep, "{path} {}", lead(hunk)["reason"]);
         if too_deep {
-            assert_eq!(hunk["verdict"], "unknown", "{path}");
+            assert_eq!(hunk["verdict"], "behavior", "{path}");
             let reason = lead(hunk)["reason"].as_str().unwrap();
             assert!(reason.contains("nested deeper than"), "{reason}");
         }
@@ -324,13 +324,26 @@ fn text_output_quotes_control_characters_in_names() {
     let out = shapr(dir.path(), &["-J", "--", missing]);
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.lines().all(|l| !l.starts_with("::")), "{text}");
+    // So does an argument clap quotes in a usage error, keeping clap's own lines.
+    for args in [
+        &["--x\n::error::x"][..],
+        &["-J", "--x\n::error::x"],
+        &["norms", "--x\n::error::x"],
+        &["--norm-threshold=1\n::error::x"],
+    ] {
+        let out = shapr(dir.path(), args);
+        assert_eq!(out.status.code(), Some(64), "{out:?}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            text.lines().all(|l| !l.starts_with("::")),
+            "{args:?}: {text}"
+        );
+        assert!(text.contains("\\n::error::x"), "{args:?}: {text}");
+    }
 }
 
-/// A partial clone fetches missing blobs from its remote, running the
-/// `uploadpack` its config names: shapr never fetches into a repository it
-/// didn't clone, so the diff fails, saying why.
-#[test]
-fn a_partial_clone_fetches_nothing() {
+/// A blob:none clone of a two-commit upstream, with nothing checked out.
+fn partial_clone() -> (tempfile::TempDir, tempfile::TempDir) {
     let upstream = repo(&[
         &[("a.rb", METHOD)],
         &[("a.rb", "def greet(other)\n  other\nend\n")],
@@ -352,19 +365,57 @@ fn a_partial_clone_fetches_nothing() {
             ".",
         ],
     );
-    let marker = clone.path().join(".git/ran");
-    let pack = format!("touch '{}'; git-upload-pack", marker.display());
-    git(clone.path(), &["config", "remote.origin.uploadpack", &pack]);
-    let out = shapr(clone.path(), &["-J", "HEAD"]);
-    assert!(!marker.exists(), "ran the repository's uploadpack");
-    assert_eq!(out.status.code(), Some(2), "{out:?}");
-    let message = report(&out)["error"].as_str().unwrap().to_string();
-    assert!(message.contains("partial clone"), "{message}");
-    // git before 2.44 ignores GIT_NO_LAZY_FETCH, so shapr doesn't start.
-    let old = fake_git("2.43.0");
-    let message = error(&shapr_with(old.path(), clone.path(), &["-J", "HEAD"]), 2);
-    assert!(!marker.exists(), "ran the repository's uploadpack");
-    assert!(message.contains("2.44"), "{message}");
+    (upstream, clone)
+}
+
+/// An ordinary partial clone fetches the blobs the diff needs from its
+/// promisor remote, as git would.
+#[test]
+fn an_ordinary_partial_clone_fetches_what_the_diff_needs() {
+    let (upstream, clone) = partial_clone();
+    let out = shapr(clone.path(), &["-j", "HEAD"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(
+        report(&out)["hunks"],
+        report(&shapr(upstream.path(), &["-j", "HEAD"]))["hunks"]
+    );
+}
+
+/// A partial clone fetches missing blobs from its remote, running what its
+/// config names (`uploadpack`, `core.sshCommand`, a credential helper): one
+/// whose own config sets anything an ordinary clone doesn't fetches nothing,
+/// so the diff fails, saying why. git's true values all mark a promisor.
+#[test]
+fn a_partial_clone_with_config_it_didnt_clone_with_fetches_nothing() {
+    for (key, promisor) in [
+        ("remote.origin.uploadpack", "true"),
+        ("core.sshCommand", "Yes"),
+        ("credential.helper", "on"),
+    ] {
+        let (_upstream, clone) = partial_clone();
+        let marker = clone.path().join(".git/ran");
+        let program = format!("touch '{}'; git-upload-pack", marker.display());
+        let value = match key {
+            "credential.helper" => format!("!{program}"),
+            _ => program,
+        };
+        git(clone.path(), &["config", key, &value]);
+        git(
+            clone.path(),
+            &["config", "remote.origin.promisor", promisor],
+        );
+        let out = shapr(clone.path(), &["-J", "HEAD"]);
+        assert!(!marker.exists(), "{key}: ran the repository's program");
+        assert_eq!(out.status.code(), Some(2), "{key}: {out:?}");
+        let message = report(&out)["error"].as_str().unwrap().to_string();
+        assert!(message.contains("partial clone"), "{message}");
+        assert!(message.contains(&key.to_ascii_lowercase()), "{message}");
+        // git before 2.44 ignores GIT_NO_LAZY_FETCH, so shapr doesn't start.
+        let old = fake_git("2.43.0");
+        let message = error(&shapr_with(old.path(), clone.path(), &["-J", "HEAD"]), 2);
+        assert!(!marker.exists(), "{key}: ran the repository's program");
+        assert!(message.contains("2.44"), "{message}");
+    }
 }
 
 /// A directory holding a `git` that reports VERSION and runs the real one.
@@ -488,4 +539,24 @@ fn a_message_search_names_one_commit() {
         report(&found)["hunks"],
         report(&shapr(dir.path(), &["-j", "HEAD~1"]))["hunks"]
     );
+}
+
+/// An annotated tag names the commit it points at.
+#[test]
+fn an_annotated_tag_names_one_commit() {
+    let dir = repo(&[&[("lib/a.rb", METHOD)], &[("lib/a.rb", "def greet\nend\n")]]);
+    git(dir.path(), &["tag", "-a", "-m", "release", "v1"]);
+    let tagged = shapr(dir.path(), &["-j", "v1"]);
+    assert_eq!(tagged.status.code(), Some(0), "{tagged:?}");
+    assert_eq!(
+        report(&tagged)["hunks"],
+        report(&shapr(dir.path(), &["-j", "HEAD"]))["hunks"]
+    );
+    // A tag of a tree still isn't a commit.
+    git(
+        dir.path(),
+        &["tag", "-a", "-m", "tree", "t1", "HEAD^{tree}"],
+    );
+    let message = error(&shapr(dir.path(), &["-J", "t1"]), 64);
+    assert!(message.contains("one commit"), "{message}");
 }
