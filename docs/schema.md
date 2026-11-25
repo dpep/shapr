@@ -352,14 +352,18 @@ call is proven to reach one definition:
   and the method, on both sides, carry the same magic comments, which
   decide a literal's encoding and whether a string is frozen.
 - The call passes no splat, `**`, or `...`, and names each keyword once
-  with a plain symbol.
+  with a plain symbol. A call left passing nothing may drop its
+  parentheses with the argument (`fetch(retries: 3)` to `fetch`).
 
 What the search can't settle is an assumption, as for a rename; a method
 in a gem's `lib/` is `public_api` even when private, since a subclass
 outside the repository may override it. A subclass or prepended module in
 another package of an application isn't seen. Calls with another receiver
 (`stub.to_return(status: 200)`) reach a method shapr can't name, so they
-stay `logic`.
+stay `logic`. Where such a call is left passing no argument, or gains one
+where it passed none, the residual's `reason` says so: a call with no
+arguments may mean something else than its defaults (WebMock's bare
+`to_return` is an empty response sequence).
 
 `detail.restated` lists each argument, in the hunk's order: `method`, the
 method called; `parameter`, `name:` or `argument N` (1-based); `value`, the

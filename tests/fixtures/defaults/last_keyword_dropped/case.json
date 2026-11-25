@@ -1,0 +1,21 @@
+{
+  "description": "a call drops its only argument, a keyword equal to the method's literal default, and its parentheses with it",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "default_argument",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "default_argument",
+            "structure": true,
+            "assumptions": []
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "structure"
+    }
+  }
+}

@@ -160,6 +160,9 @@ pub struct Arguments {
     pub positional: Vec<NodeId>,
     /// Keyword arguments in order: the keyword and its value.
     pub keywords: Vec<(String, NodeId)>,
+    /// Offsets of the call's own bytes that delimit its argument list
+    /// (Ruby's parentheses), which a call passing none may leave out.
+    pub delimiters: Vec<usize>,
 }
 
 /// A language construct that tells one kind of logic change from another.

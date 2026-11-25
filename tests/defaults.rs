@@ -28,6 +28,26 @@ fn the_reason_names_the_argument_and_the_method() {
     );
 }
 
+/// A call with no arguments may mean something else than its defaults
+/// (WebMock's bare `to_return` is an empty response sequence).
+#[test]
+fn a_near_miss_that_empties_the_call_says_so() {
+    assert_eq!(
+        reason("x.fetch(retries: 3)", "x.fetch"),
+        "drops `retries: 3`, leaving `fetch` with no arguments, not shown to restate a default: the call has a receiver, so which `fetch` it reaches is unknown"
+    );
+    assert_eq!(
+        reason("x.fetch", "x.fetch(retries: 3)"),
+        "adds `retries: 3` to `fetch`, which passed none, not shown to restate a default: the call has a receiver, so which `fetch` it reaches is unknown"
+    );
+    let kept = reason("x.fetch(x, retries: 3)", "x.fetch(x)");
+    assert!(!kept.contains("no arguments"), "{kept}");
+    assert_eq!(
+        reason("fetch(retries: 3)", "fetch"),
+        "drops `retries: 3`, `fetch`'s default"
+    );
+}
+
 /// A hunk's reason for one class and file, as `reason` reads it.
 fn reason_of(before: &[(&str, &str)], after: &[(&str, &str)]) -> String {
     let report = classify(before, after);
