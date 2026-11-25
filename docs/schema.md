@@ -837,7 +837,7 @@ order, when the code shows what changed; absent when it shows none of these
 | `negation_removed` | The same, the other way. |
 | `guard_added` | A branch's test (an `if`, a modifier `if`/`unless`, a `when`, a match arm, ...) holds a check for a missing or empty value that the before side doesn't: Ruby `nil?`, `empty?`, `blank?`, `present?` with a receiver; Rust `is_none()`, `is_some()`, `is_empty()`. A check outside a branch's test isn't one. |
 | `guard_removed` | The same, the other way. |
-| `flag_computed` | A call passing `true` or `false` as a positional argument on the before side is, on the after side, the same call (name, receiver, every other argument) passing a computed value there: one that reads a variable, field or parameter or calls something (`&[]` and constants don't). The callee now decides on runtime state. This alone adds `condition`. Not in a test file or test item, where `eq(true)` is an expected value. |
+| `flag_computed` | A call passing `true` or `false` as a positional argument on the before side is, on the after side, the same call (name, receiver, every other argument) passing a computed value there, neither call left unchanged on the other side: one that reads a variable, field or parameter or calls something (`&[]` and constants don't). The callee now decides on runtime state. This alone adds `condition`. Not in a test file or test item, where `eq(true)` is an expected value. |
 
 The text output shows it beside the facet: `[condition (flag_computed)]`.
 

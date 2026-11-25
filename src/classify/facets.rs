@@ -655,12 +655,17 @@ impl<'a> Parsed<'a> {
             .filter(|&id| self.frontend.construct(bt, id) == Some(Construct::Flag))
             .filter_map(|flag| place(bt, flag))
             .any(|(call, path)| {
-                calls.iter().any(|&other| {
-                    let (old, new) = (bt.node(call), at.node(other));
-                    old.role == new.role
-                        && old.name == new.name
-                        && self.differs_only_at(bt, call, at, other, &path)
-                })
+                // Both calls changed: the flagged one gone, the computed one new.
+                let gone =
+                    |t: &Tree, ids: &[NodeId], h: u64| !ids.iter().any(|&i| t.node(i).hash == h);
+                gone(at, a, bt.node(call).hash)
+                    && calls.iter().any(|&other| {
+                        let (old, new) = (bt.node(call), at.node(other));
+                        gone(bt, b, new.hash)
+                            && old.role == new.role
+                            && old.name == new.name
+                            && self.differs_only_at(bt, call, at, other, &path)
+                    })
             })
     }
 

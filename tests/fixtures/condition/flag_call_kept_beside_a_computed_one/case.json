@@ -1,0 +1,21 @@
+{
+  "description": "lookup(o, true, n) stays while a lookup(o, singleton, n) line is rewritten beside it (trekr): the flag call is still there, so no flag_computed",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "logic",
+            "detail": {
+              "$not": {
+                "condition": {
+                  "$not": null
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
