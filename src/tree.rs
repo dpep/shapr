@@ -1194,6 +1194,8 @@ fn line_facts(tree: &Tree) -> Vec<LineFacts> {
     comments.sort_by_key(|c| c.start);
     let mut next = comments.iter().peekable();
     let mut in_comment: Option<&Span> = None;
+    // Cursors into the sorted line starts and verbatim spans, as offsets only grow.
+    let (mut line, mut verbatim) = (0, 0);
     for (offset, byte) in tree.source.iter().enumerate() {
         if in_comment.is_some_and(|c| offset >= c.end) {
             in_comment = None;
@@ -1201,11 +1203,21 @@ fn line_facts(tree: &Tree) -> Vec<LineFacts> {
         while next.peek().is_some_and(|c| c.start <= offset) {
             in_comment = next.next();
         }
+        while tree.line_starts.get(line + 1).is_some_and(|&s| s <= offset) {
+            line += 1;
+        }
+        while tree.verbatim.get(verbatim).is_some_and(|s| s.end <= offset) {
+            verbatim += 1;
+        }
         let comment = in_comment.is_some_and(|c| offset < c.end);
-        if byte.is_ascii_whitespace() && (comment || !tree.verbatim(offset)) {
+        let kept = tree
+            .verbatim
+            .get(verbatim)
+            .is_some_and(|s| s.contains(&offset));
+        if byte.is_ascii_whitespace() && (comment || !kept) {
             continue;
         }
-        let line = &mut facts[tree.line_of(offset) - 1];
+        let line = &mut facts[line];
         if comment {
             line.comment = true;
         } else {

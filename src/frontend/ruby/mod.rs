@@ -278,7 +278,11 @@ fn sets_encoding(source: &[u8], at: &Span) -> bool {
     } else {
         0
     };
-    let line = source[..at.start].iter().filter(|&&b| b == b'\n').count();
+    // Only lines 0 and 1 matter: stop counting at 2, or every comment rescans the file.
+    let line = (source[..at.start].iter())
+        .filter(|&&b| b == b'\n')
+        .take(2)
+        .count();
     let line_start = source[..at.start]
         .iter()
         .rposition(|&b| b == b'\n')
