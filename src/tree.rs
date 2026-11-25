@@ -266,6 +266,9 @@ pub struct Semantics {
     /// Methods the runtime calls when a method is defined (Ruby's
     /// `method_added`): defining one changes what the definitions after it do.
     pub definition_hooks: &'static [&'static str],
+    /// A parameter can declare a default value a call may leave out (Ruby's
+    /// `retries: 3`): where `default_argument` looks.
+    pub default_arguments: bool,
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A

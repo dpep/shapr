@@ -38,7 +38,7 @@ pub(super) fn run(
         let Some(frontend) = frontend::for_path(file.diff.path()) else {
             continue;
         };
-        if !trees.clean() {
+        if !trees.clean() || !trees.before.semantics.default_arguments {
             continue;
         }
         let counts = OnceCell::new();

@@ -176,7 +176,8 @@ literals), and `private_by_default` (definitions are private unless marked
 load-time code beside it may observe it: Ruby) with `definition_hooks`
 (methods the runtime calls on each definition after them, `method_added`:
 a move keeps a method's order with a hook and, below one, with every other
-method).
+method), and `default_arguments` (a parameter may declare a default:
+Ruby; `default_argument` runs only there).
 `TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
 whitespace. `TreeBuilder::respell(variant, canonical)` gives a node with

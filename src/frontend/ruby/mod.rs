@@ -74,6 +74,7 @@ impl Frontend for Ruby {
             reserved: reserved::RESERVED,
             definitions_run: true,
             definition_hooks: &["method_added", "singleton_method_added"],
+            default_arguments: true,
             spelling: Spelling {
                 sigils: &['@', '$'],
                 suffixes: &['?', '!', '='],

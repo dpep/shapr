@@ -127,3 +127,17 @@ fn a_directive_naming_the_method_stops_it() {
         "drops `retries: 3`, not shown to restate a default: a directive names it in a.rb"
     );
 }
+
+#[test]
+fn a_language_without_default_arguments_gets_no_default_reason() {
+    let file = |call: &str| {
+        format!(
+            "fn fetch(key: u32, retries: Option<u32>) -> u32 {{\n    key\n}}\n\nfn go(x: u32) -> u32 {{\n    {call}\n}}\n"
+        )
+    };
+    let report = rust(&file("fetch(x)"), &file("fetch(x, None)"));
+    let reason = lead(&hunks(&report)[0])["reason"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(!reason.contains("default"), "{reason}");
+}
