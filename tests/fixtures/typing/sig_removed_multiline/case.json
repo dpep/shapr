@@ -1,0 +1,27 @@
+{
+  "description": "a sig block over several lines removed is typing",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ],
+            "lines": {
+              "before": [
+                {
+                  "start": 5,
+                  "count": 3
+                }
+              ],
+              "after": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

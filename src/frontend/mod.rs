@@ -74,6 +74,16 @@ pub trait Frontend: Sync {
     /// language, if it does: `None` for code that loads nothing, and in a
     /// language whose files aren't loaded by statements.
     fn load(&self, tree: &Tree, id: NodeId, path: &str) -> Option<Load>;
+
+    /// Whether the library defining the file at `path`'s type annotations
+    /// is known loaded at runtime (Ruby: the nearest lockfile names
+    /// sorbet-runtime), so those marked [`Flags::UNCHECKED`] do nothing.
+    /// `read` reads a file at the after revision.
+    ///
+    /// [`Flags::UNCHECKED`]: crate::tree::Flags::UNCHECKED
+    fn types_loaded(&self, _path: &str, _read: &dyn Fn(&str) -> Option<Vec<u8>>) -> bool {
+        false
+    }
 }
 
 /// A statement loading another file, as [`Frontend::load`] reads it.

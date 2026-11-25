@@ -1,0 +1,11 @@
+{
+  "description": "a gem RBI marked linguist-generated is generated, not types",
+  "expect": {
+    "hunks": [
+      {
+        "category": "generated",
+        "verdict": "unknown"
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "extend T::Helpers and abstract! added are typing; sorbet-runtime enforces abstract!",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

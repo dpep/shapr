@@ -1,0 +1,19 @@
+{
+  "description": "T.must wrapped around a value that may be nil raises on nil at runtime: typing, not structure",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

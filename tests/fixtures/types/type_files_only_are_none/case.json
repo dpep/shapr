@@ -1,0 +1,15 @@
+{
+  "description": "a change touching only RBI files has verdict none",
+  "expect": {
+    "hunks": [
+      {
+        "category": "types",
+        "verdict": "none",
+        "review_lines": 0
+      }
+    ],
+    "summary": {
+      "verdict": "none"
+    }
+  }
+}

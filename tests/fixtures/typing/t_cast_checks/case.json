@@ -1,0 +1,18 @@
+{
+  "description": "T.cast checks its value at runtime unless checked: false, so it is not structure",
+  "expect": {
+    "hunks": [
+      {
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

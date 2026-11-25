@@ -243,6 +243,8 @@ fn file_change(
         Err("binary file".to_string())
     } else if category == Category::Fixture {
         Err("test data, not classified".to_string())
+    } else if category == Category::Types {
+        Err("type declarations, not classified".to_string())
     } else {
         let lines = changed_lines(&diff);
         match frontend::for_path(diff.path()) {
@@ -313,6 +315,9 @@ pub enum Category {
     /// Test data: under a `fixtures/`, `__fixtures__/` or `testdata/`
     /// directory. Not classified; the tests that read it judge it.
     Fixture,
+    /// Type declarations only a type checker reads: Sorbet's RBI files,
+    /// RBS signatures. Not classified.
+    Types,
     Config,
     /// A dependency manifest.
     Manifest,
@@ -327,11 +332,12 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 10] = [
+    pub const ALL: [Category; 11] = [
         Category::Code,
         Category::Test,
         Category::Docs,
         Category::Fixture,
+        Category::Types,
         Category::Config,
         Category::Manifest,
         Category::Generated,
@@ -354,6 +360,7 @@ impl Category {
             Category::Test => "test",
             Category::Docs => "docs",
             Category::Fixture => "fixture",
+            Category::Types => "types",
             Category::Config => "config",
             Category::Manifest => "manifest",
             Category::Generated => "generated",
@@ -363,8 +370,9 @@ impl Category {
         }
     }
 
-    /// A fixture directory wins over the name rules, but not over a binary,
-    /// a vendored file or a set linguist attribute.
+    /// A fixture directory, then a type declaration, wins over the name
+    /// rules, but not over a binary, a vendored file or a set linguist
+    /// attribute; a type directory's prose stays docs.
     pub fn of(path: &str, binary: bool, linguist: Linguist) -> Category {
         let category = Category::by_name(path, binary, linguist);
         match category {
@@ -372,6 +380,8 @@ impl Category {
             Category::Generated if linguist.generated == Some(true) => category,
             Category::Docs if linguist.documentation == Some(true) => category,
             _ if fixture(path) => Category::Fixture,
+            Category::Docs => category,
+            _ if types(path) => Category::Types,
             _ => category,
         }
     }
@@ -482,6 +492,16 @@ fn fixture(path: &str) -> bool {
     let dirs = path.rsplit_once('/').map_or("", |(d, _)| d);
     dirs.split('/')
         .any(|d| matches!(d, "fixtures" | "__fixtures__" | "testdata"))
+}
+
+/// Type declarations: an `.rbi` or `.rbs` file, or under an `rbi/`
+/// directory at any depth (`sorbet/rbi/`) or a top-level `sig/` (RBS).
+fn types(path: &str) -> bool {
+    let dirs = path.rsplit_once('/').map_or("", |(d, _)| d);
+    path.ends_with(".rbi")
+        || path.ends_with(".rbs")
+        || dirs.split('/').any(|d| d == "rbi")
+        || path.starts_with("sig/")
 }
 
 /// A test file: under a `spec`, `test`, `tests` or `__tests__` directory, or
@@ -638,6 +658,14 @@ mod tests {
             ("app/models/vendor/y.rb", "code"),
             ("lib/vendored.rb", "code"),
             ("Makefile", "unknown"),
+            ("lib/a.rbi", "types"),
+            ("sorbet/rbi/gems/x@1.rbi", "types"),
+            ("sorbet/rbi/todo.rb", "types"),
+            ("spec/a.rbi", "types"),
+            ("sig/a.rbs", "types"),
+            ("lib/sig/a.rb", "code"),
+            ("sorbet/rbi/README.md", "docs"),
+            ("spec/fixtures/a.rbi", "fixture"),
         ] {
             assert_eq!(category(path), want, "{path}");
         }

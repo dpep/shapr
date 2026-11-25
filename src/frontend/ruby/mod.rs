@@ -4,6 +4,7 @@ pub(crate) mod generated;
 mod reserved;
 mod roles;
 mod signature;
+mod sorbet;
 pub(crate) mod variants;
 
 use super::{Arguments, Construct, Frontend, Signature};
@@ -13,15 +14,15 @@ use ruby_prism::{Location, Node, Visit};
 
 pub struct Ruby;
 
-/// Magic-comment keys Ruby or Sorbet act on, normalized (lowercase, `_`).
-/// prism reports every `# key: value` comment, so the key decides.
+/// Magic-comment keys Ruby acts on, normalized (lowercase, `_`). prism
+/// reports every `# key: value` comment, so the key decides. Sorbet's
+/// `typed` sigil is a comment: a type checker reads it, Ruby doesn't.
 const MAGIC_KEYS: &[&str] = &[
     "frozen_string_literal",
     "encoding",
     "coding",
     "warn_indent",
     "shareable_constant_value",
-    "typed",
 ];
 
 /// Ruby DSL files without an extension, as RuboCop includes them by default.
@@ -88,6 +89,7 @@ impl Frontend for Ruby {
         Walker {
             builder: &mut builder,
             roles: roles::Roles::default(),
+            sorbet: sorbet::Sorbet::of(&result),
             entered: Entered::default(),
             parents: Vec::new(),
         }
@@ -229,6 +231,10 @@ impl Frontend for Ruby {
     fn load(&self, tree: &Tree, id: NodeId, path: &str) -> Option<super::Load> {
         signature::load(tree, id, path)
     }
+
+    fn types_loaded(&self, path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> bool {
+        sorbet::runtime(path, read)
+    }
 }
 
 fn is_directive(text: &[u8]) -> bool {
@@ -277,6 +283,7 @@ fn span(loc: &Location<'_>) -> Span {
 struct Walker<'b> {
     builder: &'b mut TreeBuilder,
     roles: roles::Roles,
+    sorbet: sorbet::Sorbet,
     entered: Entered,
     /// The open prism nodes, as (kind, start), for [`variants::respell`].
     parents: Vec<(&'static str, usize)>,
@@ -335,7 +342,8 @@ impl<'pr> Visit<'pr> for Walker<'_> {
         let (kind, name, role) = self.facts(&node);
         self.builder
             .open(kind, span(&node.location()), name.as_deref(), role);
-        let flags = self.roles.flags(&node);
+        let statement = self.parents.last().is_some_and(|(k, _)| *k == "statements");
+        let flags = self.roles.flags(&node) | self.sorbet.flags(&node, statement);
         self.builder.flag(flags);
         self.respell(&node);
         self.parents.push((kind, node.location().start_offset()));
@@ -432,8 +440,10 @@ mod tests {
             .iter()
             .filter(|n| n.kind == "directive" && !n.comment)
             .count();
-        assert_eq!(directives, 3);
-        assert_eq!(kinds(&tree, true), ["comment", "comment"]);
+        assert_eq!(directives, 2);
+        // Sorbet's sigil: a type checker reads it, Ruby doesn't.
+        assert_eq!(kinds(&tree, true), ["comment", "comment", "comment"]);
+        assert!(tree.line(3).comment && !tree.line(3).code);
         assert!(tree.line(1).code && !tree.line(1).comment);
         assert!(tree.line(2).comment && !tree.line(2).code);
     }

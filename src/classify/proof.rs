@@ -31,14 +31,18 @@ pub enum Assumption {
     /// A moved unit matched several others equally well, so which one it
     /// came from is a guess.
     AmbiguousMatch,
+    /// The part changes only type annotations, and a runtime may check them
+    /// (sorbet-runtime): a value they reject raises.
+    RuntimeCheck,
 }
 
 impl Assumption {
-    pub const ALL: [Assumption; 4] = [
+    pub const ALL: [Assumption; 5] = [
         Assumption::UnseenUses,
         Assumption::SearchCapped,
         Assumption::PublicApi,
         Assumption::AmbiguousMatch,
+        Assumption::RuntimeCheck,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -47,6 +51,7 @@ impl Assumption {
             Assumption::SearchCapped => "search_capped",
             Assumption::PublicApi => "public_api",
             Assumption::AmbiguousMatch => "ambiguous_match",
+            Assumption::RuntimeCheck => "runtime_check",
         }
     }
 }

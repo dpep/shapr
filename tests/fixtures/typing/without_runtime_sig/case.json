@@ -1,0 +1,17 @@
+{
+  "description": "T::Sig::WithoutRuntime.sig does nothing at runtime: structure",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "typing",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": true
+          }
+        ]
+      }
+    ]
+  }
+}

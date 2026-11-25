@@ -22,6 +22,7 @@ mod rename;
 mod reorder;
 mod restyle;
 mod runs;
+mod typing;
 
 pub use facets::Facet;
 pub use moves::Context;
@@ -40,6 +41,7 @@ pub enum Kind {
     FormatOnly,
     CommentOnly,
     Restyle,
+    Typing,
     Reorder,
     DefaultArgument,
     Rename,
@@ -50,10 +52,11 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 11] = [
         Kind::FormatOnly,
         Kind::CommentOnly,
         Kind::Restyle,
+        Kind::Typing,
         Kind::Reorder,
         Kind::DefaultArgument,
         Kind::Rename,
@@ -73,6 +76,7 @@ impl Kind {
             Kind::FormatOnly => "format_only",
             Kind::CommentOnly => "comment_only",
             Kind::Restyle => "restyle",
+            Kind::Typing => "typing",
             Kind::Reorder => "reorder",
             Kind::DefaultArgument => "default_argument",
             Kind::Rename => "rename",
@@ -337,6 +341,7 @@ const PASSES: &[Pass] = &[
     restyle::run,
     reorder::run,
     defaults::run,
+    typing::run,
     format::rest,
 ];
 

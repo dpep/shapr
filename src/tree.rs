@@ -208,6 +208,17 @@ impl Flags {
     /// A [`Role::DynamicName`] that reaches a field, not a method (Ruby's
     /// `instance_variable_get(n)`).
     pub const FIELD: Flags = Flags(1 << 9);
+    /// A statement that only declares types for a type checker (Sorbet's
+    /// `sig { ... }`, `extend T::Sig`): `typing` compares the code without it.
+    pub const TYPING: Flags = Flags(1 << 10);
+    /// A call that returns its first positional argument, perhaps after
+    /// checking its type (Sorbet's `T.let(x, T)`, `T.must(x)`): `typing`
+    /// compares the code with the argument in its place.
+    pub const TYPE_CAST: Flags = Flags(1 << 11);
+    /// A [`Flags::TYPING`] or [`Flags::TYPE_CAST`] node no runtime checks
+    /// (`T.unsafe(x)`, `T::Sig::WithoutRuntime.sig`), once its type library
+    /// is loaded ([`Frontend::types_loaded`](crate::frontend::Frontend::types_loaded)).
+    pub const UNCHECKED: Flags = Flags(1 << 12);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0
@@ -616,6 +627,13 @@ impl Tree {
         }
     }
 
+    /// `id`'s [`Node::hash`] with each code child's hash replaced by
+    /// `child`'s, the child left out where it gives none. For a node with
+    /// children: a leaf's hash reads its bytes.
+    pub fn hash_with(&self, id: NodeId, child: impl Fn(NodeId) -> Option<u64>) -> u64 {
+        hash(self, id.0 as usize, false, child)
+    }
+
     /// The stretches of `id`'s own span outside its children.
     pub fn own_spans(&self, id: NodeId) -> Vec<Span> {
         let mut out = Vec::new();
@@ -968,7 +986,8 @@ impl TreeBuilder {
                 .collect(),
         );
         for i in (0..tree.nodes.len()).rev() {
-            tree.nodes[i].hash = hash(&tree, i, self.leaf[i], |n| n.hash);
+            let own = hash(&tree, i, self.leaf[i], |c| Some(tree.node(c).hash));
+            tree.nodes[i].hash = own;
             let canonical = self.canonical[i].as_ref();
             let (canon, transparent) = canon(&tree, i, self.leaf[i], canonical.map(|c| &c.1));
             tree.nodes[i].canon = canon;
@@ -1030,8 +1049,9 @@ impl TreeBuilder {
 
 /// Kind, then children in order with the non-whitespace text of the node's
 /// own span between them. Comments are skipped; leaves hash every byte.
-/// `child` reads a child's hash (its `hash` or its `canon`).
-fn hash(tree: &Tree, i: usize, leaf: bool, child: fn(&Node) -> u64) -> u64 {
+/// `child` reads a child's hash (its `hash` or its `canon`); a child it
+/// gives none for is left out, as a comment is.
+fn hash(tree: &Tree, i: usize, leaf: bool, child: impl Fn(NodeId) -> Option<u64>) -> u64 {
     let node = &tree.nodes[i];
     let mut h = DefaultHasher::new();
     node.kind.hash(&mut h);
@@ -1042,9 +1062,11 @@ fn hash(tree: &Tree, i: usize, leaf: bool, child: fn(&Node) -> u64) -> u64 {
     tree.walk_own(NodeId(i as u32), |piece| match piece {
         Piece::Text(text) => hash_text(tree, text, &mut h),
         Piece::Child(c) if !tree.node(c).comment => {
-            // Marks where a child sits, so text cannot slide across it.
-            h.write_u8(MARK);
-            child(tree.node(c)).hash(&mut h);
+            if let Some(child) = child(c) {
+                // Marks where a child sits, so text cannot slide across it.
+                h.write_u8(MARK);
+                child.hash(&mut h);
+            }
         }
         Piece::Child(_) => {}
     });
@@ -1091,7 +1113,7 @@ fn canon(tree: &Tree, i: usize, leaf: bool, canonical: Option<&Canonical>) -> (u
             return (code().next().expect("one child").canon, true);
         }
         Some(Canonical::Transparent) | None => {
-            return (hash(tree, i, leaf, |n| n.canon), false);
+            return (hash(tree, i, leaf, |c| Some(tree.node(c).canon)), false);
         }
     }
     (h.finish(), false)

@@ -1,0 +1,17 @@
+{
+  "description": "T.unsafe returns its value: structure where the lockfile shows sorbet-runtime defines T",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "typing",
+        "verdict": "structure",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": true
+          }
+        ]
+      }
+    ]
+  }
+}

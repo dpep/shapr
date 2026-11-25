@@ -1,0 +1,33 @@
+{
+  "description": "a sig added above a method changes only types; sorbet-runtime checks it, so it is not structure",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ],
+            "lines": {
+              "before": [],
+              "after": [
+                {
+                  "start": 5,
+                  "count": 1
+                }
+              ]
+            },
+            "review_lines": 1
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

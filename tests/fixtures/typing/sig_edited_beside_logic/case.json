@@ -1,0 +1,51 @@
+{
+  "description": "a sig edit beside a body edit is a typing part and a logic residual",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "logic",
+        "verdict": "behavior",
+        "parts": [
+          {
+            "kind": "typing",
+            "structure": false,
+            "assumptions": [
+              "runtime_check"
+            ],
+            "lines": {
+              "before": [
+                {
+                  "start": 5,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 5,
+                  "count": 1
+                }
+              ]
+            }
+          },
+          {
+            "kind": "logic",
+            "lines": {
+              "before": [
+                {
+                  "start": 7,
+                  "count": 1
+                }
+              ],
+              "after": [
+                {
+                  "start": 7,
+                  "count": 1
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
