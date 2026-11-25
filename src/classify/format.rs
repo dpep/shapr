@@ -5,6 +5,7 @@ use super::align::{Alignments, Cover};
 use super::site::{self, CodeLines, Side, Significance};
 use super::{Claim, Confidence, Evidence, Kind, LINE_CAP, Labels, Method, Outside, Part};
 use crate::change::{Change, Trees};
+use crate::diff::Hunk;
 use crate::tree::{NodeId, Span, Tree};
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
@@ -13,9 +14,13 @@ use std::collections::{BTreeSet, HashMap};
 /// output leaves it out, as the kind says as much.
 pub const PLAIN_LOGIC: &str = "code differs beyond whitespace and comments";
 
+/// The reason of a hunk whose comment disables or enables unchanged code.
+const TOGGLED: &str = "a comment it opens or closes turns unchanged lines between code and comment";
+
 pub(super) fn run(change: &Change, _: &Alignments, _: &dyn Outside, labels: &mut Labels) {
     for (file, labels) in change.files.iter().zip(labels.iter_mut()) {
         let Ok(trees) = &file.trees else { continue };
+        let toggled = toggled(trees, &file.diff.hunks);
         for (site, label) in trees.sites.iter().zip(labels.iter_mut()) {
             if !label.open() {
                 continue;
@@ -32,6 +37,10 @@ pub(super) fn run(change: &Change, _: &Alignments, _: &dyn Outside, labels: &mut
                 ),
                 (true, false) => (Kind::CommentOnly, "same code; comments differ"),
                 (false, _) => (Kind::Logic, PLAIN_LOGIC),
+            };
+            let (kind, reason) = match label.changed.intersect(&toggled).is_empty() {
+                false if kind.is_structure() => (Kind::Logic, TOGGLED),
+                _ => (kind, reason),
             };
             // Text equality can't see a change in how whitespace parses
             // (`puts -x` vs `puts - x`): structure needs tree evidence.
@@ -97,12 +106,16 @@ pub(super) fn rest(change: &Change, alignments: &Alignments, _: &dyn Outside, la
         let Ok(trees) = &change.files[f].trees else {
             continue;
         };
+        let toggled = toggled(trees, &change.files[f].diff.hunks);
         for (cover, label) in aligned.covers.iter().zip(labels[f].iter_mut()) {
             let free = label.unclaimed();
             if free.is_empty() {
                 continue;
             }
-            let logic = differing(trees, cover, &cover.changed(), &label.changed, &free);
+            let mut logic = differing(trees, cover, &cover.changed(), &label.changed, &free);
+            let toggling = free.intersect(&toggled);
+            logic.before.extend(toggling.before);
+            logic.after.extend(toggling.after);
             let code = |tree: &Tree, lines: &BTreeSet<usize>, comment: bool| -> BTreeSet<usize> {
                 let pick = |l: &&usize| tree.line(**l).code && (comment || !tree.line(**l).comment);
                 lines.iter().filter(pick).copied().collect()
@@ -223,6 +236,49 @@ pub(super) fn differing(
         if logic.before.len() + logic.after.len() == before {
             return logic.intersect(free);
         }
+    }
+}
+
+/// The changed lines inside a comment that holds an unchanged line which is
+/// code on one side and not on the other: block comment delimiters added or
+/// removed there disable or enable the code between them. A cover holds only
+/// its side's changed lines, comments aside, so comparing covers can't see
+/// the code those unchanged lines lost or gained.
+fn toggled(trees: &Trees, hunks: &[Hunk]) -> Claim {
+    let removed: BTreeSet<usize> = hunks.iter().flat_map(|h| h.removed.clone()).collect();
+    let added: BTreeSet<usize> = hunks.iter().flat_map(|h| h.added.clone()).collect();
+    // Unchanged lines pair one to one between the changed ones.
+    let mut flipped = Claim::default();
+    let (mut b, mut a) = (1, 1);
+    while b <= trees.before.line_count() && a <= trees.after.line_count() {
+        if removed.contains(&b) {
+            b += 1;
+        } else if added.contains(&a) {
+            a += 1;
+        } else {
+            if trees.before.line(b).code != trees.after.line(a).code {
+                flipped.before.insert(b);
+                flipped.after.insert(a);
+            }
+            b += 1;
+            a += 1;
+        }
+    }
+    if flipped.is_empty() {
+        return flipped;
+    }
+    let inside = |tree: &Tree, flipped: &BTreeSet<usize>, changed: &BTreeSet<usize>| {
+        let comments = tree.nodes.iter().filter(|n| n.comment);
+        let reaching = comments
+            .map(|n| tree.span_lines(&n.extent))
+            .filter(|lines| flipped.range(lines.clone()).next().is_some());
+        reaching
+            .flat_map(|lines| changed.range(lines).copied().collect::<Vec<_>>())
+            .collect::<BTreeSet<usize>>()
+    };
+    Claim {
+        before: inside(&trees.before, &flipped.before, &removed),
+        after: inside(&trees.after, &flipped.after, &added),
     }
 }
 

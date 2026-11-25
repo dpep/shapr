@@ -1,0 +1,7 @@
+{
+  "description": "a local renamed beside Rust 2015's try! macro, which tree-sitter-rust lexes as the 2018 try keyword, is a rename",
+  "expect": {
+    "hunks": [{"kind": "rename", "verdict": "structure"}],
+    "summary": {"verdict": "structure"}
+  }
+}

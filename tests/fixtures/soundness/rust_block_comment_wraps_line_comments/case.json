@@ -1,0 +1,7 @@
+{
+  "description": "a block comment wrapped around lines that were already comments is comment_only: the code is the same",
+  "expect": {
+    "hunks": [{"kind": "comment_only", "verdict": "structure"}],
+    "summary": {"verdict": "structure"}
+  }
+}

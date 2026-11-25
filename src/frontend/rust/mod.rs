@@ -120,7 +120,7 @@ impl Frontend for Rust {
         parser
             .set_language(&tree_sitter_rust::LANGUAGE.into())
             .expect("the bundled grammar matches the tree-sitter version");
-        match parser.parse(&source, None) {
+        match parse_2015(&mut parser, &source) {
             Some(cst) => Walker {
                 src: &source,
                 b: &mut builder,
@@ -271,6 +271,55 @@ fn unpublished(toml: &str, dir: &str, files: &dyn Snapshot) -> bool {
             .filter(|t| workspace(t));
     }
     root.is_some_and(|root| none(&table(&root, "[workspace.package]")))
+}
+
+/// Parses `source`, reading Rust 2015's `try!(..)` macro through a
+/// same-length identifier: tree-sitter-rust lexes `try` as the 2018 keyword
+/// and can't parse it. Spans still index `source`, which every node's text
+/// is read from.
+fn parse_2015(parser: &mut Parser, source: &[u8]) -> Option<tree_sitter::Tree> {
+    let cst = parser.parse(source, None)?;
+    let root = cst.root_node();
+    let tries = if root.has_error() {
+        try_macros(root)
+    } else {
+        Vec::new()
+    };
+    if tries.is_empty() {
+        return Some(cst);
+    }
+    let mut masked = source.to_vec();
+    for t in tries {
+        masked[t].copy_from_slice(b"tri");
+    }
+    parser.parse(&masked, None)
+}
+
+/// Each `try` keyword token followed by `!`. Since 2018 that is an error, so
+/// only the 2015 macro spells it; strings, comments and macro tokens never
+/// hold a keyword token.
+fn try_macros(root: Node<'_>) -> Vec<Span> {
+    let mut tokens = Vec::new();
+    let mut c = root.walk();
+    'walk: loop {
+        let n = c.node();
+        if n.child_count() == 0 && !n.is_missing() {
+            tokens.push(n);
+        }
+        if c.goto_first_child() || c.goto_next_sibling() {
+            continue;
+        }
+        while !c.goto_next_sibling() {
+            if !c.goto_parent() {
+                break 'walk;
+            }
+        }
+    }
+    tokens
+        .windows(2)
+        .filter(|w| !w[0].is_named() && w[0].kind() == "try" && w[1].kind() == "!")
+        .map(|w| span(&w[0]))
+        .collect()
 }
 
 fn span(n: &Node<'_>) -> Span {
@@ -1419,5 +1468,33 @@ mod tests {
     fn syntax_errors_are_recorded() {
         assert!(!parse("fn a( {").errors.is_empty());
         assert!(parse("fn a() {}").errors.is_empty());
+    }
+
+    #[test]
+    fn try_macros_are_the_try_keyword_before_a_bang() {
+        let cases = [
+            ("fn f() { let x = try!(g()); }", 1),
+            ("fn f() { let x = try ! (g()); try!(h()); }", 2),
+            ("fn f() { let x = r#try!(g()); }", 0),
+            ("fn f() { let x = try { g()? }; }", 0),
+            ("fn f() { let s = \"try!(x)\"; }", 0),
+            ("fn f() { // try!(x)\n}", 0),
+            ("fn f() { try_it!(x); retry!(y); }", 0),
+            ("fn f() { quote!{ try!(x) }; }", 0),
+        ];
+        for (src, want) in cases {
+            let mut parser = Parser::new();
+            parser
+                .set_language(&tree_sitter_rust::LANGUAGE.into())
+                .expect("grammar");
+            let cst = parser.parse(src, None).expect("parses");
+            assert_eq!(try_macros(cst.root_node()).len(), want, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_2015_try_macro_parses_as_a_macro_named_try() {
+        let found = roles("fn f() -> Result<u8, ()> { let x = try!(g()); Ok(x) }");
+        assert_has(&found, &[(Role::Hazard(Hazard::Macro), "try")]);
     }
 }
