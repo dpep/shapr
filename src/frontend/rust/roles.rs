@@ -887,6 +887,7 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         "if_expression" | "while_expression" | "match_expression" | "match_arm" => {
             Construct::Branch { test: 1 }
         }
+        "match_block" => Construct::Branch { test: 0 },
         "binary_expression"
             if matches!(
                 own().as_str(),
