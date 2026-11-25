@@ -472,6 +472,25 @@ fn completions_carry_each_shells_marker() {
     assert_eq!(unknown.status.code(), Some(64));
 }
 
+/// `summary.kinds` counts the parts the verdict rolls up, as the text
+/// summary does: a docs or unparsed file's residual isn't a logic change.
+#[test]
+fn kinds_count_parts_inside_the_verdict() {
+    let report = classify(
+        &[("README.md", "a\n"), ("Makefile", "a:\n"), ("a.rb", METHOD)],
+        &[
+            ("README.md", "b\n"),
+            ("Makefile", "b:\n"),
+            ("a.rb", &METHOD.replace("hi", "yo")),
+        ],
+    );
+    assert_eq!(
+        report["summary"]["kinds"]["logic"], 1,
+        "{:#}",
+        report["summary"]
+    );
+}
+
 #[test]
 fn every_output_field_is_documented() {
     let schema =

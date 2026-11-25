@@ -465,7 +465,12 @@ fn part_records(file: &FileChange, label: &Label) -> Vec<PartRecord> {
             detail: r.detail.clone(),
             facets: r.facets.clone(),
             assumptions: Vec::new(),
-            review_lines: code(&r.lines),
+            // Comments or blank lines no part proved are read whole: a line
+            // shift refused, say, reaches behavior through them.
+            review_lines: match code(&r.lines) {
+                0 => changed(&r.lines),
+                n => n,
+            },
             changed: changed(&r.lines),
             context: Vec::new(),
         });
@@ -497,8 +502,9 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             lines.add(&hunk.lines);
             test_review_lines += hunk.test_review_lines;
         }
+        // Part counts are over the hunks the verdict rolls up.
         let counted = hunk.verdict.counted();
-        for part in &hunk.parts {
+        for part in hunk.parts.iter().filter(|_| counted) {
             *kinds.entry(part.kind.as_str()).or_default() += 1;
             for context in part.context.iter().filter(|_| part.kind == Kind::Move) {
                 *move_contexts.entry(context.as_str()).or_default() += 1;
@@ -508,9 +514,6 @@ fn summarize(files: &[FileRecord], hunks: &[HunkRecord], mut claims: Claims) -> 
             }
             for assumption in &part.assumptions {
                 *assumptions.entry(assumption.as_str()).or_default() += 1;
-            }
-            if !counted {
-                continue;
             }
             if part.structure {
                 structure += 1;
@@ -708,16 +711,10 @@ fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
 fn summary_text(out: &mut impl Write, report: &Report) -> io::Result<()> {
     let s = &report.summary;
     // Parts in hunks inside the verdict; "outside the verdict" counts the rest.
-    let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
-    for part in report
-        .hunks
-        .iter()
-        .filter(|h| h.verdict.counted())
-        .flat_map(|h| &h.parts)
-    {
-        *kinds.entry(part.kind.as_str()).or_default() += 1;
-    }
-    let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    let kinds: Vec<String> = (s.kinds.iter())
+        .filter(|(_, n)| **n > 0)
+        .map(|(k, n)| format!("{n} {k}"))
+        .collect();
     let lead = if let Some(source) = &report.meta.source {
         let merge = match source.merge {
             true => " (a merge, against its first parent)",
