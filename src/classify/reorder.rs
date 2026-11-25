@@ -158,6 +158,32 @@ fn prove(trees: &Trees, site: &Site, free: &Claim) -> Option<Part> {
             None => true,
         },
     );
+    // Equal elements out of order may be a coincidence of in-place edits
+    // (`expect 12` → `10`, `expect 10` → `8`): a move counts only where the
+    // gap between kept elements it leaves, or the one it enters, holds a
+    // different number of elements on each side, so no edit fills it.
+    let gap =
+        |i: usize, side: fn(&(usize, usize)) -> usize| kept.iter().filter(|p| side(p) < i).count();
+    let mut sizes = vec![(0usize, 0usize); kept.len() + 1];
+    let (all_b, all_a) = (
+        left_b.iter().chain(moved.iter().map(|p| &p.0)),
+        left_a.iter().chain(moved.iter().map(|p| &p.1)),
+    );
+    for &i in all_b {
+        sizes[gap(i, |p| p.0)].0 += 1;
+    }
+    for &j in all_a {
+        sizes[gap(j, |p| p.1)].1 += 1;
+    }
+    let filled = |g: usize| sizes[g].0 == sizes[g].1;
+    moved.retain(|&(i, j)| {
+        let keep = !filled(gap(i, |p| p.0)) || !filled(gap(j, |p| p.1));
+        if !keep {
+            left_b.push(i);
+            left_a.push(j);
+        }
+        keep
+    });
     let codes = |groups: &[Group], picks: &mut dyn Iterator<Item = usize>| -> Vec<NodeId> {
         picks.filter_map(|i| groups[i].code).collect()
     };

@@ -1,0 +1,4 @@
+{
+  "description": "three values edited in place, two of the new values equal to old ones elsewhere: edits, not a reorder of coincidentally equal statements",
+  "expect": {"hunks": [{"kind": "logic", "parts": [{"kind": "logic"}]}]}
+}
