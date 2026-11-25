@@ -83,7 +83,8 @@ src/
                     nearest lockfile depends on sorbet-runtime, for typing
     ruby/generated.rs   prism node kinds and names (script/gen-ruby-kinds.sh; don't edit)
     rust/mod.rs     tree-sitter → TreeBuilder: own text, folded `;`/braces, attributes into their item,
-                    macro token trees as leaves, trailing commas ignored
+                    macro token trees as leaves, trailing commas ignored; 2015's `try!` parsed through a
+                    same-length stand-in, text still read from the real source
     rust/roles.rs   which tree-sitter nodes play which Role; local bindings; derive-observed members
   change.rs         assembles a Change: per file, both trees, a Site per hunk, and its
                     category (code, test, docs, config, manifest, generated, ...)

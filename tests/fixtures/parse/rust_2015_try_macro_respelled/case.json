@@ -1,0 +1,7 @@
+{
+  "description": "a macro call changed to try! is logic: the parser reads try! through a same-length stand-in, and the tree keeps the real bytes",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}],
+    "summary": {"verdict": "behavior"}
+  }
+}

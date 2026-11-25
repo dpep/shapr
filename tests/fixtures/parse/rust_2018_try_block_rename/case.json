@@ -1,0 +1,7 @@
+{
+  "description": "a local renamed beside a 2018 try block is a rename; the try keyword before a block is left to the grammar",
+  "expect": {
+    "hunks": [{"kind": "rename", "verdict": "structure"}],
+    "summary": {"verdict": "structure"}
+  }
+}
