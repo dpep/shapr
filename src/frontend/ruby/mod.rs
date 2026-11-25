@@ -93,6 +93,7 @@ impl Frontend for Ruby {
             sorbet: sorbet::Sorbet::of(&result),
             entered: Entered::default(),
             parents: Vec::new(),
+            variants: variants::Context::default(),
             gaps: Vec::new(),
             receivers: Vec::new(),
         }
@@ -299,6 +300,8 @@ struct Walker<'b> {
     entered: Entered,
     /// The open prism nodes, as (kind, start), for [`variants::respell`].
     parents: Vec<(&'static str, usize)>,
+    /// What [`variants::respell`] gathers from the code around a node.
+    variants: variants::Context,
     /// Per open node, the stretches of an interpolated heredoc's body no
     /// part holds, in order, to report as leaves between its parts.
     gaps: Vec<Vec<Span>>,
@@ -336,7 +339,10 @@ fn key(node: &Node<'_>) -> (&'static str, usize, usize) {
 impl Walker<'_> {
     fn respell(&mut self, node: &Node<'_>) {
         let parent = self.parents.last().copied();
-        if let Some((variant, canonical)) = variants::respell(node, parent, self.builder.source()) {
+        let source = self.builder.source();
+        if let Some((variant, canonical)) =
+            variants::respell(node, parent, source, &mut self.variants)
+        {
             self.builder.respell(variant, canonical);
         }
     }

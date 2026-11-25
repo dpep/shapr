@@ -1,0 +1,15 @@
+{
+  "description": "super() in a method without parameters, and a bare super",
+  "expect": {
+    "hunks": [
+      {
+        "kind": "restyle",
+        "parts": {
+          "$every": {"kind": {"$not": "logic"}},
+          "$some": {"detail": {"variants": ["Style/SuperArguments"]}, "kind": "restyle", "structure": true}
+        },
+        "verdict": "structure"
+      }
+    ]
+  }
+}

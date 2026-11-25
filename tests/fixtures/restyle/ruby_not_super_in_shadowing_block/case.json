@@ -1,0 +1,6 @@
+{
+  "description": "not the same program, so logic: in the block, record is the block's; a bare super passes the method's",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

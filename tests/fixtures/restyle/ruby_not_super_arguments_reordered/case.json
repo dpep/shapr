@@ -1,0 +1,6 @@
+{
+  "description": "not the same program, so logic: a bare super passes the parameters in their own order",
+  "expect": {
+    "hunks": {"$every": {"kind": "logic"}}
+  }
+}

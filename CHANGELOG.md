@@ -48,3 +48,4 @@ First release.
 - `--completions [SHELL]` prints a completion script for bash, zsh, fish, elvish or PowerShell.
 - A Rust doc comment under serde's `Serialize`/`Deserialize` or thiserror's `Error` (named through its crate or imported from it) is a comment: those derives never read docs. A field's or variant's own attributes (`#[serde(...)]`) no longer make its doc code.
 - A Ruby instance or class variable renamed along with the symbols and strings spelling it in the same change (`%i[@old]`, `:@old`, `"@old"`) is a `rename`: those literals follow the field as `instance_variable_get(:@old)` does. Such a literal is no longer a `literal_only` change.
+- Ruby `restyle` recognizes `Style/SuperArguments`: `super(a, b)` passing every parameter of its method in order and a bare `super` are the same program.

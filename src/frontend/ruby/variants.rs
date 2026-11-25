@@ -9,7 +9,8 @@
 //! `and` binding looser than `=`), the trees differ and no form hides it.
 
 use crate::tree::Canonical;
-use ruby_prism::Node;
+use ruby_prism::{Node, Visit};
+use std::collections::HashMap;
 
 pub const STRING_LITERALS: &str = "Style/StringLiterals";
 pub const HASH_SYNTAX: &str = "Style/HashSyntax";
@@ -35,9 +36,19 @@ pub const ENDLESS_METHOD: &str = "Style/EndlessMethod";
 pub const EMPTY_METHOD: &str = "Style/EmptyMethod";
 pub const SINGLE_LINE_METHODS: &str = "Style/SingleLineMethods";
 pub const SEMICOLON: &str = "Style/Semicolon";
+pub const SUPER_ARGUMENTS: &str = "Style/SuperArguments";
 
 /// The enclosing prism node, as (kind, start offset).
 pub(super) type Parent = Option<(&'static str, usize)>;
+
+/// What respelling a node needs from the code around it, gathered as the
+/// walk opens a `def`.
+#[derive(Default)]
+pub(super) struct Context {
+    /// The `super` calls that pass the enclosing method's parameters as
+    /// they are, by start offset, each with its canonical form.
+    forwarding: HashMap<usize, Vec<u8>>,
+}
 
 /// `node`'s variant and canonical form, when its syntax has other
 /// spellings of the same program.
@@ -45,9 +56,18 @@ pub(super) fn respell(
     node: &Node<'_>,
     parent: Parent,
     source: &[u8],
+    context: &mut Context,
 ) -> Option<(&'static str, Canonical)> {
     let parent_kind = parent.map(|(kind, _)| kind);
     let syntax = |variant| Some((variant, Canonical::Syntax(Vec::new())));
+    if let Some(def) = node.as_def_node() {
+        forwarding(&def, &mut context.forwarding);
+    }
+    if node.as_super_node().is_some() || node.as_forwarding_super_node().is_some() {
+        let start = node.location().start_offset();
+        let form = context.forwarding.get(&start)?;
+        return Some((SUPER_ARGUMENTS, Canonical::Value(form.clone())));
+    }
     if let Some(n) = node.as_string_node() {
         // A regexp's or command's text is read by the regexp engine or the
         // shell, escapes and all.
@@ -252,6 +272,95 @@ pub(super) fn respell(
         return Some((variant, Canonical::Syntax(n.name().as_slice().to_vec())));
     }
     None
+}
+
+/// Records the `super` calls in `def`'s own body (not a block's, where a
+/// block parameter may shadow a method's) that mean what a bare `super`
+/// means there: a bare `super` passes each parameter's current value, in
+/// order, and the method's block, as `super(a, b)` does where `a, b` are
+/// every parameter. Each gets the method's parameters as its form, so a
+/// bare `super` under other parameters differs. Only required and optional
+/// positionals and a block parameter are read; a method with any other
+/// parameter records nothing.
+fn forwarding(def: &ruby_prism::DefNode<'_>, out: &mut HashMap<usize, Vec<u8>>) {
+    let mut names: Vec<Vec<u8>> = Vec::new();
+    let mut form = b"zsuper".to_vec();
+    if let Some(params) = def.parameters() {
+        let plain = params.rest().is_none()
+            && params.posts().iter().next().is_none()
+            && params.keywords().iter().next().is_none()
+            && params.keyword_rest().is_none();
+        if !plain {
+            return;
+        }
+        for (tag, list) in [(b'r', params.requireds()), (b'o', params.optionals())] {
+            for p in list.iter() {
+                let name = if let Some(r) = p.as_required_parameter_node() {
+                    r.name().as_slice().to_vec()
+                } else if let Some(o) = p.as_optional_parameter_node() {
+                    o.name().as_slice().to_vec()
+                } else {
+                    return; // a destructuring `(a, b)`
+                };
+                form.push(tag);
+                form.extend_from_slice(&name);
+                form.push(0);
+                names.push(name);
+            }
+        }
+        if params.block().is_some() {
+            form.push(b'&');
+        }
+    }
+    let Some(body) = def.body() else {
+        return;
+    };
+    let mut scan = Supers {
+        names: &names,
+        form: &form,
+        out,
+    };
+    scan.visit(&body);
+}
+
+/// The walk behind [`forwarding`], over a method's own scope.
+struct Supers<'s> {
+    names: &'s [Vec<u8>],
+    form: &'s [u8],
+    out: &'s mut HashMap<usize, Vec<u8>>,
+}
+
+impl<'pr> Visit<'pr> for Supers<'_> {
+    fn visit_super_node(&mut self, node: &ruby_prism::SuperNode<'pr>) {
+        let arguments: Vec<Node<'_>> = node
+            .arguments()
+            .map(|a| a.arguments().iter().collect())
+            .unwrap_or_default();
+        let passed = arguments.len() == self.names.len()
+            && arguments.iter().zip(self.names).all(|(arg, name)| {
+                arg.as_local_variable_read_node()
+                    .is_some_and(|r| r.depth() == 0 && r.name().as_slice() == name.as_slice())
+            });
+        if passed && node.block().is_none() {
+            self.out
+                .insert(node.location().start_offset(), self.form.to_vec());
+        }
+    }
+
+    fn visit_forwarding_super_node(&mut self, node: &ruby_prism::ForwardingSuperNode<'pr>) {
+        if node.block().is_none() {
+            self.out
+                .insert(node.location().start_offset(), self.form.to_vec());
+        }
+    }
+
+    // A new scope: its locals, `self` or meaning of `super` are its own.
+    fn visit_block_node(&mut self, _: &ruby_prism::BlockNode<'pr>) {}
+    fn visit_lambda_node(&mut self, _: &ruby_prism::LambdaNode<'pr>) {}
+    fn visit_def_node(&mut self, _: &ruby_prism::DefNode<'pr>) {}
+    fn visit_class_node(&mut self, _: &ruby_prism::ClassNode<'pr>) {}
+    fn visit_module_node(&mut self, _: &ruby_prism::ModuleNode<'pr>) {}
+    fn visit_singleton_class_node(&mut self, _: &ruby_prism::SingletonClassNode<'pr>) {}
 }
 
 /// A comma after a call's last argument, before its closing parenthesis.
