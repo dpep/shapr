@@ -1,0 +1,6 @@
+{
+  "description": "thiserror's Error derive reads #[error] attributes, never doc comments, so a doc added to a variant under it is a comment",
+  "expect": {
+    "hunks": [{"kind": "comment_only", "verdict": "structure"}]
+  }
+}

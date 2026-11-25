@@ -1,0 +1,6 @@
+{
+  "description": "a Serialize derive the file doesn't import from serde may come from a crate that reads doc comments, so a doc under it is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

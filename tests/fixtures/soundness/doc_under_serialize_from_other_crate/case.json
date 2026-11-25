@@ -1,0 +1,6 @@
+{
+  "description": "a Serialize derive imported from a crate other than serde may read doc comments, so a doc under it is code",
+  "expect": {
+    "hunks": [{"kind": "logic", "verdict": "behavior"}]
+  }
+}

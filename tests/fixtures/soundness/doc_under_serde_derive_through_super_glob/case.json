@@ -1,0 +1,9 @@
+{
+  "description": "a module's `use super::*` brings its parent's serde import, so a doc under Serialize there is a comment; a sibling module's own glob from another crate settles nothing, so a doc there is code",
+  "expect": {
+    "hunks": [
+      {"kind": "comment_only", "verdict": "structure"},
+      {"kind": "logic", "verdict": "behavior"}
+    ]
+  }
+}

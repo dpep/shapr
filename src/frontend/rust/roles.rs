@@ -70,7 +70,7 @@ const PLAIN_MACROS: &[&str] = &[
 
 /// Derives that never read a member's name; any other derive (`Debug`,
 /// `Serialize`, a CLI parser) makes field and variant names observable.
-const NAMELESS_DERIVES: &[&str] = &[
+pub(super) const NAMELESS_DERIVES: &[&str] = &[
     "Clone",
     "Copy",
     "Default",
