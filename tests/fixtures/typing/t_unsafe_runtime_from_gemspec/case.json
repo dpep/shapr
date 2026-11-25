@@ -1,0 +1,4 @@
+{
+  "description": "the gem's own gemspec depends on sorbet-runtime at runtime (the lockfile's PATH gem at the root): T.unsafe returns its value, structure",
+  "expect": {"hunks": [{"kind": "typing", "verdict": "structure", "parts": [{"kind": "typing", "structure": true}]}]}
+}

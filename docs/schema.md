@@ -288,7 +288,10 @@ every annotation on its lines is one sorbet-runtime never checks
 (`T.unsafe(x)`, `T.let`/`T.cast`/`T.bind` with `checked: false`,
 `T::Sig::WithoutRuntime.sig`) and the nearest `Gemfile.lock` or
 `gems.locked` above the file names `sorbet-runtime` or
-`sorbet-static-and-runtime`, so `T` is its module. A repository whose
+`sorbet-static-and-runtime` as the project's own dependency, so `T` is its
+module: a top-level entry under `DEPENDENCIES`, or a runtime dependency of
+the gemspec at the lockfile's root (its `PATH` gem with `remote: .`). Another
+gem's dependency (tapioca's) doesn't count. A repository whose
 lockfile names neither isn't taken as unchecked: whatever defines `T` there
 (a stub gem, a shim of its own) isn't seen. `T.cast` checks its value at
 runtime unless `checked: false`. `review_lines`: every code line of the

@@ -76,7 +76,7 @@ pub trait Frontend: Sync {
     fn load(&self, tree: &Tree, id: NodeId, path: &str) -> Option<Load>;
 
     /// Whether the library defining the file at `path`'s type annotations
-    /// is known loaded at runtime (Ruby: the nearest lockfile names
+    /// is known loaded at runtime (Ruby: the nearest lockfile depends on
     /// sorbet-runtime), so those marked [`Flags::UNCHECKED`] do nothing.
     /// `read` reads a file at the after revision.
     ///

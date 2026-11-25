@@ -1,0 +1,4 @@
+{
+  "description": "a lockfile naming sorbet-static-and-runtime only as a dependency of another gem (tapioca, a development tool) doesn't show the runtime loaded: T.unsafe isn't structure",
+  "expect": {"hunks": [{"verdict": {"$not": "structure"}, "parts": {"$every": {"structure": false}}}]}
+}

@@ -174,7 +174,7 @@ impl<'pr> Visit<'pr> for Scan {
 }
 
 /// Whether the nearest lockfile above `path` (`Gemfile.lock`,
-/// `gems.locked`) names sorbet-runtime, so `T` is its module: then
+/// `gems.locked`) shows the project loading sorbet-runtime, so `T` is its module: then
 /// [`Flags::UNCHECKED`] annotations do nothing at runtime.
 pub(super) fn runtime(path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> bool {
     let mut dirs: Vec<&str> = path.split('/').collect();
@@ -197,16 +197,36 @@ pub(super) fn runtime(path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> boo
     }
 }
 
-/// A lockfile line's first word is a gem: `sorbet-runtime (0.5.1)`,
-/// `sorbet-runtime!` for a path gem.
+/// Whether the lockfile shows sorbet-runtime (or sorbet-static-and-runtime)
+/// loaded by the project itself: a top-level entry under `DEPENDENCIES`, or a
+/// runtime dependency of the gemspec at the lockfile's root (its `PATH` gem
+/// with `remote: .`). Another gem's dependency (a development tool's) doesn't
+/// count.
 fn names_runtime(lock: &[u8]) -> bool {
-    String::from_utf8_lossy(lock).lines().any(|line| {
+    let runtime = |line: &str| {
         let gem = line.split_whitespace().next().unwrap_or_default();
         matches!(
             gem.trim_end_matches('!'),
             "sorbet-runtime" | "sorbet-static-and-runtime"
         )
-    })
+    };
+    let indent = |line: &str| line.len() - line.trim_start().len();
+    let mut section = "";
+    let mut root = false;
+    for line in String::from_utf8_lossy(lock).lines() {
+        if indent(line) == 0 {
+            section = line.trim();
+            root = false;
+            continue;
+        }
+        match section {
+            "DEPENDENCIES" if indent(line) == 2 && runtime(line) => return true,
+            "PATH" if indent(line) == 2 => root |= line.trim() == "remote: .",
+            "PATH" if root && indent(line) == 6 && runtime(line) => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -275,7 +295,10 @@ mod tests {
     fn the_nearest_lockfile_names_the_runtime() {
         let files = |path: &str| -> Option<Vec<u8>> {
             match path {
-                "Gemfile.lock" => Some(b"GEM\n  specs:\n    sorbet-runtime (0.5.1)\n".to_vec()),
+                "Gemfile.lock" => Some(
+                    b"GEM\n  specs:\n    sorbet-runtime (0.5.1)\n\nDEPENDENCIES\n  sorbet-runtime\n"
+                        .to_vec(),
+                ),
                 "engines/x/Gemfile.lock" => {
                     Some(b"GEM\n  specs:\n    sorbet-runtime-stub (0.2)\n".to_vec())
                 }
@@ -286,5 +309,23 @@ mod tests {
         assert!(runtime("a.rb", &files));
         assert!(!runtime("engines/x/lib/a.rb", &files));
         assert!(!runtime("a.rb", &|_| None));
+    }
+
+    #[test]
+    fn the_runtime_is_a_direct_dependency() {
+        let lock = |s: &str| names_runtime(s.as_bytes());
+        assert!(lock("DEPENDENCIES\n  sorbet-runtime\n"));
+        assert!(lock("DEPENDENCIES\n  sorbet-static-and-runtime (>= 0.5)\n"));
+        assert!(lock(
+            "PATH\n  remote: .\n  specs:\n    w (0.1)\n      sorbet-runtime (>= 0.5)\n\nDEPENDENCIES\n  w!\n"
+        ));
+        // Only another gem's dependency.
+        assert!(!lock(
+            "GEM\n  specs:\n    tapioca (0.16)\n      sorbet-static-and-runtime\n    sorbet-static-and-runtime (0.5)\n\nDEPENDENCIES\n  tapioca\n"
+        ));
+        // A path gem elsewhere isn't the project's gemspec.
+        assert!(!lock(
+            "PATH\n  remote: vendor/x\n  specs:\n    x (0.1)\n      sorbet-runtime\n\nDEPENDENCIES\n  x!\n"
+        ));
     }
 }
