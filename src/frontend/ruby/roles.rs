@@ -519,6 +519,7 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
             Construct::Branch { test }
         }
         "and" | "or" => Construct::Comparison,
+        "call" if name == Some("!") => Construct::Negation,
         "call" if matches!(name, Some(n) if COMPARISONS.contains(&n)) => Construct::Comparison,
         "call"
             if matches!(name, Some("raise" | "fail"))
@@ -528,8 +529,15 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         }
         "rescue" | "rescue_modifier" | "ensure" => Construct::Error,
         "call" if matches!(name, Some(n) if assertion(n, node.role)) => Construct::Assertion,
-        "integer" | "float" | "rational" | "imaginary" | "string" | "symbol" | "true" | "false"
-        | "nil" | "regular_expression" => Construct::Literal,
+        "call"
+            if matches!(name, Some("nil?" | "empty?" | "blank?" | "present?"))
+                && matches!(node.role, Role::Call(Receiver::Explicit)) =>
+        {
+            Construct::Guard
+        }
+        "integer" | "float" | "rational" | "imaginary" | "string" | "symbol" | "nil"
+        | "regular_expression" => Construct::Literal,
+        "true" | "false" => Construct::Flag,
         "parameters" => Construct::Parameters,
         _ => return None,
     })
@@ -594,7 +602,7 @@ fn assertion(name: &str, role: Role) -> bool {
 
 /// Methods that compare or negate.
 const COMPARISONS: &[&str] = &[
-    "==", "!=", "<", ">", "<=", ">=", "<=>", "===", "=~", "!~", "!", "eql?", "equal?",
+    "==", "!=", "<", ">", "<=", ">=", "<=>", "===", "=~", "!~", "eql?", "equal?",
 ];
 
 #[cfg(test)]

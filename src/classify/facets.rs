@@ -308,7 +308,12 @@ impl<'a> Parsed<'a> {
             };
             side(&b) != side(&a)
         };
-        if differs(|c| matches!(c, Construct::Branch { .. } | Construct::Comparison)) {
+        if differs(|c| {
+            matches!(
+                c,
+                Construct::Branch { .. } | Construct::Comparison | Construct::Negation
+            )
+        }) {
             facets.insert(Facet::Condition);
         }
         if differs(|c| *c == Construct::Error) {
@@ -442,7 +447,7 @@ impl<'a> Parsed<'a> {
                     }
                     tests.iter().map(|&c| tree.node(c).hash).collect()
                 }
-                Construct::Comparison | Construct::Error => {
+                Construct::Comparison | Construct::Negation | Construct::Error => {
                     if !own_touched() {
                         continue;
                     }
@@ -511,7 +516,10 @@ impl<'a> Parsed<'a> {
                 .iter()
                 .filter(|&&(id, n)| {
                     n.role != Role::DynamicName
-                        && self.frontend.construct(tree, id) == Some(Construct::Literal)
+                        && matches!(
+                            self.frontend.construct(tree, id),
+                            Some(Construct::Literal | Construct::Flag)
+                        )
                 })
                 .map(|(_, n)| n.extent.clone())
                 .collect();

@@ -895,9 +895,10 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
         {
             Construct::Comparison
         }
-        "unary_expression" if own() == "!" => Construct::Comparison,
+        "unary_expression" if own() == "!" => Construct::Negation,
         "integer_literal" | "float_literal" | "string_literal" | "raw_string_literal"
-        | "char_literal" | "boolean_literal" => Construct::Literal,
+        | "char_literal" => Construct::Literal,
+        "boolean_literal" => Construct::Flag,
         "try_expression" => Construct::Error,
         "macro_invocation" if matches!(name, Some(n) if ERROR_MACROS.contains(&n)) => {
             Construct::Error
@@ -906,6 +907,9 @@ pub(super) fn construct(tree: &Tree, id: NodeId) -> Option<Construct> {
             Construct::Error
         }
         "call_expression" | "tuple_struct_pattern" if first_named("Err") => Construct::Error,
+        "call_expression" if matches!(name, Some("is_none" | "is_some" | "is_empty")) => {
+            Construct::Guard
+        }
         "parameters" => Construct::Parameters,
         "function_item" | "mod_item" if test_item(tree, id) => Construct::Test,
         "macro_invocation"

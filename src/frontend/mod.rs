@@ -188,10 +188,17 @@ pub enum Construct {
     /// A conditional (`if`, `while`, `case`, a `when`, a match arm): its
     /// first `test` code children are what it tests.
     Branch { test: usize },
-    /// An operator comparing or combining truth values (`>`, `==`, `&&`, `!`).
+    /// An operator comparing or combining truth values (`>`, `==`, `&&`).
     Comparison,
-    /// A number, string, symbol, boolean or nil written out.
+    /// A truth value negated (`!x`, Ruby's `not x`): its first code child.
+    Negation,
+    /// A call asking whether a value is missing or empty (`nil?`,
+    /// `empty?`, `blank?`, `present?`; `is_none`, `is_some`, `is_empty`).
+    Guard,
+    /// A number, string, symbol or nil written out.
     Literal,
+    /// `true` or `false` written out.
+    Flag,
     /// Raises, propagates or rescues an error (`raise`, `rescue`, `?`,
     /// `unwrap`, `panic!`).
     Error,
