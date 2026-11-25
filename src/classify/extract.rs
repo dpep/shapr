@@ -650,8 +650,8 @@ fn between(tree: &Tree, scope: NodeId, id: NodeId) -> Span {
 /// caller also changed elsewhere: A walked down the call's path, each
 /// level's child on it paired with the other side's child of the same kind
 /// and own text in the gap a longest common subsequence of hashes leaves
-/// around it; at the statement, of the gap's statements the run sharing the
-/// most with B's body.
+/// around it; at the deepest statements it pairs, of the gap's statements
+/// the run sharing the most with B's body.
 fn locate(
     calls: &Tree,
     a_call: NodeId,
@@ -668,13 +668,18 @@ fn locate(
         path.push(calls.node(top).parent?);
     }
     path.reverse();
+    // The deepest statements the walk pairs: the call's own, unless code
+    // around it changed form (a block `if` become a modifier).
+    let mut deepest = None;
     let (mut x, mut y) = (a_call, a_chunk);
     for &child in &path[1..] {
         let (cx, cy) = (code_children(calls, x), code_children(chunks, y));
         if calls.node(x).kind != chunks.node(y).kind || cx.len().saturating_mul(cy.len()) > 10_000 {
-            return None;
+            break;
         }
-        let i = cx.iter().position(|&c| c == child)?;
+        let Some(i) = cx.iter().position(|&c| c == child) else {
+            break;
+        };
         let pairs = lcs(
             cx.len(),
             cy.len(),
@@ -683,17 +688,21 @@ fn locate(
         );
         let lo = pairs.iter().rev().find(|p| p.0 < i).map_or(0, |p| p.1 + 1);
         let hi = pairs.iter().find(|p| p.0 > i).map_or(cy.len(), |p| p.1);
-        let gap = cy.get(lo..hi)?;
+        let Some(gap) = cy.get(lo..hi) else {
+            break;
+        };
         if calls.node(x).kind == body_kind {
-            return best_run(chunks, gap, calls, body);
+            deepest = Some(gap.to_vec());
         }
         let own_x = unmarked(own(calls, child, None));
-        y = *gap.iter().find(|&&c| {
+        let Some(&twin) = gap.iter().find(|&&c| {
             chunks.node(c).kind == calls.node(child).kind && unmarked(own(chunks, c, None)) == own_x
-        })?;
-        x = child;
+        }) else {
+            break;
+        };
+        (x, y) = (child, twin);
     }
-    None
+    best_run(chunks, &deepest?, calls, body)
 }
 
 /// Of `gap`'s contiguous runs, the one sharing the most subtrees with
