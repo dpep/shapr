@@ -36,3 +36,16 @@ fn an_unchecked_annotation_says_nothing_checks_it() {
     assert_eq!(part["structure"], false);
     assert_eq!(part["evidence"]["unchecked"], 1);
 }
+
+#[test]
+fn without_the_runtime_says_t_may_not_be_sorbets() {
+    // `T.unsafe` is never checked; what fails is `T` itself.
+    for cast in ["T.unsafe(x).go", "T.must(x).go"] {
+        let part = typing(false, &BEFORE.replace("x.go", cast));
+        assert_eq!(
+            part["reason"],
+            "types only; without sorbet-runtime loaded, T may be undefined or not Sorbet's",
+            "{cast}"
+        );
+    }
+}
