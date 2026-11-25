@@ -275,34 +275,45 @@ fn find(
     let body_kind = calls.node(body).kind;
     let b_stmts = code_children(calls, body);
     let mut context = Vec::new();
-    // An expression first (a binding's value, an argument): the binding or
-    // the call around it stays in the caller. Then a run of statements; then,
-    // when the caller changed beyond the call, the run standing where it is.
-    let (expression, assigned, chunk) = match splice(calls, a_call, call, None, chunks, a_chunk) {
-        Some(chunk) => (true, None, chunk),
-        None => match splice(calls, a_call, stmt, Some(body_kind), chunks, a_chunk) {
-            Some(chunk) => (false, assigned, chunk),
-            None => {
-                context.push(Context::Caller);
-                let run = locate(calls, a_call, call, body_kind, chunks, a_chunk, &b_stmts)
-                    .ok_or("no statements where the call stands")?;
-                (false, assigned, run)
-            }
-        },
-    };
     let args = arguments(calls, call);
-    let flow = Flow::of(chunks, a_chunk, &chunk);
-
     let wired = args
         .as_ref()
         .filter(|args| args.len() == params.len())
         .and_then(|args| Names::wired(&params, args));
-    let exact = wired.and_then(|names| {
-        Matcher::new(calls, chunks, names).body(&b_stmts, &chunk, assigned.as_deref())
-    });
-    let matched = exact.or_else(|| {
-        Matcher::new(calls, chunks, Names::default()).body(&b_stmts, &chunk, assigned.as_deref())
-    });
+    // B's body against a chunk, under the call's wiring and else under any
+    // renaming: (exact, matched), each the renamed node count.
+    let fit = |chunk: &[NodeId], assigned: Option<&str>| {
+        let exact = wired
+            .clone()
+            .and_then(|names| Matcher::new(calls, chunks, names).body(&b_stmts, chunk, assigned));
+        let any = || Matcher::new(calls, chunks, Names::default()).body(&b_stmts, chunk, assigned);
+        (exact, exact.or_else(any))
+    };
+    // An expression (a binding's value, an argument) leaves the binding or
+    // the call around it in the caller; the whole statement moves when B's
+    // body matches only that (`x = b(...)`, B assigning and returning `x`).
+    // A chunk both splices find is a statement. When neither splices, the
+    // caller changed beyond the call: the run standing where it is.
+    let statements = splice(calls, a_call, stmt, Some(body_kind), chunks, a_chunk)
+        .map(|chunk| (false, assigned.clone(), chunk));
+    let expression = splice(calls, a_call, call, None, chunks, a_chunk)
+        .filter(|chunk| statements.as_ref().is_none_or(|(_, _, s)| s != chunk))
+        .map(|chunk| (true, None, chunk));
+    let spliced: Vec<_> = expression.into_iter().chain(statements).collect();
+    let fits = spliced
+        .iter()
+        .position(|(_, v, chunk)| fit(chunk, v.as_deref()).1.is_some());
+    let (expression, assigned, chunk) = match spliced.into_iter().nth(fits.unwrap_or(0)) {
+        Some(found) => found,
+        None => {
+            context.push(Context::Caller);
+            let run = locate(calls, a_call, call, body_kind, chunks, a_chunk, &b_stmts)
+                .ok_or("no statements where the call stands")?;
+            (false, assigned, run)
+        }
+    };
+    let flow = Flow::of(chunks, a_chunk, &chunk);
+    let (exact, matched) = fit(&chunk, assigned.as_deref());
     let nodes = chunk
         .iter()
         .flat_map(|&s| chunks.descendants(s))

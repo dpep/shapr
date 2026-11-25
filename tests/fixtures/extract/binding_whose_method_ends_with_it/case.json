@@ -1,0 +1,7 @@
+{
+  "description": "a binding becomes a call to a new method whose body is that same binding, its value returned: the statement moves, not just its value",
+  "expect": {
+    "hunks": {"$every": {"kind": "extract", "parts": [{"kind": "extract", "structure": true}]}},
+    "summary": {"verdict": "structure"}
+  }
+}
