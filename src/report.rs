@@ -916,6 +916,17 @@ fn claims(out: &mut impl Write, claims: &Claims, refactor: bool) -> io::Result<(
         [one] => emit(out, &format!("claims: {one} of {of}"))?,
         many => emit(out, &format!("claims: {} (of {of})", many.join(", ")))?,
     }
+    for (label, finding) in conflicts(claims, refactor) {
+        emit(out, &format!("{label}: {finding}"))?;
+    }
+    Ok(())
+}
+
+/// Each claim the code doesn't bear out, as a label (`unproven`,
+/// `conflict`) and its line. With REFACTOR, the refactor line already names
+/// the hunks an unproven refactor or style claim would count.
+fn conflicts(claims: &Claims, refactor: bool) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
     for conflict in &claims.experimental.conflicts {
         let unproven = matches!(
             conflict.finding,
@@ -962,9 +973,9 @@ fn claims(out: &mut impl Write, claims: &Claims, refactor: bool) -> io::Result<(
             Finding::NoReorderParts => "reorder",
             _ => conflict.claim.as_str(),
         };
-        emit(out, &format!("{label}: claims {claim}; {finding}"))?;
+        out.push((label, format!("claims {claim}; {finding}")));
     }
-    Ok(())
+    out
 }
 
 /// A hunk in a file shapr didn't compare, by its category alone: `docs
