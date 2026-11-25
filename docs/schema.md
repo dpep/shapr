@@ -1275,7 +1275,7 @@ comma or colon is in double quotes there, as is one git quotes.
 | `input` | string or null | As `meta.input`: the form the change was named in. |
 | `verdict`, `hunks`, `review_lines`, `test_review_lines`, `refactor_share` | | As in the `summary` record. |
 | `claims` | string array | The categories the messages claim (`summary.claims.experimental.categories` above 0). |
-| `unproven` | string array | Each claim the code doesn't bear out, as the text output's `unproven:` and `conflict:` lines say it. |
+| `unproven` | array | Each claim the code doesn't bear out (`summary.claims.experimental.conflicts`): `claim`, `finding`, and `hunks`, the places of every hunk behind it. |
 | `read_first` | array | The lines to read, ranked: residuals, and proven parts that still need reading (`extract`, `inline`, `typing`: their `review_lines` above 0). A residual that nearly proved a structural kind first, then more review lines, then more facets. At most 15; `more` places the rest. Below. |
 | `more` | object | The items left out of `read_first`: `items`, `review_lines`, and `at`, their places. |
 | `unproven_structure` | array | Parts of a structural kind that aren't structure: `at`, `kind`, `review_lines`, and `why`, their assumptions and move contexts. |

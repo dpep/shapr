@@ -24,7 +24,7 @@ pub struct Digest<'a> {
     test_review_lines: usize,
     refactor_share: f64,
     claims: Vec<&'static str>,
-    unproven: Vec<String>,
+    unproven: Vec<Claim<'a>>,
     read_first: Vec<Item<'a>>,
     more: More<'a>,
     unproven_structure: Vec<Unproven<'a>>,
@@ -55,6 +55,15 @@ fn text_path(path: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(p) if p.contains([' ', ',', ':']) => format!("\"{p}\"").into(),
         quoted => quoted,
     }
+}
+
+/// A claim the code doesn't bear out, as `summary.claims` has it, with
+/// every hunk behind it placed.
+#[derive(Serialize)]
+struct Claim<'a> {
+    claim: crate::claims::Category,
+    finding: crate::claims::Finding,
+    hunks: Vec<Place<'a>>,
 }
 
 /// Lines to read: one hunk's residual or proven part that still needs
@@ -243,9 +252,15 @@ pub fn build<'a>(report: &'a Report) -> Digest<'a> {
         at: rest.iter().flat_map(|i| i.at.iter().copied()).collect(),
     };
     let claims = s.claims.experimental.categories.iter();
-    let unproven = super::conflicts(report, false)
-        .into_iter()
-        .map(|(label, line)| format!("{label}: {line}"))
+    let unproven = (s.claims.experimental.conflicts.iter())
+        .map(|c| Claim {
+            claim: c.claim,
+            finding: c.finding,
+            hunks: (c.hunks.iter())
+                .filter_map(|&id| report.hunks.get(id))
+                .map(place)
+                .collect(),
+        })
         .collect();
     Digest {
         record: "digest",
@@ -367,8 +382,9 @@ pub fn text(out: &mut impl Write, report: &Report) -> io::Result<()> {
         emit(
             out,
             &format!(
-                "skip, proven structure: {} changed lines ({}); {} hunk{} wholly structure",
+                "skip, proven structure: {} changed line{} ({}); {} hunk{} wholly structure",
                 d.skip.changed_lines,
+                plural(d.skip.changed_lines),
                 kinds.join(", "),
                 d.skip.hunks,
                 plural(d.skip.hunks)

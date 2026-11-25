@@ -103,15 +103,22 @@ fn digest_refuses_ndjson() {
 fn every_digest_field_is_documented() {
     let schema =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/schema.md")).unwrap();
-    let dir = repo(&[&[("a.rb", BEFORE)], &[("a.rb", AFTER)]]);
+    let dir = every_record();
     let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
     for record in [
         &digest,
         &digest["read_first"][0],
         &digest["skip"],
         &digest["more"],
+        &digest["unproven"][0],
+        &digest["unproven_structure"][0],
+        &digest["style"][0],
+        &digest["outside"]["docs"],
     ] {
-        for key in record.as_object().unwrap().keys() {
+        let record = record
+            .as_object()
+            .unwrap_or_else(|| panic!("a record is missing: {digest}"));
+        for key in record.keys() {
             assert!(
                 schema.contains(&format!("`{key}`")),
                 "docs/schema.md doesn't name `{key}`"
@@ -333,4 +340,66 @@ fn digest_says_what_was_compared() {
     // The full text output names only what shapr chose.
     let text = String::from_utf8(shapr(dir.path(), &["HEAD~1..HEAD"]).stdout).unwrap();
     assert!(!text.starts_with("HEAD~1..HEAD"), "{text}");
+}
+
+/// A change holding every digest record: an unproven claim, an unproven
+/// move, a style deviation and a hunk outside the verdict.
+fn every_record() -> tempfile::TempDir {
+    let left = "class Left\n  def first(x)\n    x * 2\n  end\n\n  def second(x)\n    x * 3\n  end\nend\n\nclass Right\n  def z(x)\n    x\n  end\nend\n";
+    let right = "class Left\n  def first(x)\n    x * 2\n  end\nend\n\nclass Right\n  def z(x)\n    x\n  end\n\n  def second(x)\n    x * 3\n  end\nend\n";
+    let quoted = "def a\n  x = 'a'\n  y = 'b'\n  z = 'c'\nend\n";
+    let rule = "Style/StringLiterals:\n  EnforcedStyle: single_quotes\n";
+    let dir = tempfile::tempdir().unwrap();
+    init(dir.path());
+    commit(
+        dir.path(),
+        &[
+            (".rubocop.yml", rule),
+            ("b.rb", quoted),
+            ("c.rb", left),
+            ("README.md", "a\n"),
+            ("d.rb", BEFORE),
+        ],
+        "init",
+    );
+    commit(
+        dir.path(),
+        &[
+            ("b.rb", &quoted.replace("'c'", "\"c\"")),
+            ("c.rb", right),
+            ("README.md", "b\n"),
+            ("d.rb", AFTER),
+        ],
+        "Refactor the helpers",
+    );
+    dir
+}
+
+#[test]
+fn digest_unproven_claims_are_structured() {
+    let dir = every_record();
+    let digest = report(&shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]));
+    let full = report(&shapr(dir.path(), &["-j", "HEAD~1..HEAD"]));
+    let conflict = &full["summary"]["claims"]["experimental"]["conflicts"][0];
+    let unproven = &digest["unproven"][0];
+    assert_eq!(unproven["claim"], conflict["claim"], "{digest}");
+    assert_eq!(unproven["finding"], conflict["finding"], "{digest}");
+    assert_eq!(
+        unproven["hunks"].as_array().unwrap().len() as u64,
+        conflict["count"].as_u64().unwrap(),
+        "{digest}"
+    );
+    assert_reconciles(&digest);
+}
+
+#[test]
+fn digest_text_counts_one_line_in_the_singular() {
+    let before = "def a\n  1\nend\ndef b\n  2\nend\n";
+    let after = "def a\n  1\nend\n\ndef b\n  2\nend\n";
+    let dir = repo(&[&[("a.rb", before)], &[("a.rb", after)]]);
+    let text = String::from_utf8(shapr(dir.path(), &["--digest", "HEAD~1..HEAD"]).stdout).unwrap();
+    assert!(
+        text.contains("skip, proven structure: 1 changed line ("),
+        "{text}"
+    );
 }
