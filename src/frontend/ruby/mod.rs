@@ -171,9 +171,8 @@ impl Frontend for Ruby {
     /// A Rails application's or engine's controllers, mailers, jobs and
     /// channels: routes, `deliver_later`, `perform_later` and clients reach
     /// their public methods by name, and a template by the action's name.
-    /// The Rails root is the directory holding `app/`, wherever it sits: an
-    /// application has `config/application.rb` there, an engine
-    /// `lib/**/engine.rb`.
+    /// In a repository holding a `config/application.rb` or an `engine.rb`
+    /// anywhere, every such `app/` directory at any depth counts.
     fn called_by_name(&self, path: &str, paths: &[&str]) -> bool {
         const DIRS: &[&str] = &[
             "app/controllers/",
@@ -181,21 +180,17 @@ impl Frontend for Ruby {
             "app/jobs/",
             "app/channels/",
         ];
-        let rails = |root: &str| {
-            paths
-                .iter()
-                .filter_map(|p| p.strip_prefix(root))
-                .any(|rest| {
-                    rest == "config/application.rb"
-                        || rest
-                            .strip_prefix("lib/")
-                            .is_some_and(|r| r.ends_with("/engine.rb"))
-                })
-        };
-        (0..path.len())
-            .filter(|&i| i == 0 || path.as_bytes()[i - 1] == b'/')
-            .filter(|&i| DIRS.iter().any(|d| path[i..].starts_with(d)))
-            .any(|i| rails(&path[..i]))
+        // A pack's or engine's `app/` needn't sit beside what makes it Rails.
+        let rails = paths.iter().any(|p| {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            *p == "config/application.rb"
+                || p.ends_with("/config/application.rb")
+                || name == "engine.rb"
+        });
+        rails
+            && (0..path.len())
+                .filter(|&i| i == 0 || path.as_bytes()[i - 1] == b'/')
+                .any(|i| DIRS.iter().any(|d| path[i..].starts_with(d)))
     }
 
     /// A gem's code: under `lib/` beside a `*.gemspec`.

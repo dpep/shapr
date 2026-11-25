@@ -1,0 +1,15 @@
+{
+  "description": "a public action renamed in a packwerk pack's controller (packs/blog/app/controllers, config/application.rb at the top) (index to list): routes and the implicit template reach it by name, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}

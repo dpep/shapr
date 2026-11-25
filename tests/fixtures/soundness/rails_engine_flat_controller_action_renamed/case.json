@@ -1,0 +1,15 @@
+{
+  "description": "a public action renamed in an engine's controller (engines/blog/app/controllers, its engine in lib/engine.rb, no lib/blog/) (index to list): routes and the implicit template reach it by name, not structure",
+  "expect": {
+    "hunks": {
+      "$every": {
+        "verdict": {
+          "$not": "structure"
+        }
+      }
+    },
+    "summary": {
+      "verdict": "behavior"
+    }
+  }
+}
