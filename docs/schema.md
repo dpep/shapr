@@ -465,6 +465,10 @@ every name that differs passes these checks:
   names (`len`, `save`, `last`) are often held elsewhere, so their renames
   stay `logic`.
 
+A renamed positional parameter changes what reflection on the method
+reports (Ruby's `Method#parameters`); that is a documented limit, as the
+line a backtrace or `source_location` reports is.
+
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
 class or module; a `field` in its file when it is a Ruby instance or class
 variable, and in every parsed file of the change when it is a Rust struct
