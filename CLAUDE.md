@@ -75,7 +75,7 @@ src/
     order.rs        per language and container, what observes the order of its elements, for reorder
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
-    ruby/signature.rs  plain literals, code that may run with another `self`, loads
+    ruby/load.rs    statements loading another file (`require`, `autoload`, ...), for moves
     ruby/reserved.rs   method names Ruby reaches without a visible call (Object's, protocol hooks)
     ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
                     ids from here
@@ -153,7 +153,7 @@ other packages depend on, from the repository's layout; `called_by_name`: whethe
 calls a file's public methods by name, given the repository's paths (a Rails root's
 `app/controllers/`); `load`: how a statement loads another file, for moves into new files;
 `rebinds_self`: a node whose code may run with another `self`, for extract; `types_loaded`: whether the library behind a file's type annotations is known loaded
-at runtime (Ruby: the nearest lockfile depends on sorbet-runtime), for `typing`; and `plain_literal`: a literal with no shared identity, for reorder) and reports
+at runtime (Ruby: the nearest lockfile depends on sorbet-runtime), for `typing`) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
 language reads as code), `error`. The builder computes everything the core

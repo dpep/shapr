@@ -206,10 +206,6 @@ impl Frontend for Rust {
         roles::surface(tree, id)
     }
 
-    fn plain_literal(&self, _: &Tree, _: NodeId) -> bool {
-        false
-    }
-
     fn reorder(
         &self,
         tree: &Tree,

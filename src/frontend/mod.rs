@@ -56,11 +56,6 @@ pub trait Frontend: Sync {
     /// job's `perform`.
     fn called_by_name(&self, path: &str, paths: &[&str]) -> bool;
 
-    /// `id` is a literal every evaluation of which gives an equal value no
-    /// other evaluation shares: a number, symbol, plain string, `nil`,
-    /// `true`, `false`, or an empty collection.
-    fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool;
-
     /// How a reader outside the program sees `id`: printed, logged or raised
     /// text, or serialized keys. For `output_text` and `serialized_key`.
     fn surface(&self, tree: &Tree, id: NodeId) -> Option<Surface>;

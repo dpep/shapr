@@ -1,27 +1,8 @@
-//! Plain literals, code that may run with another `self`, and statements
-//! loading files, read off the tree by prism's node kinds.
+//! Statements loading another Ruby file, read off the tree by prism's node
+//! kinds.
 
 use crate::frontend::{Load, Target};
 use crate::tree::{Flags, NodeId, Receiver, Role, Tree};
-
-pub(super) fn plain_literal(tree: &Tree, id: NodeId) -> bool {
-    let empty = tree.code_children(id).next().is_none();
-    match tree.node(id).kind {
-        "integer" | "float" | "symbol" | "nil" | "true" | "false" => true,
-        // A string node with a child is a heredoc; an empty `{}` or `[]`.
-        "string" | "hash" | "array" => empty,
-        _ => false,
-    }
-}
-
-/// A block or lambda (`instance_eval`, `instance_exec` and DSLs run one
-/// with another `self`), and the bodies that open a `self` of their own.
-pub(super) fn rebinds_self(tree: &Tree, id: NodeId) -> bool {
-    matches!(
-        tree.node(id).kind,
-        "block" | "lambda" | "def" | "class" | "module" | "singleton_class"
-    )
-}
 
 /// Directories a bare `require` finds files under, by convention: a gem's
 /// `lib`, the `-I` of a test runner, the working directory.
@@ -110,24 +91,6 @@ fn normalize(path: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::frontend::{Frontend, Ruby};
-
-    #[test]
-    fn plain_literals_are_values_without_shared_identity() {
-        let tree = Ruby.parse(
-            b"[1, -2.5, :s, 's', nil, true, false, {}, [], \"#{x}\", [1], /r/, 1r, X, <<~E]\n  h\nE\n"
-                .to_vec(),
-        );
-        let list = (0..tree.nodes.len() as u32)
-            .map(NodeId)
-            .find(|&id| tree.node(id).kind == "array")
-            .unwrap();
-        let plain: Vec<bool> = (tree.code_children(list))
-            .map(|e| plain_literal(&tree, e))
-            .collect();
-        let mut expected = vec![true; 9];
-        expected.extend([false; 6]);
-        assert_eq!(plain, expected);
-    }
 
     #[test]
     fn loads_name_their_file() {

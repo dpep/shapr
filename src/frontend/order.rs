@@ -2,7 +2,6 @@
 //! facts the `reorder` pass reads. A container this module doesn't name
 //! (a positional argument list, `match` arms) isn't a reorder at all.
 
-use super::{Frontend, Ruby};
 use crate::tree::{Flags, NodeId, Role, Tree};
 
 /// What the order of a container's elements can be observed through.
@@ -21,7 +20,7 @@ pub enum Dependence {
     Evaluation,
 }
 
-/// [`Frontend::reorder`] for Ruby.
+/// [`super::Frontend::reorder`] for Ruby.
 pub(super) fn ruby(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependence>> {
     let mut out = match tree.node(container).kind {
         "hash" | "keyword_hash" if distinct_keys(tree, container) => vec![Dependence::Iteration],
@@ -56,7 +55,7 @@ fn distinct_keys(tree: &Tree, hash: NodeId) -> bool {
         let Some(key) = tree.code_children(entry).next() else {
             return false;
         };
-        if !Ruby.plain_literal(tree, key) {
+        if !plain_literal(tree, key) {
             return false;
         }
         // Canonical, so `'a'` and `"a"` are one key.
@@ -119,7 +118,7 @@ const ITEMS: &[&str] = &[
     "foreign_mod_item",
 ];
 
-/// [`Frontend::reorder`] for Rust.
+/// [`super::Frontend::reorder`] for Rust.
 pub(super) fn rust(tree: &Tree, container: NodeId, moved: &[NodeId]) -> Option<Vec<Dependence>> {
     let kind = tree.node(container).kind;
     let out = match kind {
@@ -199,10 +198,23 @@ fn rust_pure(tree: &Tree, id: NodeId) -> bool {
     })
 }
 
+/// A literal every evaluation of which gives an equal value no other
+/// evaluation shares: a number, symbol, plain string, `nil`, `true`, `false`,
+/// or an empty collection.
+fn plain_literal(tree: &Tree, id: NodeId) -> bool {
+    let empty = tree.code_children(id).next().is_none();
+    match tree.node(id).kind {
+        "integer" | "float" | "symbol" | "nil" | "true" | "false" => true,
+        // A string node with a child is a heredoc; an empty `{}` or `[]`.
+        "string" | "hash" | "array" => empty,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::Rust;
+    use crate::frontend::{Frontend, Ruby, Rust};
 
     /// The first node of `kind`, and its code children.
     fn container(tree: &Tree, kind: &str) -> (NodeId, Vec<NodeId>) {
@@ -289,5 +301,23 @@ mod tests {
             Some(vec![Elements])
         );
         assert_eq!(rust("fn f() { g(a, b); }", "arguments"), None);
+    }
+
+    #[test]
+    fn plain_literals_are_values_without_shared_identity() {
+        let tree = Ruby.parse(
+            b"[1, -2.5, :s, 's', nil, true, false, {}, [], \"#{x}\", [1], /r/, 1r, X, <<~E]\n  h\nE\n"
+                .to_vec(),
+        );
+        let list = (0..tree.nodes.len() as u32)
+            .map(NodeId)
+            .find(|&id| tree.node(id).kind == "array")
+            .unwrap();
+        let plain: Vec<bool> = (tree.code_children(list))
+            .map(|e| plain_literal(&tree, e))
+            .collect();
+        let mut expected = vec![true; 9];
+        expected.extend([false; 6]);
+        assert_eq!(plain, expected);
     }
 }

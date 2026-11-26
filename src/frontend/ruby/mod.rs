@@ -1,9 +1,9 @@
 //! Ruby, parsed with prism.
 
 pub(crate) mod generated;
+mod load;
 mod reserved;
 mod roles;
-mod signature;
 mod sorbet;
 pub(crate) mod variants;
 
@@ -238,10 +238,6 @@ impl Frontend for Ruby {
         roles::surface(tree, id)
     }
 
-    fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool {
-        signature::plain_literal(tree, id)
-    }
-
     fn reorder(
         &self,
         tree: &Tree,
@@ -251,12 +247,17 @@ impl Frontend for Ruby {
         super::order::ruby(tree, container, moved)
     }
 
+    /// A block or lambda (`instance_eval`, `instance_exec` and DSLs run one
+    /// with another `self`), and the bodies that open a `self` of their own.
     fn rebinds_self(&self, tree: &Tree, id: NodeId) -> bool {
-        signature::rebinds_self(tree, id)
+        matches!(
+            tree.node(id).kind,
+            "block" | "lambda" | "def" | "class" | "module" | "singleton_class"
+        )
     }
 
     fn load(&self, tree: &Tree, id: NodeId, path: &str) -> Option<super::Load> {
-        signature::load(tree, id, path)
+        load::load(tree, id, path)
     }
 
     fn types_loaded(&self, path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> bool {
