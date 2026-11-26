@@ -253,7 +253,7 @@ pub(super) fn exposed(tree: &Tree, def: NodeId) -> bool {
 }
 
 /// How a node can name a method: what every pass that must see all of a
-/// method's uses (rename, extract and inline, default_argument) reads.
+/// method's uses (rename, extract and inline) reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Naming {
     /// Defines it.

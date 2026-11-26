@@ -56,16 +56,6 @@ pub trait Frontend: Sync {
     /// job's `perform`.
     fn called_by_name(&self, path: &str, paths: &[&str]) -> bool;
 
-    /// How method definition `def` receives arguments, when every parameter
-    /// is required, optional or a keyword (or a block): `None` for one that
-    /// collects the rest (`*args`, `**opts`, `...`), and so can tell what it
-    /// was passed, and in a language without default arguments.
-    fn signature(&self, tree: &Tree, def: NodeId) -> Option<Signature>;
-
-    /// How `call` passes its arguments, when each is a plain expression or a
-    /// keyword named by a literal: `None` when one splats or forwards.
-    fn arguments(&self, tree: &Tree, call: NodeId) -> Option<Arguments>;
-
     /// `id` is a literal every evaluation of which gives an equal value no
     /// other evaluation shares: a number, symbol, plain string, `nil`,
     /// `true`, `false`, or an empty collection.
@@ -153,30 +143,6 @@ impl Target {
             }
         }
     }
-}
-
-/// A method's parameters, as [`Frontend::signature`] reads them.
-#[derive(Debug, Default, PartialEq)]
-pub struct Signature {
-    /// The parameter list, absent for a method with none.
-    pub list: Option<NodeId>,
-    /// Required positional parameters, all before the optional ones.
-    pub required: usize,
-    /// Each optional positional parameter's default, in order.
-    pub optional: Vec<NodeId>,
-    /// Keyword parameters in order, with an optional one's default.
-    pub keywords: Vec<(String, Option<NodeId>)>,
-}
-
-/// A call's arguments, as [`Frontend::arguments`] reads them.
-#[derive(Debug, Default, PartialEq)]
-pub struct Arguments {
-    pub positional: Vec<NodeId>,
-    /// Keyword arguments in order: the keyword and its value.
-    pub keywords: Vec<(String, NodeId)>,
-    /// Offsets of the call's own bytes that delimit its argument list
-    /// (Ruby's parentheses), which a call passing none may leave out.
-    pub delimiters: Vec<usize>,
 }
 
 /// A literal regular expression, as [`Frontend::pattern`] reads it.

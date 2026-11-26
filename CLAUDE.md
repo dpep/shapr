@@ -2,7 +2,7 @@
 
 `shapr` classifies the **shape of a code change**. For each hunk in a diff it
 says which structural changes it holds (`format_only`, `comment_only`,
-`restyle`, `typing`, `reorder`, `default_argument`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
+`restyle`, `typing`, `reorder`, `rename`, `move`, `extract`, `inline`), each as a part with the lines it
 explains, and the residual `logic` lines no part explains; it gives each hunk
 and the whole change a verdict: structure, behavior, or mixed (structure and
 behavior changes belong apart; see the README's References). It is a narrow, deterministic, pipe-first evidence tool; review
@@ -75,7 +75,7 @@ src/
     order.rs        per language and container, what observes the order of its elements, for reorder
     ruby/mod.rs     prism → TreeBuilder; magic comments become code leaves
     ruby/roles.rs   which prism nodes play which Role
-    ruby/signature.rs  a def's parameters and a call's arguments, for default_argument
+    ruby/signature.rs  plain literals, code that may run with another `self`, loads
     ruby/reserved.rs   method names Ruby reaches without a visible call (Object's, protocol hooks)
     ruby/variants.rs   spelling variants and their canonical forms, for restyle; norms take their
                     ids from here
@@ -107,8 +107,6 @@ src/
     reorder.rs      the reorder pass: a hunk's elements of one container permuted, with the context
                     (frontend::order) naming what observes the order; structure when nothing does
     rename.rs       the rename pass: aligned sides differing only in names, checked per scope
-    defaults.rs     the default_argument pass: a call drops or adds an argument restating its
-                    callee's literal default, the callee tied to one definition through the search
     moves.rs        the move pass: declarations the alignment left out, paired across files
     extract.rs      the extract / inline pass: a chunk of statements swapped for a call
     relocate.rs     after the passes, residual lines relocated verbatim between hunks: a fact,
@@ -154,10 +152,8 @@ can reach a method, constant or field by a computed name through; `library`: whe
 other packages depend on, from the repository's layout; `called_by_name`: whether a framework
 calls a file's public methods by name, given the repository's paths (a Rails root's
 `app/controllers/`); `load`: how a statement loads another file, for moves into new files;
-`rebinds_self`: a node whose code may run with another `self`, for `default_argument` and
-extract; `types_loaded`: whether the library behind a file's type annotations is known loaded
-at runtime (Ruby: the nearest lockfile depends on sorbet-runtime), for `typing`; and for `default_argument`, `signature`, `arguments` and `plain_literal`: a def's
-parameters, a call's arguments, a literal with no shared identity) and reports
+`rebinds_self`: a node whose code may run with another `self`, for extract; `types_loaded`: whether the library behind a file's type annotations is known loaded
+at runtime (Ruby: the nearest lockfile depends on sorbet-runtime), for `typing`; and `plain_literal`: a literal with no shared identity, for reorder) and reports
 raw structure to a `TreeBuilder`: `open`/`close` for nodes with children,
 `leaf` for nodes compared byte for byte, `comment`, `directive` (a comment the
 language reads as code), `error`. The builder computes everything the core
@@ -179,8 +175,7 @@ literals), and `private_by_default` (definitions are private unless marked
 load-time code beside it may observe it: Ruby) with `definition_hooks`
 (methods the runtime calls on each definition after them, `method_added`:
 a move keeps a method's order with a hook and, below one, with every other
-method), and `default_arguments` (a parameter may declare a default:
-Ruby; `default_argument` runs only there).
+method).
 `TreeBuilder::ignore(span)` marks a
 separator the language ignores (Rust's trailing comma), hashed like
 whitespace. `TreeBuilder::respell(variant, canonical)` gives a node with

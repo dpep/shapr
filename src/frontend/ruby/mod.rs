@@ -7,7 +7,7 @@ mod signature;
 mod sorbet;
 pub(crate) mod variants;
 
-use super::{Arguments, Construct, Frontend, Signature};
+use super::{Construct, Frontend};
 use crate::norms::Snapshot;
 use crate::tree::{NodeId, Role, Semantics, Span, Spelling, Tree, TreeBuilder};
 use ruby_prism::{Location, Node, Visit};
@@ -84,7 +84,6 @@ impl Frontend for Ruby {
             reserved: reserved::RESERVED,
             definitions_run: true,
             definition_hooks: &["method_added", "singleton_method_added"],
-            default_arguments: true,
             spelling: SPELLING,
             ..Semantics::default()
         });
@@ -237,14 +236,6 @@ impl Frontend for Ruby {
 
     fn surface(&self, tree: &Tree, id: NodeId) -> Option<super::Surface> {
         roles::surface(tree, id)
-    }
-
-    fn signature(&self, tree: &Tree, def: NodeId) -> Option<Signature> {
-        signature::signature(tree, def)
-    }
-
-    fn arguments(&self, tree: &Tree, call: NodeId) -> Option<Arguments> {
-        signature::arguments(tree, call)
     }
 
     fn plain_literal(&self, tree: &Tree, id: NodeId) -> bool {
