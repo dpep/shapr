@@ -1,0 +1,11 @@
+{
+  "description": "an extract adding a private method to a gem's class: a subclass outside the repository defining the new name takes the call, so public_api",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": {"$some": {"kind": "extract", "structure": false, "assumptions": ["public_api"]}}
+      }
+    ]
+  }
+}

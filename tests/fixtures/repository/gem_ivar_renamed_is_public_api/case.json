@@ -1,0 +1,11 @@
+{
+  "description": "a gem's instance variable renamed at every site: a subclass outside the repository may read the old name, so public_api",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": {"$some": {"kind": "rename", "structure": false, "assumptions": ["public_api"]}}
+      }
+    ]
+  }
+}

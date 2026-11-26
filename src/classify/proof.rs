@@ -245,6 +245,13 @@ pub(super) fn public(tree: &Tree, def: NodeId) -> bool {
     named.or_else(|| visibility(tree, def)) != Some(Visibility::Private)
 }
 
+/// Whether code in another package can reach or override definition `def`
+/// of a library: in Rust, a `pub` item; in Ruby, anything, since a subclass
+/// can override a private method and read an instance variable.
+pub(super) fn exposed(tree: &Tree, def: NodeId) -> bool {
+    !tree.semantics.private_by_default || tree.node(def).flags.contains(Flags::PUBLIC)
+}
+
 /// How a node can name a method: what every pass that must see all of a
 /// method's uses (rename, extract and inline, default_argument) reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
