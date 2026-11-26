@@ -23,9 +23,6 @@ pub(super) enum Op {
     Move,
     /// A declaration moved to another file.
     MoveAcrossFiles,
-    /// An argument restating a default dropped or added: the hazard is in
-    /// the called method's own body.
-    RestateDefault,
     /// Lines added or removed above the code, or the code's own line edited:
     /// it sits at another line or column.
     Shift,
@@ -74,13 +71,6 @@ pub(super) fn blocks(op: Op, hazard: Hazard) -> bool {
             Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
             | Binding | Frame => false,
         },
-        // The parameter is bound either way; a method reading its own frame
-        // is left alone rather than reasoned about.
-        Op::RestateDefault => match hazard {
-            Binding | Frame | Stack => true,
-            Return | Break | Next | Redo | Retry | Yield | Super | BlockGiven | Await | Macro
-            | Line | File => false,
-        },
         // Only an explicit read of the code's own position or the stack's; a
         // backtrace reports shifted lines too, as any exception does.
         Op::Shift => match hazard {
@@ -106,8 +96,6 @@ mod tests {
         assert!(!blocks(Op::RenameLocal, Hazard::Frame));
         assert!(blocks(Op::Move, Hazard::Line) && !blocks(Op::Move, Hazard::File));
         assert!(blocks(Op::MoveAcrossFiles, Hazard::File));
-        assert!(blocks(Op::RestateDefault, Hazard::Binding));
-        assert!(!blocks(Op::RestateDefault, Hazard::Super));
         assert!(blocks(Op::Shift, Hazard::Line) && !blocks(Op::Shift, Hazard::Frame));
         assert!(blocks(Op::Shift, Hazard::Stack) && blocks(Op::RenameMethod, Hazard::Stack));
     }

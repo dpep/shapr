@@ -276,9 +276,6 @@ pub struct Semantics {
     /// Methods the runtime calls when a method is defined (Ruby's
     /// `method_added`): defining one changes what the definitions after it do.
     pub definition_hooks: &'static [&'static str],
-    /// A parameter can declare a default value a call may leave out (Ruby's
-    /// `retries: 3`): where `default_argument` looks.
-    pub default_arguments: bool,
 }
 
 /// Stands for a child in a node's own text ([`Tree::own_text`], the hash). A
@@ -742,21 +739,6 @@ impl Tree {
                 }
             })
             .collect()
-    }
-
-    /// The deepest node whose extent contains `span`.
-    pub fn deepest_containing(&self, span: &Span) -> NodeId {
-        let mut at = Self::ROOT;
-        'descend: loop {
-            for &child in &self.node(at).children {
-                let extent = &self.node(child).extent;
-                if extent.start <= span.start && span.end <= extent.end {
-                    at = child;
-                    continue 'descend;
-                }
-            }
-            return at;
-        }
     }
 
     /// `id` and every node under it, in source order.

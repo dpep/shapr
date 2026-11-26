@@ -19,7 +19,6 @@ Each hunk is a list of parts. A part is one proven change of these kinds, with t
 | `restyle` | structure | `{:a => 'x'}` becomes `{a: "x"}`, or `S { a: a }` becomes `S { a }` | 0 |
 | `typing` | behavior: sorbet-runtime checks types at runtime; structure for annotations it never checks (`T.unsafe`, `checked: false`) | a `sig { returns(Integer) }` added, `x` becomes `T.must(x)` | all code lines |
 | `reorder` | structure; behavior when something observes the order (`require`s, Gemfile `gem` lines, hash entries, array elements) | separate `use` declarations sorted; Gemfile gems sorted | 0; the moved lines when order is observed |
-| `default_argument` | structure; behavior when the method is a gem's (a subclass outside may override it) | `fetch(x, retries: 3)` becomes `fetch(x)` where `fetch` declares `retries: 3` | 0; all code lines when not proven |
 | `rename` | structure; behavior when it renames a library's public API, or in a Ruby library any method or instance variable (a subclass outside may use it) | parameter `x` becomes `side`, with every use | 0; all code lines when not proven |
 | `move` | structure; behavior when it lands among different code (another class, past a `private`) | two methods of a class swap places | 0; the definition's first line when it lands among different code |
 | `extract` | structure; behavior when it adds a method a library's subclass outside may define (any method of a Ruby library, a `pub` one of a Rust library) | statements become a new method, replaced by a call to it | all code lines |

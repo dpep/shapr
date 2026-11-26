@@ -75,11 +75,9 @@ fn digest_lists_logic_and_counts_structure_to_skip() {
 
 #[test]
 fn digest_groups_hunks_sharing_a_note_and_is_smaller_than_the_report() {
-    // The same unproven default dropped twice reads as one item.
+    // The same unproven rename of a call twice reads as one item.
     let before = "class F\n  def fetch(key, retries: 3)\n    key\n  end\n\n  def go(x)\n    x.fetch(x, retries: 3)\n  end\n\n\n\n\n\n\n  def stop(x)\n    x.fetch(x, retries: 3)\n  end\nend\n";
-    let after = before
-        .replace(", retries: 3)\n  end\n\n\n", ")\n  end\n\n\n")
-        .replace("x, retries: 3)\n  end\nend", "x)\n  end\nend");
+    let after = before.replace("x.fetch(", "x.grab(");
     let dir = repo(&[&[("a.rb", before)], &[("a.rb", &after)]]);
     let full = shapr(dir.path(), &["-j", "HEAD~1..HEAD"]).stdout;
     let out = shapr(dir.path(), &["-j", "--digest", "HEAD~1..HEAD"]).stdout;
@@ -228,12 +226,12 @@ fn structure_with_lines_to_read_is_listed_not_skipped() {
 
 #[test]
 fn a_group_aggregates_its_members_and_keeps_tests_apart() {
-    // The same unproven default dropped twice, the second hunk beside a
+    // The same unproven rename of a call twice, the second hunk beside a
     // reindented `end`; and a rename shared by code and its spec.
     let before = "class F\n  def fetch(key, retries: 3)\n    key\n  end\n\n  def go(x)\n    x.fetch(x, retries: 3)\n  end\n\n\n\n\n\n\n  def stop(x)\n    x.fetch(x, retries: 3)\n  end\nend\n";
     let after = before
-        .replace("x, retries: 3)\n  end\n\n", "x)\n  end\n\n")
-        .replace("x, retries: 3)\n  end\nend", "x)\n      end\nend");
+        .replace("x.fetch(", "x.grab(")
+        .replace("3)\n  end\nend", "3)\n      end\nend");
     let spec = "describe 'a' do\n  it 'x' do\n    foo(1)\n  end\nend\n";
     let code = "def go\n  foo(1)\nend\n";
     let dir = repo(&[

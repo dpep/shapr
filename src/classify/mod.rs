@@ -11,7 +11,6 @@ pub mod proof;
 pub mod site;
 
 mod align;
-mod defaults;
 mod extract;
 mod format;
 pub use format::PLAIN_LOGIC;
@@ -43,7 +42,6 @@ pub enum Kind {
     Restyle,
     Typing,
     Reorder,
-    DefaultArgument,
     Rename,
     Move,
     Extract,
@@ -52,13 +50,12 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 11] = [
+    pub const ALL: [Kind; 10] = [
         Kind::FormatOnly,
         Kind::CommentOnly,
         Kind::Restyle,
         Kind::Typing,
         Kind::Reorder,
-        Kind::DefaultArgument,
         Kind::Rename,
         Kind::Move,
         Kind::Extract,
@@ -78,7 +75,6 @@ impl Kind {
             Kind::Restyle => "restyle",
             Kind::Typing => "typing",
             Kind::Reorder => "reorder",
-            Kind::DefaultArgument => "default_argument",
             Kind::Rename => "rename",
             Kind::Move => "move",
             Kind::Extract => "extract",
@@ -343,7 +339,6 @@ const PASSES: &[Pass] = &[
     extract::run,
     restyle::run,
     reorder::run,
-    defaults::run,
     typing::run,
     format::rest,
 ];
@@ -558,7 +553,6 @@ mod tests {
                 | Kind::Restyle
                 | Kind::Typing
                 | Kind::Reorder
-                | Kind::DefaultArgument
                 | Kind::Rename
                 | Kind::Move
                 | Kind::Extract

@@ -62,7 +62,6 @@ fn same_place(kind: Kind) -> bool {
         | Kind::Restyle
         | Kind::Typing
         | Kind::Reorder
-        | Kind::DefaultArgument
         | Kind::Rename => true,
         Kind::Move | Kind::Extract | Kind::Inline | Kind::Logic => false,
     }
