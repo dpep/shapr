@@ -1,0 +1,16 @@
+{
+  "description": "a method moved verbatim from class << self into a nested module the class extends: a move whose owner changes, as into an included module",
+  "expect": {
+    "hunks": [
+      {
+        "file": "lib/limits.rb",
+        "parts": [{"kind": "move", "structure": false, "detail": {"context": ["owner"]}}]
+      },
+      {
+        "file": "lib/s.rb",
+        "parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": ["owner"]}}}
+      }
+    ],
+    "summary": {"verdict": "behavior"}
+  }
+}

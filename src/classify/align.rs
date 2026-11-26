@@ -180,10 +180,8 @@ pub(super) enum Key<'t> {
 
 pub(super) fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     let node = tree.node(id);
-    if matches!(
-        node.role,
-        Role::Definition(NameKind::Class | NameKind::Module)
-    ) && let Some(name) = namespace_name(tree, id, false)
+    if owns(tree, id)
+        && let Some(name) = namespace_name(tree, id, false)
     {
         return Key::Namespace(name);
     }
@@ -198,9 +196,19 @@ pub(super) fn key(tree: &Tree, id: NodeId) -> Key<'_> {
     Key::Code(node.hash)
 }
 
+/// A node that owns the definitions in its body: a class or module, or a
+/// singleton class ([`Flags::SINGLETON`]).
+pub(super) fn owns(tree: &Tree, id: NodeId) -> bool {
+    let node = tree.node(id);
+    matches!(
+        node.role,
+        Role::Definition(NameKind::Class | NameKind::Module)
+    ) || node.flags.contains(Flags::SINGLETON)
+}
+
 /// A namespace's name, as its name child's hash (`A::B` tells it from
 /// `C::B`); one without a name stands by its first child (a Rust `impl`'s
-/// header). With `context`, any code before the name counts too: a Rust
+/// header, the object of Ruby's `class << self`). With `context`, any code before the name counts too: a Rust
 /// attribute (`#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`),
 /// though not an annotation (visibility), and its [`qualifiers`]. Alignment pairs namespaces by name,
 /// so one whose attributes were edited still aligns; owners compare with

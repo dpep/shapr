@@ -1,0 +1,7 @@
+{
+  "description": "a private method of class << self moved into a module the class extends, where it is public: owner, visibility and load order all differ",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}, "$some": {"parts": {"$some": {"kind": "move", "structure": false, "detail": {"context": ["owner", "visibility", "load_order"]}}}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

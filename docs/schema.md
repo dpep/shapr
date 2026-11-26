@@ -940,8 +940,12 @@ ranks nothing. The JSON keeps it.
 ## Moves
 
 A *unit* is a method, class, module or constant definition of at least 3
-syntax nodes, sitting directly in a file or a class or module body (not in
-a block or conditional). Each file's trees are aligned body by body, nodes
+syntax nodes, sitting directly in a file or a class, module or
+`class << self` body (not in a block or conditional). A `class << self` owns
+its methods as a class does, told apart by its object, so a method moved
+from it into a module the class `extend`s has context `owner`, as one moved
+from a class into a module it `include`s does. One removed or added whole
+isn't opened: its methods aren't units. Each file's trees are aligned body by body, nodes
 the diff left alone first, then larger nodes first, so of two swapped
 definitions the one git shows moving is the unit; a unit the alignment
 leaves out was removed or added. A removed unit pairs with an
@@ -956,9 +960,9 @@ its new place differs. Its `context` names each difference:
 | context | meaning |
 |---|---|
 | `module` | Rust, across files: each file is a module, so the paths it resolves and its own path change. |
-| `owner` | A different enclosing class, module or `impl` (a Rust namespace's attributes count, inner ones too: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`, nor `impl S { #![cfg(test)] }` a plain `impl S`). |
+| `owner` | A different enclosing class, module, `class << self` or `impl` (a Rust namespace's attributes count, inner ones too: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`, nor `impl S { #![cfg(test)] }` a plain `impl S`). |
 | `visibility` | A method in a different visibility section: it crossed a bare `private`, `protected`, `public` or `module_function`. A constant or class isn't affected by one. |
-| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition and, below one, every other method of its class (the hook sees them in order). A definition moved between two containers (two openings of a class, two `impl`s or modules) is compared with the statements around each container too, so it crosses what stands between them. Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
+| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition and, below one (in its own body or an enclosing one, as a class body's `def self.singleton_method_added` above `class << self`), every other method of its class (the hook sees them in order). A definition moved between two containers (two openings of a class, two `impl`s or modules) is compared with the statements around each container too, so it crosses what stands between them. Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
 | `directives` | Across files, different file-level directives (`# frozen_string_literal`). |
 | `position` | The unit reads its own line (`__LINE__`, Rust's `line!()`), or its own file (`__FILE__`, `__dir__`, `require_relative`, Rust's `file!()`) and moved to another file. |
 
