@@ -791,8 +791,9 @@ fn misflowed(flow: &Flow, assigned: &HashSet<&str>) -> Option<String> {
 
 /// Checks a proven candidate against the repository: a file outside the
 /// change that already uses B's name (a subclass's method of that name, a
-/// caller of the removed method) makes it a collision. Removing a public
-/// method of a library (an inline) leaves `public_api`.
+/// caller of the removed method) makes it a collision. Adding or removing a
+/// method another package can reach or override ([`proof::exposed`]) in a
+/// library leaves `public_api`.
 fn reach(
     change: &Change,
     outside: &dyn Outside,
@@ -836,7 +837,7 @@ fn reach(
     {
         stats.assumptions.push(Assumption::ComputedName);
     }
-    if found.dir == Dir::Inline && outside.library(path) && proof::public(calls, b) {
+    if outside.library(path) && proof::exposed(calls, b) {
         stats.assumptions.push(Assumption::PublicApi);
     }
     stats.assumptions.sort_unstable();
@@ -894,7 +895,13 @@ fn apply(trees: &Trees, hunk_ids: &[usize], found: &Found, labels: &mut [Label])
                 reason = format!("{reason}, but {}", why.join("; "));
             }
             if stats.assumptions.contains(&Assumption::PublicApi) {
-                reason = format!("public API removed: {reason}");
+                let surface = match found.dir {
+                    Dir::Extract => {
+                        "a library's subclass outside the repository may define the new method"
+                    }
+                    Dir::Inline => "callers outside the repository may call the removed method",
+                };
+                reason = format!("{reason}; {surface}");
             } else if stats.assumptions.contains(&Assumption::ComputedName) {
                 reason = format!("{reason}; a name computed at runtime could reach it");
             } else if !stats.assumptions.is_empty() {

@@ -1,0 +1,11 @@
+{
+  "description": "a library crate's private fn renamed: no other crate can name or override it, so the rename is structure",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "structure",
+        "parts": {"$some": {"kind": "rename", "structure": true, "assumptions": []}}
+      }
+    ]
+  }
+}

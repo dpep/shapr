@@ -66,7 +66,7 @@ fn meter(public: &str, private: &str) -> String {
 #[test]
 fn a_private_method_renamed_with_no_use_outside_the_change_is_structure() {
     let report = classify(
-        &[GEMSPEC],
+        &[],
         &[("lib/widgets/meter.rb", &meter("level", "sample"))],
         &[("lib/widgets/meter.rb", &meter("level", "probe"))],
     );

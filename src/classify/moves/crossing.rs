@@ -14,8 +14,10 @@
 //!   `moves/method_past_method_added_hook`, `moves/method_to_new_file_past_method_added`;
 //! - it [`expands`]: a macro invocation or an item an attribute macro
 //!   rewrites: `moves/rust_fn_past_item_macro_in_impl`;
-//! - the unit is a hook, or below one, and the statement is a method: their
-//!   order is what the hook sees (#147): `moves/methods_swapped_under_method_added_hook`;
+//! - the unit is a hook, or below one in its statement list or an enclosing
+//!   one, and the statement is a method: their order is what the hook sees
+//!   (#147): `moves/methods_swapped_under_method_added_hook`,
+//!   `moves/singleton_methods_swapped_under_outer_singleton_method_added`;
 //! - it declares the unit's name, or names it at load time:
 //!   `moves/singleton_method_past_class_self_definition`, `soundness/mv4_window_reads_moved_class`;
 //! - it declares a name the unit's load-time code reads;
@@ -157,14 +159,22 @@ impl<'t> Needs<'t> {
     fn of(tree: &'t Tree, node: NodeId) -> Self {
         let runs_now = tree.node(node).role != Role::Definition(NameKind::Method);
         let hooks = tree.semantics.definition_hooks;
+        // A hook before it in its own statement list or an enclosing one (a
+        // class body's `def self.singleton_method_added` above `class << self`).
+        let hook_before = |path: NodeId| {
+            let Some(list) = tree.node(path).parent else {
+                return false;
+            };
+            tree.node(list)
+                .children
+                .iter()
+                .take_while(|&&c| c != path)
+                .any(|&c| declared_name(tree, c).is_some_and(|n| hooks.contains(&n)))
+        };
         let hooked = !runs_now
-            && tree.node(node).parent.is_some_and(|p| {
-                tree.node(p)
-                    .children
-                    .iter()
-                    .take_while(|&&c| c != node)
-                    .any(|&c| declared_name(tree, c).is_some_and(|n| hooks.contains(&n)))
-            });
+            && std::iter::once(node)
+                .chain(tree.ancestors(node))
+                .any(hook_before);
         Needs {
             tree,
             node,

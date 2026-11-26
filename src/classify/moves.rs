@@ -23,7 +23,7 @@
 mod crossing;
 mod loading;
 
-use super::align::{Alignments, Side, lcs, namespace_name, qualifiers, size, transparent};
+use super::align::{Alignments, Side, lcs, namespace_name, owns, qualifiers, size, transparent};
 use super::format::{dice, subtree_hashes};
 use super::hazard::{Op, blocks};
 use super::{Assumption, Claim, Confidence, Kind, Labels, Outside, Part, rounded, site};
@@ -600,16 +600,16 @@ fn is_unit(tree: &Tree, node: NodeId) -> bool {
         && owner(tree, node).is_some()
 }
 
-/// The namespaces enclosing `node`, outermost first, each as its name's
-/// subtree hash. `None` when some ancestor is neither a namespace nor
-/// transparent: a block, a conditional, a call. A declaration there runs
+/// The namespaces enclosing `node` (singleton classes too), outermost
+/// first, each as its name's subtree hash. `None` when some ancestor is
+/// neither a namespace nor transparent: a block, a conditional, a call. A declaration there runs
 /// under that construct, so moving it out or in is not a reorder.
 fn owner(tree: &Tree, node: NodeId) -> Option<Vec<u64>> {
     let mut chain = Vec::new();
     let mut at = tree.node(node).parent;
     while let Some(id) = at {
         let n = tree.node(id);
-        if matches!(n.role, Role::Definition(NameKind::Class | NameKind::Module)) {
+        if owns(tree, id) {
             chain.push(namespace_name(tree, id, true)?);
         } else if !transparent(tree, id) {
             return None;

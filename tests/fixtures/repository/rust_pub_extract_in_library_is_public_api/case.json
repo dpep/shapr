@@ -1,0 +1,11 @@
+{
+  "description": "an extract adding a pub method to a library crate's type: a downstream call to a trait method of that name now resolves to it, so public_api",
+  "expect": {
+    "hunks": [
+      {
+        "verdict": "behavior",
+        "parts": {"$some": {"kind": "extract", "structure": false, "assumptions": ["public_api"]}}
+      }
+    ]
+  }
+}

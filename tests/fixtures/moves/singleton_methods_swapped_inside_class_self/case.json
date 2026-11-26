@@ -1,0 +1,7 @@
+{
+  "description": "two methods swapped inside class << self: the singleton class owns both before and after, so the move is structure, as in a class body",
+  "expect": {
+    "hunks": {"$every": {"verdict": "structure"}},
+    "summary": {"verdict": "structure"}
+  }
+}

@@ -170,7 +170,7 @@ pub enum Hazard {
 /// Facts a frontend marks on a node beside its role. Not in the hash or the
 /// output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Flags(u16);
+pub struct Flags(u32);
 
 impl Flags {
     /// Bounds local variables: a local's scope is the nearest node so
@@ -228,6 +228,10 @@ impl Flags {
     /// A block or loop that a `next`, `break` or `redo` inside it acts on
     /// (Ruby's blocks, lambdas and loops), not the method around it.
     pub const LOOP: Flags = Flags(1 << 15);
+    /// A body whose methods belong to one object's singleton class (Ruby's
+    /// `class << self`): an owner of the definitions in it, as a class is,
+    /// keyed by that object.
+    pub const SINGLETON: Flags = Flags(1 << 16);
 
     pub fn contains(self, other: Flags) -> bool {
         self.0 & other.0 == other.0

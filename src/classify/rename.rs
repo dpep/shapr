@@ -284,7 +284,7 @@ pub(super) fn run(
         values.insert("uses".into(), uses.into());
         values.insert("searched".into(), searched.into());
         let reason = if assumptions.contains(&Assumption::PublicApi) {
-            "public API rename: callers outside this repository can break"
+            "public API rename: callers or subclasses outside this repository can break"
         } else if assumptions.is_empty() {
             "only identifiers change, consistently in their scope"
         } else {
@@ -740,12 +740,10 @@ fn reach(
             Verified::Clear { searched: n } => searched = Some(searched.unwrap_or(0).max(n)),
         }
     }
-    // A field (`@x`) is never another package's to call.
-    let public = scope != Scope::Field
-        && facts
-            .definitions
-            .iter()
-            .any(|&(f, id)| outside.library(file(f).diff.path()) && proof::public(before(f), id));
+    let public = facts
+        .definitions
+        .iter()
+        .any(|&(f, id)| outside.library(file(f).diff.path()) && proof::exposed(before(f), id));
     if public {
         assumptions.insert(Assumption::PublicApi);
     }

@@ -1,0 +1,7 @@
+{
+  "description": "two methods swapped inside class << self below a singleton_method_added hook defined in the class body: the hook sees them in another order, so not structure",
+  "expect": {
+    "hunks": {"$every": {"verdict": {"$not": "structure"}}},
+    "summary": {"verdict": "behavior"}
+  }
+}

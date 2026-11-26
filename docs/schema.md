@@ -173,7 +173,7 @@ What the search can't settle stays on the part:
 |---|---|
 | `unseen_uses` | The repository couldn't be searched (a diff on stdin outside a repository or not ending in the index or the working tree, a failed search), or holds the name in a file shapr can't parse for a use (YAML, JavaScript; see below), so code outside the change may still use the name. |
 | `search_capped` | The search hit one of its [bounds](#search-bounds): the repository holds more files of the language than one search reads, or the run's searches already read their share of files, or the files to parse (those that call by a computed name, then the files found) pass the run's bytes. Uses outside the change weren't checked. `summary.bounds_hit` names the bound. |
-| `public_api` | The name is part of a library's public surface, so callers outside this repository can break: a renamed or inlined public definition in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override it with another default), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A Ruby method is public unless `private` (a `private` section, `private def`, `private :name`); protected counts. A private module's `pub` items count, as they may be re-exported. Instance variables never do. Also a definition moved from a gem's `lib/` into a new file that other files load after the old one: another package may load the old file alone ([New files](#new-files)). |
+| `public_api` | The name is part of a library's public surface, so callers or subclasses outside this repository can break: a renamed definition, or a method an `extract` adds or an `inline` removes, in a gem's `lib/` (beside a `*.gemspec`), or the method a `default_argument` calls there, private or not (a subclass outside the repository may override a private method, read an instance variable, or define the method an extract adds), or a `pub` item (or a `pub` trait's item or `pub` enum's variant) in a Rust library crate (a `[lib]` target or `src/lib.rs`, not `publish = false` or `publish = []`, itself or through `publish.workspace = true`; a crate whose `Cargo.toml` can't be read counts; outside its binaries, tests, examples, benches and build script). A private module's `pub` items count, as they may be re-exported; a Rust item without `pub` never does. Also a definition moved from a gem's `lib/` into a new file that other files load after the old one: another package may load the old file alone ([New files](#new-files)). |
 | `runtime_check` | A `typing` part holds a type annotation a runtime may check: sorbet-runtime checks a `sig`, `T.let`, `T.cast` and `T.bind`, raises on a `nil` in `T.must`, and enforces `abstract!` and its kin, so a value the new types reject raises where the old code ran. See [Typing](#typing). |
 | `ambiguous_match` | A `move` whose unit matched more than one other unit equally well (`evidence.candidates` above 1): which one it came from is a guess. |
 | `computed_name` | An `extract` or `inline` whose method a name computed at runtime could spell (`send(n)`, `public_send("get_#{k}")`, `define_method(n)`), in a file of the change on the side where the method doesn't exist or in a file outside the change at its after revision: a call it makes may reach the method, or one it defines may replace it. A literal spelling of the name (`send(:name)`) is a `collision` instead. |
@@ -464,6 +464,10 @@ every name that differs passes these checks:
   that name, a class it would reopen) binds to the renamed code. Common
   names (`len`, `save`, `last`) are often held elsewhere, so their renames
   stay `logic`.
+
+A renamed positional parameter changes what reflection on the method
+reports (Ruby's `Method#parameters`); that is a documented limit, as the
+line a backtrace or `source_location` reports is.
 
 Scopes: a `local` (variable or parameter) lives in its enclosing method,
 class or module; a `field` in its file when it is a Ruby instance or class
@@ -940,8 +944,12 @@ ranks nothing. The JSON keeps it.
 ## Moves
 
 A *unit* is a method, class, module or constant definition of at least 3
-syntax nodes, sitting directly in a file or a class or module body (not in
-a block or conditional). Each file's trees are aligned body by body, nodes
+syntax nodes, sitting directly in a file or a class, module or
+`class << self` body (not in a block or conditional). A `class << self` owns
+its methods as a class does, told apart by its object, so a method moved
+from it into a module the class `extend`s has context `owner`, as one moved
+from a class into a module it `include`s does. One removed or added whole
+isn't opened: its methods aren't units. Each file's trees are aligned body by body, nodes
 the diff left alone first, then larger nodes first, so of two swapped
 definitions the one git shows moving is the unit; a unit the alignment
 leaves out was removed or added. A removed unit pairs with an
@@ -956,9 +964,9 @@ its new place differs. Its `context` names each difference:
 | context | meaning |
 |---|---|
 | `module` | Rust, across files: each file is a module, so the paths it resolves and its own path change. |
-| `owner` | A different enclosing class, module or `impl` (a Rust namespace's attributes count, inner ones too: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`, nor `impl S { #![cfg(test)] }` a plain `impl S`). |
+| `owner` | A different enclosing class, module, `class << self` or `impl` (a Rust namespace's attributes count, inner ones too: `#[cfg(unix)] mod imp` is not `#[cfg(windows)] mod imp`, nor `impl S { #![cfg(test)] }` a plain `impl S`). |
 | `visibility` | A method in a different visibility section: it crossed a bare `private`, `protected`, `public` or `module_function`. A constant or class isn't affected by one. |
-| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition and, below one, every other method of its class (the hook sees them in order). A definition moved between two containers (two openings of a class, two `impl`s or modules) is compared with the statements around each container too, so it crosses what stands between them. Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
+| `load_order` | A different order relative to a sibling that names it or that it names at load time (`alias_method`, `private :x`, a redefinition, a constant read, a Rust `macro_rules!` of a macro it invokes) or any statement that runs code at load time (a `require`, a DSL call, an `include`, a constant whose value calls something: `X = Counter.next`), except beside a Rust function, whose definition runs no code, where only an item-level macro invocation or attribute macro counts; for a Ruby method also a `method_added` or `singleton_method_added` definition and, below one (in its own body or an enclosing one, as a class body's `def self.singleton_method_added` above `class << self`), every other method of its class (the hook sees them in order). A definition moved between two containers (two openings of a class, two `impl`s or modules) is compared with the statements around each container too, so it crosses what stands between them. Also a Ruby definition moved into a file the change adds, unless the new file is shown to run where the code ran (see [New files](#new-files)). |
 | `directives` | Across files, different file-level directives (`# frozen_string_literal`). |
 | `position` | The unit reads its own line (`__LINE__`, Rust's `line!()`), or its own file (`__FILE__`, `__dir__`, `require_relative`, Rust's `file!()`) and moved to another file. |
 

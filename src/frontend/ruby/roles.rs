@@ -435,6 +435,7 @@ fn flags(node: &Node<'_>) -> Flags {
             }
         }
         Node::ClassNode { .. } | Node::ModuleNode { .. } => Flags::SCOPE,
+        Node::SingletonClassNode { .. } => Flags::SINGLETON,
         Node::ArgumentsNode { .. } => Flags::ARGUMENTS,
         Node::BlockParametersNode { .. } => Flags::BLOCK_PARAMETERS,
         Node::BlockNode { .. }
