@@ -52,6 +52,16 @@ const FILES: &[&str] = &[
     "rakefile",
 ];
 
+/// How Ruby spells a name in source.
+const SPELLING: Spelling = Spelling {
+    sigils: &['@', '$'],
+    suffixes: &['?', '!', '='],
+    glued: &['?', '!'],
+    field_sigil: Some('@'),
+    symbol: Some(':'),
+    quotes: &['"', '\''],
+};
+
 /// Comment directives prism doesn't report as magic: they have no `: value`.
 const DIRECTIVE_PREFIXES: &[&str] = &["rubocop:disable", "rubocop:enable", "rubocop:todo"];
 
@@ -75,14 +85,7 @@ impl Frontend for Ruby {
             definitions_run: true,
             definition_hooks: &["method_added", "singleton_method_added"],
             default_arguments: true,
-            spelling: Spelling {
-                sigils: &['@', '$'],
-                suffixes: &['?', '!', '='],
-                glued: &['?', '!'],
-                field_sigil: Some('@'),
-                symbol: Some(':'),
-                quotes: &['"', '\''],
-            },
+            spelling: SPELLING,
             ..Semantics::default()
         });
         let result = ruby_prism::parse(&source);
@@ -134,6 +137,18 @@ impl Frontend for Ruby {
 
     fn dispatch_words(&self) -> &'static [&'static str] {
         roles::DISPATCH_WORDS
+    }
+
+    /// Visits prism's nodes with the roles `parse` gives them, building no tree.
+    fn computed_names(&self, source: &[u8]) -> Vec<String> {
+        let result = ruby_prism::parse(source);
+        let mut names = Names {
+            roles: roles::Roles::default(),
+            entered: Entered::default(),
+            found: Vec::new(),
+        };
+        names.visit(&result.node());
+        names.found
     }
 
     /// Templates call helpers and models by name too.
@@ -278,7 +293,11 @@ fn sets_encoding(source: &[u8], at: &Span) -> bool {
     } else {
         0
     };
-    let line = source[..at.start].iter().filter(|&&b| b == b'\n').count();
+    // Only lines 0 and 1 matter: stop counting at 2, or every comment rescans the file.
+    let line = (source[..at.start].iter())
+        .filter(|&&b| b == b'\n')
+        .take(2)
+        .count();
     let line_start = source[..at.start]
         .iter()
         .rposition(|&b| b == b'\n')
@@ -374,6 +393,43 @@ impl Walker<'_> {
         let (kind, name) = generated::kind_and_name(node);
         let (role, renamed) = self.roles.of(node);
         (kind, renamed.or_else(|| name.map(<[u8]>::to_vec)), role)
+    }
+}
+
+/// The computed names a file's calls reach, as [`Frontend::computed_names`]
+/// reports them: each node takes its role in the order [`Walker`] visits it.
+struct Names {
+    roles: roles::Roles,
+    entered: Entered,
+    found: Vec<String>,
+}
+
+impl Names {
+    fn dispatched(&mut self, node: &Node<'_>) -> bool {
+        self.entered.dispatched(node)
+    }
+
+    fn note(&mut self, node: &Node<'_>) {
+        self.entered.enter(node);
+        if let (Role::DynamicName, Some(name)) = self.roles.of(node)
+            && name.contains(&b'*')
+        {
+            let name = String::from_utf8_lossy(&name);
+            let name = name.trim_end_matches(|c| SPELLING.suffixes.contains(&c));
+            self.found.push(name.to_string());
+        }
+    }
+}
+
+impl<'pr> Visit<'pr> for Names {
+    generated::concrete_visits!('pr);
+
+    fn visit_branch_node_enter(&mut self, node: Node<'pr>) {
+        self.note(&node);
+    }
+
+    fn visit_leaf_node_enter(&mut self, node: Node<'pr>) {
+        self.note(&node);
     }
 }
 
@@ -707,6 +763,52 @@ mod tests {
                 "greet", "wave", "nod", "size", "color", "fresh", "stale", "newer", "older",
                 "@cache"
             ]
+        );
+    }
+
+    /// `computed_names` against the tree `parse` builds: every Ruby file
+    /// of the fixtures, and calls in the places a walk could miss.
+    #[test]
+    fn computed_names_are_the_trees_patterns() {
+        let from_tree = |source: &[u8]| -> Vec<String> {
+            let tree = Ruby.parse(source.to_vec());
+            (tree.nodes.iter())
+                .filter(|n| n.role == Role::DynamicName)
+                .filter_map(|n| n.name.as_deref().filter(|name| name.contains('*')))
+                .map(|name| name.trim_end_matches(['?', '!', '=']).to_string())
+                .collect()
+        };
+        let snippet = "send(n)\nx.try(:\"#{a}?\")\nrespond_to?(:*)\nname.constantize\n\
+             private attr_reader :\"a_#{b}\"\nalias_method :\"#{c}_was\", :c\n\
+             define_method(\"#{d}=\") { |v| instance_variable_set(\"@#{d}\", v) }\n\
+             f(<<~R, send(m))\n  #{e}\nR\nh = { k: public_send(*args) }\n";
+        let mut sources = vec![snippet.as_bytes().to_vec()];
+        let mut dirs = vec![std::path::PathBuf::from("tests/fixtures")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if Ruby.handles(&path.to_string_lossy()) {
+                    sources.push(std::fs::read(&path).unwrap());
+                }
+            }
+        }
+        let mut patterns = 0;
+        for source in &sources {
+            let want = from_tree(source);
+            assert_eq!(
+                Ruby.computed_names(source),
+                want,
+                "{}",
+                String::from_utf8_lossy(source)
+            );
+            patterns += want.len();
+        }
+        assert!(
+            sources.len() > 100 && patterns > 10,
+            "{} files",
+            sources.len()
         );
     }
 

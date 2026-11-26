@@ -456,7 +456,7 @@ impl Walker<'_> {
             (_, "parenthesized_expression") => {
                 self.open(&n, attrs, None, Role::Other);
                 // `(s.f)()` calls a field; `s.f()` a method.
-                let callee = n.parent().is_some_and(|p| {
+                let callee = self.family.parent(&n).is_some_and(|p| {
                     p.kind() == "call_expression"
                         && p.child_by_field_name("function")
                             .is_some_and(|f| f.id() == n.id())

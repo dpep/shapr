@@ -5,6 +5,7 @@
 use super::Walker;
 use crate::norms::Replace;
 use ruby_prism::Node;
+use std::collections::HashMap;
 use std::ops::Range;
 
 pub const METHOD: &str = "Naming/MethodName";
@@ -162,6 +163,13 @@ fn modifier<'a>(node: &Node<'a>) -> Option<(&'a [u8], Option<usize>)> {
 pub fn methods(w: &mut Walker) {
     let source = w.source;
     let defs = std::mem::take(&mut w.names.defs);
+    // Looked up once per method: scanning the file for each made a file
+    // of many private methods quadratic.
+    let words = words(source);
+    let mut calls: HashMap<&[u8], Vec<usize>> = HashMap::new();
+    for c in &w.names.calls {
+        calls.entry(&source[c.clone()]).or_default().push(c.start);
+    }
     for (span, instance) in defs {
         let name = &source[span.clone()];
         let Some((style, core)) = case(name) else {
@@ -169,11 +177,10 @@ pub fn methods(w: &mut Walker) {
         };
         let fix = (instance && w.names.private.contains(&span.start))
             .then(|| {
-                let calls = (w.names.calls.iter()).filter(|c| &source[(*c).clone()] == name);
-                let uses: Vec<usize> = std::iter::once(span.start)
-                    .chain(calls.map(|c| c.start))
-                    .collect();
-                rename(source, name, 0..source.len(), &uses)
+                let calls = calls.get(name).into_iter().flatten().copied();
+                let uses: Vec<usize> = std::iter::once(span.start).chain(calls).collect();
+                let find = |word: &[u8]| words.get(word).cloned().unwrap_or_default();
+                rename(name, &find, &uses)
             })
             .flatten();
         let line = w.index.line(span.start);
@@ -215,7 +222,7 @@ pub fn variables(w: &mut Walker) {
                     .any(|word| !mentions(source, range.clone(), word).is_empty())
             });
             let fix = (!dynamic)
-                .then(|| rename(source, &name, range.clone(), &uses))
+                .then(|| rename(&name, &|word| mentions(source, range.clone(), word), &uses))
                 .flatten();
             let line = w.index.line(first);
             w.push(
@@ -230,12 +237,12 @@ pub fn variables(w: &mut Walker) {
     }
 }
 
-/// `name` respelled in the other style everywhere `range` mentions it, when
-/// each mention starts at one of `uses` and the new name is unused there.
+/// `name` respelled in the other style everywhere `find` mentions it (the
+/// starts of a word, as [`mentions`] finds them), when each mention starts at
+/// one of `uses` and the new name is unused there.
 fn rename(
-    source: &[u8],
     name: &[u8],
-    range: Range<usize>,
+    find: &dyn Fn(&[u8]) -> Vec<usize>,
     uses: &[usize],
 ) -> Option<(String, Vec<Replace>)> {
     let (style, core) = case(name)?;
@@ -251,10 +258,10 @@ fn rename(
     let prefix = core.as_ptr() as usize - name.as_ptr() as usize;
     let word = &name[..prefix + core.len()];
     let new_word = [&word[..prefix], text.as_bytes()].concat();
-    if !mentions(source, range.clone(), &new_word).is_empty() {
+    if !find(&new_word).is_empty() {
         return None;
     }
-    let found = mentions(source, range, word);
+    let found = find(word);
     found.iter().all(|at| uses.contains(at)).then(|| {
         let replaces = found
             .iter()
@@ -332,6 +339,31 @@ pub fn camel(core: &[u8]) -> Option<String> {
     Some(out)
 }
 
+/// The starts of every whole identifier in `source`, by its text: what
+/// [`mentions`] finds for each over the whole file.
+fn words(source: &[u8]) -> HashMap<&[u8], Vec<usize>> {
+    let ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80;
+    let mut words: HashMap<&[u8], Vec<usize>> = HashMap::new();
+    let mut at = 0;
+    while at < source.len() {
+        if !ident(source[at]) {
+            at += 1;
+            continue;
+        }
+        let end = (at..source.len())
+            .find(|&i| !ident(source[i]))
+            .unwrap_or(source.len());
+        let sigil = at
+            .checked_sub(1)
+            .is_some_and(|p| matches!(source[p], b'@' | b'$'));
+        if !sigil {
+            words.entry(&source[at..end]).or_default().push(at);
+        }
+        at = end;
+    }
+    words
+}
+
 /// Starts of `word` in `range` as a whole identifier: not part of a longer
 /// name, an `@ivar` or a `$global`. Symbols, strings and comments count.
 pub fn mentions(source: &[u8], range: Range<usize>, word: &[u8]) -> Vec<usize> {
@@ -355,6 +387,21 @@ mod tests {
     use super::super::tests::styles;
     use super::*;
     use crate::norms::Language;
+
+    #[test]
+    fn words_index_what_mentions_finds() {
+        let src = "def go_on; @go_on = $go_on; go_on2 = go_on; end\n:go_on \"go_on\" # go_on\nx_go_on caf\u{e9}go_on go_on?";
+        let source = src.as_bytes();
+        let words = words(source);
+        for word in ["go_on", "go_on2", "x_go_on", "def", "on", "caf\u{e9}go_on"] {
+            let found = words.get(word.as_bytes()).cloned().unwrap_or_default();
+            assert_eq!(
+                found,
+                mentions(source, 0..source.len(), word.as_bytes()),
+                "{word}"
+            );
+        }
+    }
 
     #[test]
     fn names_of_two_or_more_words_choose() {

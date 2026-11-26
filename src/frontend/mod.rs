@@ -41,6 +41,11 @@ pub trait Frontend: Sync {
     /// none of them as a word holds no such call.
     fn dispatch_words(&self) -> &'static [&'static str];
 
+    /// The names computed at runtime that `source`'s calls reach: each
+    /// [`crate::tree::Role::DynamicName`] pattern holding a `*` that [`Frontend::parse`]
+    /// would mark, its name suffixes trimmed, found without building a tree.
+    fn computed_names(&self, source: &[u8]) -> Vec<String>;
+
     /// Whether the file at `path` is library code another package can depend
     /// on, judged from the repository's layout at the after revision.
     fn library(&self, path: &str, files: &dyn Snapshot) -> bool;
